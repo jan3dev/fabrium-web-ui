@@ -6,6 +6,8 @@ const clientRef: {
   current: {
     getRoom: (r: string) => unknown;
     getUser: (u: string) => unknown;
+    on?: () => void;
+    off?: () => void;
   } | null;
 } = { current: null };
 
@@ -55,6 +57,9 @@ describe("useUserName", () => {
     clientRef.current = {
       getRoom: () => null,
       getUser: () => null,
+      // The room is unknown, so the hook waits for it to sync in.
+      on: () => {},
+      off: () => {},
     };
     const { result } = renderHook(() =>
       useUserName("@docs:localhost", "!r:localhost"),

@@ -1,4 +1,4 @@
-import { type MatrixClient, type RoomStateEvent, type User, UserEvent } from "matrix-js-sdk";
+import { ClientEvent, type MatrixClient, type Room, type RoomStateEvent, type User, UserEvent } from "matrix-js-sdk";
 import { MatrixClientPeg } from "../client/peg";
 
 /**
@@ -94,8 +94,21 @@ const attachRoomState: Attach = (key, bucket, client) => {
   const sep = key.indexOf(SEP);
   const roomId = key.slice(0, sep);
   const kind = key.slice(sep + 1) as RoomStateEvent;
-  const room = client?.getRoom(roomId) ?? null;
-  if (!room) return;
+  if (!client) return;
+  const room = client.getRoom(roomId);
+  if (!room) {
+    // Not synced in yet (a deep link on a cold load): attach once it arrives.
+    const onRoom = (arrived: Room) => {
+      if (arrived.roomId !== roomId) return;
+      client.off(ClientEvent.Room, onRoom);
+      bucket.detach = null;
+      attachRoomState(key, bucket, client);
+      notify(bucket);
+    };
+    client.on(ClientEvent.Room, onRoom);
+    bucket.detach = () => client.off(ClientEvent.Room, onRoom);
+    return;
+  }
   const handler = () => notify(bucket);
   room.currentState.on(kind, handler);
   bucket.detach = () => room.currentState.off(kind, handler);

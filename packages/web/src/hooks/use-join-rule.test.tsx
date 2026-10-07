@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { injectStateEvent, makeFakeClient, makeRoom, mkMatrixEvent } from "../../test/factories";
 import { MatrixClientPeg } from "../client/peg";
@@ -63,5 +63,20 @@ describe("useJoinRule", () => {
     MatrixClientPeg.injectClientForTest(client);
     const { result } = renderHook(() => useJoinRule(roomId));
     expect(result.current.rule).toBe("invite");
+  });
+
+  it("picks up a room that syncs in after the first render", () => {
+    const client = makeFakeClient({ userId: me });
+    MatrixClientPeg.injectClientForTest(client);
+    const { result } = renderHook(() => useJoinRule(roomId));
+    expect(result.current.rule).toBe("invite");
+
+    const room = makeRoom(roomId, { client, myUserId: me });
+    injectStateEvent(
+      room,
+      mkMatrixEvent({ roomId, sender: "@admin:h.example", type: "m.room.join_rules", stateKey: "", content: { join_rule: "public" } }),
+    );
+    act(() => (client as unknown as { addRoom(r: unknown): void }).addRoom(room));
+    expect(result.current.rule).toBe("public");
   });
 });

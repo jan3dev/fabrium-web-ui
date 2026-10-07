@@ -61,7 +61,7 @@ describe("composer integration", () => {
     const user = userEvent.setup();
     // Wait for the initial sync to surface the room before typing — sendEvent
     // silently queues until the client knows the room.
-    await screen.findByText("alpha");
+    await screen.findByRole("link", { name: /alpha/ });
     const input = await screen.findByRole("textbox", { name: /message/i });
     await user.type(input, "hi from me{Enter}");
     await waitFor(() => expect(sendCalls).toHaveLength(1));

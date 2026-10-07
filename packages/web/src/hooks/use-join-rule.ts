@@ -1,6 +1,7 @@
 import { type MatrixEvent, RoomStateEvent } from "matrix-js-sdk";
 import { useSyncExternalStore } from "react";
 import { MatrixClientPeg } from "../client/peg";
+import { subscribeRoomState } from "./matrix-subscriptions";
 import { useSpaceName } from "./use-space-name";
 
 export type JoinRule = "invite" | "restricted" | "public";
@@ -37,18 +38,7 @@ function snapshot(roomId: string): JoinRuleState {
 
 export function useJoinRule(roomId: string): { rule: JoinRule; spaceName: string | null } {
   const state = useSyncExternalStore(
-    (cb) => {
-      const client = MatrixClientPeg.safeGet();
-      const room = client?.getRoom(roomId);
-      if (!room) return MatrixClientPeg.subscribe(cb);
-      const onState = () => cb();
-      room.currentState.on(RoomStateEvent.Events, onState);
-      const unsubPeg = MatrixClientPeg.subscribe(cb);
-      return () => {
-        room.currentState.off(RoomStateEvent.Events, onState);
-        unsubPeg();
-      };
-    },
+    (cb) => subscribeRoomState(roomId, [RoomStateEvent.Events], cb),
     () => snapshot(roomId),
     () => EMPTY,
   );
