@@ -152,18 +152,26 @@ export function TimelinePanel({
     return () => clearTimeout(t);
   }, [highlighted]);
 
-  // "N new messages" while the reader is scrolled up.
-  const [awayFromBottomAt, setAwayFromBottomAt] = useState<number | null>(null);
-  const messageCount = useMemo(
-    () => entries.filter((e) => e.message.kind === "message").length,
-    [entries],
-  );
+  // "N new messages" while the reader is scrolled up. Counted by time, so
+  // older history paging in above does not count as new.
+  const [awaySince, setAwaySince] = useState<number | null>(null);
+  const newest = useMemo(() => {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i].message.kind === "message") return entries[i].message.createdAt;
+    }
+    return 0;
+  }, [entries]);
   const onAtBottomChange = useCallback(
-    (atBottom: boolean) => setAwayFromBottomAt(atBottom ? null : messageCount),
-    [messageCount],
+    (atBottom: boolean) => setAwaySince(atBottom ? null : newest),
+    [newest],
   );
-  const unseen =
-    awayFromBottomAt === null ? 0 : messageCount - awayFromBottomAt;
+  const unseen = useMemo(
+    () =>
+      awaySince === null
+        ? 0
+        : entries.filter((e) => e.message.kind === "message" && e.message.createdAt > awaySince).length,
+    [entries, awaySince],
+  );
 
   const onStartReached = useCallback(() => {
     if (hasMore && !loading) void loadMore();

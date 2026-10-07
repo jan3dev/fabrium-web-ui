@@ -127,5 +127,7 @@ export function useBottomSettle(
   }, [cancelFrame, pinToBottom]);
 
   React.useEffect(() => cancel, [cancel]);
-  return { cancel, settle };
+  /** True until the reader scrolls away by wheel, touch, keys or the scrollbar. */
+  const armed = React.useCallback(() => bottomIntentRef.current, []);
+  return { armed, cancel, settle };
 }

@@ -70,7 +70,7 @@ export function TimelineList({
   const previousKeysRef = React.useRef<readonly string[]>([]);
   const isPrepend = didPrepend(previousKeysRef.current, keys);
   const atBottomRef = React.useRef(true);
-  const { cancel: cancelBottomSettle, settle: settleAtBottom } =
+  const { armed: bottomArmed, cancel: cancelBottomSettle, settle: settleAtBottom } =
     useBottomSettle(hostRef, listRef, itemsLengthRef);
 
   React.useLayoutEffect(() => {
@@ -78,9 +78,11 @@ export function TimelineList({
     previousKeysRef.current = keys;
     if (keys.length === 0) return;
     // First paint, and rows arriving while the reader sits at the bottom. The
-    // keys array is rebuilt on every change, so compare its tail, not its identity.
+    // keys array is rebuilt on every change, so compare its tail, not its
+    // identity. A reader who never scrolled away counts as at the bottom even
+    // if a scroll event mid-measure briefly said otherwise.
     const appended = !isPrepend && previous.at(-1) !== keys.at(-1);
-    if (previous.length === 0 || (appended && atBottomRef.current)) settleAtBottom();
+    if (previous.length === 0 || (appended && (atBottomRef.current || bottomArmed()))) settleAtBottom();
     // A window shorter than the viewport never scrolls, so ask for more here too.
     const scroller = hostRef.current?.firstElementChild;
     if (
@@ -88,7 +90,7 @@ export function TimelineList({
       scroller.scrollHeight - scroller.clientHeight <= START_REACHED_PX
     )
       onStartReached?.();
-  }, [keys, isPrepend, settleAtBottom, onStartReached]);
+  }, [keys, isPrepend, settleAtBottom, bottomArmed, onStartReached]);
 
   React.useImperativeHandle(
     ref,

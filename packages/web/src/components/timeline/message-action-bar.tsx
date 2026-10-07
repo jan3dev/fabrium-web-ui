@@ -60,10 +60,11 @@ export function MessageActionBar({
     <div
       className={cn(
         "transition-opacity duration-(--duration-fast)",
-        "sm:pointer-events-none sm:opacity-0",
-        "sm:group-hover/message:pointer-events-auto sm:group-hover/message:opacity-100",
-        "sm:group-focus-within/message:pointer-events-auto sm:group-focus-within/message:opacity-100",
-        (pickerOpen || menuOpen) && "sm:pointer-events-auto sm:opacity-100",
+        // Hover on desktop; on touch screens a tap focuses the row.
+        "pointer-events-none opacity-0",
+        "group-hover/message:pointer-events-auto group-hover/message:opacity-100",
+        "group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100",
+        (pickerOpen || menuOpen) && "pointer-events-auto opacity-100",
       )}
       data-testid="message-action-bar"
     >

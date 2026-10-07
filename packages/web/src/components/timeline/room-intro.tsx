@@ -29,7 +29,7 @@ export function RoomIntro({
       </p>
       {topic ? (
         <div className="mt-2 max-w-xl whitespace-pre-line text-body2 text-text-secondary">
-          <TopicText topic={topic} />
+          <TopicText topic={topic} clamp={false} />
         </div>
       ) : null}
     </div>

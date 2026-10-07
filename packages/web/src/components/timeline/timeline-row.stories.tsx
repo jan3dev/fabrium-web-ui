@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { MemoryRouter } from "react-router-dom";
 import { fn } from "storybook/test";
 import type { ActorSummary, TimelineEntry, TimelineMessage } from "@/model/types";
 import { DayDivider } from "./day-divider";
@@ -60,6 +61,14 @@ const meta = {
   title: "Timeline/Rows",
   component: TimelineRow,
   parameters: { layout: "padded" },
+  // Topic and message links navigate in-app.
+  decorators: [
+    (Story) => (
+      <MemoryRouter>
+        <Story />
+      </MemoryRouter>
+    ),
+  ],
 } satisfies Meta<typeof TimelineRow>;
 
 export default meta;

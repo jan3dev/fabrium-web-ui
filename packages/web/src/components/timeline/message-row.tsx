@@ -129,7 +129,7 @@ export function MessageRow({
     <article
       className={cn(
         "group/message relative mx-1 flex gap-2.5 rounded-card px-2 transition-colors",
-        "hover:bg-surface-secondary focus-within:bg-surface-secondary",
+        "outline-none hover:bg-surface-secondary focus-within:bg-surface-secondary",
         isContinuation ? "items-start py-0.5" : "items-start pt-2 pb-0.5",
         !isFollowedByContinuation && "mb-1.5",
         message.failed && "opacity-60",
@@ -139,6 +139,8 @@ export function MessageRow({
       data-message-id={message.id}
       data-highlighted={highlighted || undefined}
       data-testid="message-row"
+      // Focusable so a tap on touch screens shows the action bar (focus-within).
+      tabIndex={-1}
     >
       {isContinuation ? (
         <div aria-hidden className="flex w-8 shrink-0 justify-end pt-0.5">
@@ -149,7 +151,7 @@ export function MessageRow({
           />
         </div>
       ) : (
-        <div className="shrink-0 pt-0.5">
+        <div className="flex w-8 shrink-0 pt-0.5">
           <AuthorAvatar userId={message.author.id} />
         </div>
       )}
