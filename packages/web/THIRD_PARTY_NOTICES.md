@@ -16,6 +16,24 @@ Derived files:
 - `src/components/ui/segmented-control.tsx` ← `desktop/src/shared/ui/segmented-control.tsx`
 - `src/components/ui/switch.tsx` ← `desktop/src/shared/ui/switch.tsx`
 - `src/components/ui/toggle.tsx` ← `desktop/src/shared/ui/toggle.tsx`
+- `src/components/ui/sidebar.tsx` ← `desktop/src/shared/ui/sidebar.tsx`
+- `src/components/ui/unread-pill.tsx` ← `desktop/src/shared/ui/UnreadPill.tsx`
+- `src/components/layout/aux-panel-shell.tsx` ← `desktop/src/shared/layout/AuxiliaryPanelShell.tsx`
+- `src/components/layout/aux-panel-header.tsx` ← `desktop/src/shared/layout/AuxiliaryPanelHeader.tsx`
+- `src/components/room-glyph.tsx` ← `desktop/src/features/channels/ui/ChannelGlyph.tsx`
+- `src/components/structures/room-header.tsx` ← `desktop/src/features/chat/ui/ChatHeader.tsx`
+- `src/components/structures/room-status-badge.tsx` ← `desktop/src/features/channels/ui/EphemeralChannelBadge.tsx`
+- `src/components/structures/top-bar.tsx` ← `desktop/src/app/AppTopChrome.tsx`
+- `src/components/structures/workspace-rail.tsx` ← `desktop/src/features/sidebar/ui/CommunityRail.tsx`
+- `src/components/structures/sidebar/section.tsx` ← `desktop/src/features/sidebar/ui/SidebarSection.tsx`
+- `src/components/structures/sidebar/room-row.tsx` ← `desktop/src/features/sidebar/ui/SidebarSection.tsx`
+- `src/components/structures/sidebar/room-context-menu.tsx` ← `desktop/src/features/sidebar/ui/ChannelContextMenu.tsx`
+- `src/components/structures/sidebar/more-unread-button.tsx` ← `desktop/src/features/sidebar/ui/MoreUnreadButton.tsx`
+- `src/components/structures/sidebar/profile-card.tsx` ← `desktop/src/features/sidebar/ui/SidebarProfileCard.tsx`
+- `src/hooks/use-app-shortcuts.ts` ← `desktop/src/app/useAppShellKeyboardShortcuts.ts`
+- `src/hooks/use-aux-panel-width.ts` ← `desktop/src/shared/hooks/useThreadPanelWidth.ts`
+- `src/hooks/use-mobile.ts` ← `desktop/src/shared/hooks/use-mobile.tsx`
+- `src/lib/keyboard-shortcuts.ts` ← `desktop/src/shared/lib/keyboard-shortcuts.ts`
 
 ## Apache License 2.0
 

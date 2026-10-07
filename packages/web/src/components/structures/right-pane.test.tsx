@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { injectStateEvent, makeFakeClient, makeRoom, mkMatrixEvent } from "../../../test/factories";
 import { MatrixClientPeg } from "../../client/peg";
-import { RoomPanel } from "./room-panel";
+import { type PaneView, RightPane } from "./right-pane";
 
 const { notifSetState } = vi.hoisted(() => ({ notifSetState: vi.fn() }));
 vi.mock("../../hooks/use-room-notif-state", () => ({
@@ -45,19 +45,19 @@ function setup(myPL: number) {
   return { setRoomName, setRoomTopic, sendStateEvent, uploadContent, leave };
 }
 
-function renderPanel(view: "home" | "people" | "notifications" = "home", onNavigate = vi.fn()) {
+function renderPanel(view: PaneView = "info", onNavigate = vi.fn(), onClose = vi.fn()) {
   render(
     <MemoryRouter>
-      <RoomPanel roomId={roomId} spaceId="!space:h.example" view={view} onNavigate={onNavigate} onClose={() => {}} />
+      <RightPane roomId={roomId} spaceId="!space:h.example" view={view} onNavigate={onNavigate} onClose={onClose} />
     </MemoryRouter>,
   );
-  return { onNavigate };
+  return { onNavigate, onClose };
 }
 
-describe("<RoomPanel /> — home", () => {
+describe("<RightPane /> — info", () => {
   it("displays name, alias, topic, join rule and member count", () => {
     setup(0);
-    renderPanel("home");
+    renderPanel("info");
     expect(screen.getByText("Design")).toBeInTheDocument();
     expect(screen.getByText("#design:h.example")).toBeInTheDocument();
     expect(screen.getByText("where we design")).toBeInTheDocument();
@@ -67,13 +67,13 @@ describe("<RoomPanel /> — home", () => {
 
   it("hides edit affordances below the required power level", () => {
     setup(0);
-    renderPanel("home");
+    renderPanel("info");
     expect(screen.queryByRole("button", { name: /edit (name|topic)/i })).toBeNull();
   });
 
   it("edits the topic when permitted", async () => {
     const { setRoomTopic } = setup(100);
-    renderPanel("home");
+    renderPanel("info");
     await userEvent.click(screen.getByRole("button", { name: /edit topic/i }));
     const box = screen.getByRole("textbox", { name: /topic/i });
     await userEvent.clear(box);
@@ -84,7 +84,7 @@ describe("<RoomPanel /> — home", () => {
 
   it("uploads and sets a new avatar when permitted", async () => {
     const { uploadContent, sendStateEvent } = setup(100);
-    renderPanel("home");
+    renderPanel("info");
     const file = new File(["png"], "room.png", { type: "image/png" });
     await userEvent.upload(screen.getByLabelText(/room avatar/i), file);
     expect(uploadContent).toHaveBeenCalled();
@@ -93,35 +93,44 @@ describe("<RoomPanel /> — home", () => {
 
   it("leaves the room from the home", async () => {
     const { leave } = setup(0);
-    renderPanel("home");
+    renderPanel("info");
     await userEvent.click(screen.getByRole("button", { name: /leave room/i }));
     expect(leave).toHaveBeenCalledWith(roomId);
   });
 
-  it("navigates to People and Notifications rows", async () => {
+  it("navigates to Members and Notifications rows", async () => {
     setup(0);
-    const { onNavigate } = renderPanel("home");
-    await userEvent.click(screen.getByRole("button", { name: /people/i }));
-    expect(onNavigate).toHaveBeenCalledWith("people");
+    const { onNavigate } = renderPanel("info");
+    await userEvent.click(screen.getByRole("button", { name: /^members$/i }));
+    expect(onNavigate).toHaveBeenCalledWith("members");
     await userEvent.click(screen.getByRole("button", { name: /notifications/i }));
     expect(onNavigate).toHaveBeenCalledWith("notifications");
   });
 });
 
-describe("<RoomPanel /> — sub-views", () => {
+describe("<RightPane /> — sub-views", () => {
   it("Notifications sub-view changes the setting and can go back", async () => {
     setup(0);
     const { onNavigate } = renderPanel("notifications");
     await userEvent.click(screen.getByRole("radio", { name: /mute/i }));
     expect(notifSetState).toHaveBeenCalledWith("mute");
     await userEvent.click(screen.getByRole("button", { name: /back/i }));
-    expect(onNavigate).toHaveBeenCalledWith("home");
+    expect(onNavigate).toHaveBeenCalledWith("info");
   });
 
-  it("People sub-view renders the member list and can go back", async () => {
+  it("Members sub-view renders the member list and can go back", async () => {
     setup(0);
-    const { onNavigate } = renderPanel("people");
+    const { onNavigate } = renderPanel("members");
+    expect(screen.getByRole("heading", { name: "Members" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /back/i }));
-    expect(onNavigate).toHaveBeenCalledWith("home");
+    expect(onNavigate).toHaveBeenCalledWith("info");
+  });
+
+  it("closes from the header", async () => {
+    setup(0);
+    const { onClose } = renderPanel("info");
+    expect(screen.queryByRole("button", { name: /back/i })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /close panel/i }));
+    expect(onClose).toHaveBeenCalled();
   });
 });

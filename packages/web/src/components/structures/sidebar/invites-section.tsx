@@ -19,12 +19,14 @@ export function InvitesSection() {
         <InviteRow key={invite.roomId} invite={invite} />
       ))}
       {overflow > 0 && (
-        <Link
-          to="/invites"
-          className="block px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-        >
-          View all invites ({invites.length})
-        </Link>
+        <li>
+          <Link
+            to="/invites"
+            className="block px-2 py-1.5 text-caption1 text-muted-foreground hover:text-foreground"
+          >
+            View all invites ({invites.length})
+          </Link>
+        </li>
       )}
     </Section>
   );

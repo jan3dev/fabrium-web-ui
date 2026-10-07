@@ -1,14 +1,11 @@
-import { useEffect, useState } from "react";
-import { Outlet, useMatch } from "react-router-dom";
-import { UserAvatar } from "@/components/user-avatar";
-import { Button } from "@/components/ui/button";
+import { useCallback, useEffect, useState } from "react";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Outlet,
+  useMatch,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
+import { QuickSwitcher } from "@/components/dialogs/quick-switcher";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { useNotifications } from "@/hooks/use-notifications";
 import { usePushSubscription } from "@/hooks/use-push-subscription";
@@ -16,24 +13,27 @@ import { useClearRoomNotifications } from "@/hooks/use-clear-room-notifications"
 import { useServiceWorkerMessages } from "@/hooks/use-service-worker-messages";
 import {
   Sidebar,
-  SidebarContent,
   SidebarFooter,
-  SidebarHeader,
   SidebarInset,
   SidebarProvider,
-  SidebarTrigger,
+  SidebarRail,
 } from "@/components/ui/sidebar";
+import { useGlobalSearchEnabled } from "../../client/feature-flags";
 import { MatrixClientPeg } from "../../client/peg";
 import { DEFAULT_WORKFORCE_SPACE } from "../../client/runtime-config";
 import { useActiveSpaceId } from "../../hooks/use-active-space-id";
+import { useAppShortcuts } from "../../hooks/use-app-shortcuts";
 import { useJoinedSpaces } from "../../hooks/use-joined-spaces";
+import { markAllRead } from "../../hooks/use-mark-read";
 import { useMatrixClient } from "../../hooks/use-matrix-client";
-import { useUserName } from "../../hooks/use-user-name";
+import { useIsMobile } from "../../hooks/use-mobile";
 import { LeftPanel } from "./left-panel";
+import { RightPane, type PaneView, parsePaneView } from "./right-pane";
 import { RoomHeader } from "./room-header";
-import { RoomPanel } from "./room-panel";
+import { SidebarProfileCard } from "./sidebar/profile-card";
 import type { Scope } from "./sidebar/scope";
-import { SpaceSwitcher } from "./sidebar/space-switcher";
+import { TopBar } from "./top-bar";
+import { WorkspaceRail } from "./workspace-rail";
 
 export interface LoggedInOutletContext {
   spaceId: string | null;
@@ -47,17 +47,46 @@ export interface LoggedInViewProps {
   workforceSpace?: string;
 }
 
-export function LoggedInView({ pushGatewayUrl, vapidPublicKey, workforceSpace }: LoggedInViewProps = {}) {
+const SCOPE_STORAGE_KEY = "fabrium:workspace";
+
+function readStoredScope(): Scope | null {
+  try {
+    const raw = localStorage.getItem(SCOPE_STORAGE_KEY);
+    if (raw === "home") return { kind: "home" };
+    return raw ? { kind: "space", spaceId: raw } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Rooms in sidebar order, read from the rendered rows so it always matches what the user sees. */
+function sidebarRoomIds(): string[] {
+  return Array.from(
+    document.querySelectorAll<HTMLElement>("[data-sidebar-room-id]"),
+    (el) => el.dataset.sidebarRoomId!,
+  );
+}
+
+export function LoggedInView({
+  pushGatewayUrl,
+  vapidPublicKey,
+  workforceSpace,
+}: LoggedInViewProps = {}) {
   const client = useMatrixClient();
   const userId = client.getUserId() ?? "";
-  const myName = useUserName(userId);
   const serverName = userId.split(":")[1] ?? userId;
   const spaceLocalpart = workforceSpace ?? DEFAULT_WORKFORCE_SPACE;
-  const { ready: workforceSpaceReady, spaceId } = useActiveSpaceId(spaceLocalpart, serverName);
+  const { ready: workforceSpaceReady, spaceId } = useActiveSpaceId(
+    spaceLocalpart,
+    serverName,
+  );
   const joinedSpaces = useJoinedSpaces();
-  const [scope, setScope] = useState<Scope | null>(null);
-  const [rightPanel, setRightPanel] = useState<"home" | "people" | "notifications" | null>(null);
+  const isMobile = useIsMobile();
+  const navigate = useNavigate();
+  const searchEnabled = useGlobalSearchEnabled();
+  const [scope, setScopeState] = useState<Scope | null>(readStoredScope);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const push = usePushSubscription({
     push_gateway_url: pushGatewayUrl,
     vapid_public_key: vapidPublicKey,
@@ -67,6 +96,8 @@ export function LoggedInView({ pushGatewayUrl, vapidPublicKey, workforceSpace }:
   const roomMatch = useMatch("/room/:roomId");
   const roomId = roomMatch?.params.roomId ?? null;
   useClearRoomNotifications(roomId);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const pane = roomId ? parsePaneView(searchParams.get("pane")) : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -87,101 +118,130 @@ export function LoggedInView({ pushGatewayUrl, vapidPublicKey, workforceSpace }:
     };
   }, [client]);
 
-  useEffect(() => {
-    if (scope) return;
-    if (spaceId) {
-      setScope({ kind: "space", spaceId });
-      return;
+  const setScope = useCallback((next: Scope) => {
+    setScopeState(next);
+    try {
+      localStorage.setItem(
+        SCOPE_STORAGE_KEY,
+        next.kind === "home" ? "home" : next.spaceId,
+      );
+    } catch {
+      // The choice still holds for this session.
     }
-    // Workforce space didn't resolve — if the user only belongs to one
-    // space, scope to it instead of stranding them on Home (ZNC008).
-    if (workforceSpaceReady && joinedSpaces.length === 1) {
-      setScope({ kind: "space", spaceId: joinedSpaces[0].roomId });
-    }
-  }, [spaceId, scope, workforceSpaceReady, joinedSpaces]);
+  }, []);
 
-  const activeScope: Scope = scope ?? (spaceId ? { kind: "space", spaceId } : { kind: "home" });
+  // Workforce space didn't resolve — if the user only belongs to one space,
+  // scope to it instead of stranding them on Home (ZNC008).
+  const defaultScope: Scope = spaceId
+    ? { kind: "space", spaceId }
+    : workforceSpaceReady && joinedSpaces.length === 1
+      ? { kind: "space", spaceId: joinedSpaces[0].roomId }
+      : { kind: "home" };
+  // The remembered choice wins once its space is known; a space since left falls back.
+  const activeScope: Scope =
+    scope && (scope.kind === "home" || joinedSpaces.some((s) => s.roomId === scope.spaceId))
+      ? scope
+      : defaultScope;
+  const workspaceName =
+    activeScope.kind === "home"
+      ? "Home"
+      : (joinedSpaces.find((s) => s.roomId === activeScope.spaceId)?.name ??
+        "Workspace");
 
-  const openPanel = (view: "home" | "people" | "notifications") =>
-    setRightPanel((p) => (p === view ? null : view));
+  const setPane = (view: PaneView | null) =>
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (view) next.set("pane", view);
+      else next.delete("pane");
+      return next;
+    });
+  const togglePane = (view: PaneView) => setPane(pane === view ? null : view);
+
+  useAppShortcuts({
+    onQuickSwitch: () => setSwitcherOpen(true),
+    onSearch: searchEnabled ? () => navigate("/search") : undefined,
+    onNavigateRoom: (delta) => {
+      const ids = sidebarRoomIds();
+      if (ids.length === 0) return;
+      const at = roomId ? ids.indexOf(roomId) : -1;
+      const nextIndex =
+        at === -1
+          ? delta > 0
+            ? 0
+            : ids.length - 1
+          : Math.min(Math.max(at + delta, 0), ids.length - 1);
+      if (nextIndex !== at) navigate(`/room/${ids[nextIndex]}`);
+    },
+    onClosePane: pane ? () => setPane(null) : undefined,
+    onMarkAllRead: () => markAllRead(),
+  });
+
+  const rail = <WorkspaceRail scope={activeScope} onSelect={setScope} />;
 
   return (
-    <SidebarProvider className="h-svh overflow-hidden">
-      <Sidebar collapsible="icon">
-        <SidebarHeader className="h-12 flex-row items-center border-b border-sidebar-border px-2">
-          <SpaceSwitcher scope={activeScope} onSelect={setScope} />
-        </SidebarHeader>
-        <SidebarContent>
-          <LeftPanel scope={activeScope} workforceSpaceId={spaceId} />
-        </SidebarContent>
-        <SidebarFooter className="border-t border-sidebar-border p-1">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                aria-label="User menu"
-                className="h-9 w-full justify-start gap-2 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
-              >
-                <UserAvatar userId={userId} size="sm" className="shrink-0" />
-                <span className="truncate text-sm font-medium group-data-[collapsible=icon]:hidden">
-                  {myName}
-                </span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start" className="w-48">
-              <DropdownMenuItem disabled className="font-medium">
-                {myName}
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                {userId}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
-                Settings
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => void MatrixClientPeg.logout()}>
-                Log out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </SidebarFooter>
-      </Sidebar>
-      <SidebarInset data-testid="logged-in-view">
-        <header className="flex h-12 items-center gap-2 border-b border-border px-3">
-          <SidebarTrigger aria-label="Toggle sidebar" className="md:hidden" />
-          <div className="flex flex-1 min-w-0 items-center">
-            <RoomHeader
-              membersOpen={rightPanel === "people"}
-              onToggleMembers={() => openPanel("people")}
-              onOpenInfo={() => openPanel("home")}
-              onOpenMore={() => openPanel("home")}
-            />
-          </div>
-        </header>
-        <SettingsDialog
-          open={settingsOpen}
-          onOpenChange={setSettingsOpen}
-          pushGatewayUrl={pushGatewayUrl}
-          vapidPublicKey={vapidPublicKey}
-        />
-        <main className="flex-1 min-h-0 overflow-hidden">
-          <div className="relative flex h-full min-h-0">
-            <div className="min-w-0 flex-1 overflow-hidden">
-              <Outlet context={{ spaceId, activeScope, setScope } satisfies LoggedInOutletContext} />
+    <SidebarProvider className="h-svh overflow-hidden bg-sidebar">
+      {isMobile ? null : rail}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <TopBar />
+        <div className="relative flex min-h-0 flex-1">
+          <Sidebar>
+            {isMobile ? rail : null}
+            <div className="flex min-w-0 flex-1 flex-col">
+              <LeftPanel scope={activeScope} workforceSpaceId={spaceId} />
+              <SidebarFooter>
+                <SidebarProfileCard
+                  workspaceName={workspaceName}
+                  onOpenSettings={() => setSettingsOpen(true)}
+                />
+              </SidebarFooter>
             </div>
-            {roomId && rightPanel && (
-              <RoomPanel
-                roomId={roomId}
-                spaceId={spaceId}
-                view={rightPanel}
-                onNavigate={setRightPanel}
-                onClose={() => setRightPanel(null)}
+            {isMobile ? null : <SidebarRail />}
+          </Sidebar>
+          <SidebarInset
+            data-testid="logged-in-view"
+            className="overflow-hidden border-border md:rounded-tl-card md:border-t md:border-l"
+          >
+            {roomId ? (
+              <RoomHeader
+                workforceSpaceId={spaceId}
+                membersOpen={pane === "members"}
+                infoOpen={pane === "info"}
+                onToggleMembers={() => togglePane("members")}
+                onToggleInfo={() => togglePane("info")}
               />
-            )}
-          </div>
-        </main>
-      </SidebarInset>
+            ) : null}
+            <div className="relative flex min-h-0 flex-1">
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <Outlet
+                  context={
+                    {
+                      spaceId,
+                      activeScope,
+                      setScope,
+                    } satisfies LoggedInOutletContext
+                  }
+                />
+              </div>
+              {roomId && pane ? (
+                <RightPane
+                  roomId={roomId}
+                  spaceId={spaceId}
+                  view={pane}
+                  onNavigate={setPane}
+                  onClose={() => setPane(null)}
+                />
+              ) : null}
+            </div>
+          </SidebarInset>
+        </div>
+      </div>
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        pushGatewayUrl={pushGatewayUrl}
+        vapidPublicKey={vapidPublicKey}
+      />
+      <QuickSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
     </SidebarProvider>
   );
 }

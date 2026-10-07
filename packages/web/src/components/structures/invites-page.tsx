@@ -10,11 +10,11 @@ export function InvitesPage() {
       {invites.length === 0 ? (
         <p className="text-sm text-muted-foreground">No pending invites.</p>
       ) : (
-        <div className="flex flex-col gap-2">
+        <ul className="flex flex-col gap-2">
           {invites.map((invite) => (
             <InviteRow key={invite.roomId} invite={invite} />
           ))}
-        </div>
+        </ul>
       )}
     </div>
   );

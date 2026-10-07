@@ -29,6 +29,7 @@ export function makeFakeClient(opts: FakeClientOpts): MatrixClient {
     getRoom: (id: string) => rooms.get(id) ?? null,
     getRooms: () => Array.from(rooms.values()),
     getUser: () => null,
+    getAccountData: () => undefined,
     credentials: { userId: opts.userId },
     supportsThreads: () => false,
     supportsExperimentalThreads: () => false,

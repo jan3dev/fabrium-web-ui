@@ -1,12 +1,15 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeftIcon, BellIcon, CloseIcon, GlobeIcon, LockIcon, PencilIcon, SignOutIcon, StarIcon, UsersIcon } from "@/components/icons";
+import { BellIcon, GlobeIcon, LockIcon, PencilIcon, SignOutIcon, StarIcon, UsersIcon } from "@/components/icons";
+import { AuxPanelHeader } from "@/components/layout/aux-panel-header";
+import { AuxPanel } from "@/components/layout/aux-panel-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { MatrixClientPeg } from "../../client/peg";
+import { useAuxPanelWidth } from "../../hooks/use-aux-panel-width";
 import { useJoinRule } from "../../hooks/use-join-rule";
 import { useMyPowerLevel } from "../../hooks/use-my-power-level";
 import { useRoomFavorite } from "../../hooks/use-room-favorite";
@@ -22,21 +25,35 @@ const RULE_LABEL = {
   public: { Icon: GlobeIcon, text: "Anyone can join" },
 } as const;
 
-interface RoomPanelProps {
+/** Right-pane views, kept in the URL as `?pane=`. Threads move here in W4. */
+export const PANE_VIEWS = ["info", "members", "notifications"] as const;
+export type PaneView = (typeof PANE_VIEWS)[number];
+
+export function parsePaneView(value: string | null): PaneView | null {
+  return PANE_VIEWS.find((v) => v === value) ?? null;
+}
+
+const TITLES: Record<PaneView, string> = {
+  info: "Room info",
+  members: "Members",
+  notifications: "Notifications",
+};
+
+interface RightPaneProps {
   roomId: string;
   spaceId: string | null;
-  view: "home" | "people" | "notifications";
-  onNavigate: (view: "home" | "people" | "notifications") => void;
+  view: PaneView;
+  onNavigate: (view: PaneView) => void;
   onClose: () => void;
 }
 
 // Rows sit inside a p-1 container (like the sidebar user-menu footer), so each row
 // has 4px breathing room from the separator and panel edges. Content padding is px-3
 // so icon lands at 4+12=16px from the panel edge, same as before.
-const ROW = "flex h-8 w-full items-center gap-2.5 px-3 text-sm";
-const ACTION_ROW = `${ROW} cursor-pointer rounded-md transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`;
+const ROW = "flex h-8 w-full items-center gap-2.5 px-3 text-body2";
+const ACTION_ROW = `${ROW} cursor-pointer rounded-utility transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`;
 
-function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" | "spaceId">) {
+function InfoView({ roomId, onNavigate, onClose }: Omit<RightPaneProps, "view" | "spaceId">) {
   const navigate = useNavigate();
   const client = MatrixClientPeg.safeGet();
   const room = client?.getRoom(roomId);
@@ -111,7 +128,7 @@ function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" |
                 aria-label="Room name"
                 value={nameValue}
                 onChange={(e) => setNameValue(e.target.value)}
-                className="h-7 text-sm font-semibold"
+                className="h-7 text-body2 font-semibold"
               />
               <Button size="sm" onClick={() => void onSaveName()}>Save</Button>
               <Button size="sm" variant="ghost" onClick={() => setEditingName(false)}>Cancel</Button>
@@ -132,7 +149,7 @@ function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" |
               )}
             </div>
           )}
-          {alias && <p className="truncate text-xs text-muted-foreground">{alias}</p>}
+          {alias && <p className="truncate text-caption1 text-muted-foreground">{alias}</p>}
         </div>
       </div>
 
@@ -159,7 +176,7 @@ function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" |
               value={topicValue}
               onChange={(e) => setTopicValue(e.target.value)}
               rows={3}
-              className="text-sm"
+              className="text-body2"
             />
             <div className="flex gap-1">
               <Button size="sm" onClick={() => void onSaveTopic()}>Save</Button>
@@ -168,7 +185,7 @@ function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" |
           </div>
         ) : (
           <>
-            {topic && <p className="px-3 pb-1 text-sm text-muted-foreground">{topic}</p>}
+            {topic && <p className="px-3 pb-1 text-body2 text-muted-foreground">{topic}</p>}
             {canEdit && (
               <button
                 type="button"
@@ -199,10 +216,10 @@ function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" |
         <button
           type="button"
           className={ACTION_ROW}
-          onClick={() => onNavigate("people")}
+          onClick={() => onNavigate("members")}
         >
           <UsersIcon className="size-4 shrink-0" />
-          People
+          Members
         </button>
         <button
           type="button"
@@ -230,23 +247,16 @@ function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" |
   );
 }
 
-function NotificationsView({ roomId, onNavigate }: { roomId: string; onNavigate: (v: "home") => void }) {
+function NotificationsView({ roomId }: { roomId: string }) {
   const { state, setState } = useRoomNotifState(roomId);
 
   return (
     <div className="flex flex-col">
-      <div className="flex h-10 items-center gap-1 px-2">
-        <Button variant="ghost" size="icon" aria-label="Back" onClick={() => onNavigate("home")}>
-          <ArrowLeftIcon className="size-4" />
-        </Button>
-        <h2 className="text-sm font-semibold">Notifications</h2>
-      </div>
-      <Separator />
       <div className="px-4 py-3">
         <fieldset className="space-y-1">
           <legend className="sr-only">Notification setting</legend>
           {(["all", "mentions", "mute"] as RoomNotifState[]).map((value) => (
-            <label key={value} className="flex h-8 cursor-pointer items-center gap-2.5 text-sm">
+            <label key={value} className="flex h-8 cursor-pointer items-center gap-2.5 text-body2">
               <input
                 type="radio"
                 name="notif"
@@ -264,47 +274,24 @@ function NotificationsView({ roomId, onNavigate }: { roomId: string; onNavigate:
   );
 }
 
-function PeopleView({
-  roomId,
-  spaceId,
-  onNavigate,
-}: {
-  roomId: string;
-  spaceId: string | null;
-  onNavigate: (v: "home") => void;
-}) {
-  return (
-    <div className="flex flex-col">
-      <div className="flex h-10 items-center gap-1 px-2">
-        <Button variant="ghost" size="icon" aria-label="Back" onClick={() => onNavigate("home")}>
-          <ArrowLeftIcon className="size-4" />
-        </Button>
-        <h2 className="text-sm font-semibold">People</h2>
-      </div>
-      <Separator />
-      <MemberPanel roomId={roomId} spaceId={spaceId} />
-    </div>
-  );
-}
+export function RightPane({ roomId, spaceId, view, onNavigate, onClose }: RightPaneProps) {
+  const { widthPx, onResizeStart, onResetWidth, canReset } = useAuxPanelWidth();
+  const title = TITLES[view];
 
-export function RoomPanel({ roomId, spaceId, view, onNavigate, onClose }: RoomPanelProps) {
   return (
-    <aside className="absolute inset-0 z-20 flex flex-col overflow-y-auto border-l border-border bg-background md:relative md:inset-auto md:w-64 md:shrink-0">
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
-        <span className="text-sm font-semibold">Room info</span>
-        <Button variant="ghost" size="icon" aria-label="Close panel" onClick={onClose}>
-          <CloseIcon className="size-4" />
-        </Button>
-      </div>
-      {view === "home" && (
-        <HomeView roomId={roomId} onNavigate={onNavigate} onClose={onClose} />
-      )}
-      {view === "notifications" && (
-        <NotificationsView roomId={roomId} onNavigate={(v) => onNavigate(v)} />
-      )}
-      {view === "people" && (
-        <PeopleView roomId={roomId} spaceId={spaceId} onNavigate={(v) => onNavigate(v)} />
-      )}
-    </aside>
+    <AuxPanel
+      label={title}
+      testId="right-pane"
+      widthPx={widthPx}
+      onResizeStart={onResizeStart}
+      onResetWidth={onResetWidth}
+      canResetWidth={canReset}
+      onClose={onClose}
+      header={<AuxPanelHeader title={title} onBack={view === "info" ? undefined : () => onNavigate("info")} />}
+    >
+      {view === "info" && <InfoView roomId={roomId} onNavigate={onNavigate} onClose={onClose} />}
+      {view === "notifications" && <NotificationsView roomId={roomId} />}
+      {view === "members" && <MemberPanel roomId={roomId} spaceId={spaceId} />}
+    </AuxPanel>
   );
 }

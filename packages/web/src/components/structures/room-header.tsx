@@ -1,196 +1,125 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/chat/ui/ChatHeader.tsx. Modified.
-import {
-  Activity,
-  Bot,
-  CircleDot,
-  Copy,
-  FileText,
-  FolderGit2,
-  Hash,
-  House,
-  Lock,
-  Zap,
-} from "lucide-react";
-import type * as React from "react";
-import { toast } from "sonner";
+import { useSyncExternalStore } from "react";
+import { useMatch } from "react-router-dom";
 
-import type { ChannelType, ChannelVisibility } from "@/shared/api/types";
-import { UpdateIndicator } from "@/features/settings/UpdateIndicator";
-import { cn } from "@/shared/lib/cn";
-import { channelChrome } from "@/shared/layout/chromeLayout";
-import { Button } from "@/shared/ui/button";
-import { writeTextToClipboard } from "@/shared/lib/clipboard";
+import { BellOffIcon, InfoIcon, StarIcon } from "@/components/icons";
+import { RoomGlyph } from "@/components/room-glyph";
+import { Badge } from "@/components/ui/badge";
+import { IconButton } from "@/components/ui/icon-button";
+import { cn } from "@/lib/utils";
+import { MatrixClientPeg } from "../../client/peg";
+import { useDirectRooms } from "../../hooks/use-direct-rooms";
+import { useJoinRule } from "../../hooks/use-join-rule";
+import { useMemberRoles } from "../../hooks/use-member-roles";
+import { useRoomFavorite } from "../../hooks/use-room-favorite";
+import { useRoomNotifState } from "../../hooks/use-room-notif-state";
+import { useRoomTopic } from "../../hooks/use-room-topic";
+import { useWorkforce } from "../../hooks/use-workforce";
+import { MemberStack } from "./member-stack";
+import { RoomStatusBadge } from "./room-status-badge";
 
-type ChatHeaderProps = {
-  actions?: React.ReactNode;
-  belowSystemChrome?: boolean;
-  /** Ref to the outer chrome wrapper when `belowSystemChrome` is true. */
-  chromeWrapperRef?: React.Ref<HTMLDivElement>;
-  title: string;
-  description?: string;
-  channelType?: ChannelType;
-  visibility?: ChannelVisibility;
-  leadingContent?: React.ReactNode;
-  mode?: "home" | "channel" | "agents" | "workflows" | "pulse" | "projects";
-  overlaysContent?: boolean;
-  statusBadge?: React.ReactNode;
-  /** Identity adornment rendered exactly 4px after a DM title. */
-  titleAdornment?: React.ReactNode;
-  /** Render the chrome wrapper without an individual backdrop when a parent supplies shared blur. */
-  transparentChrome?: boolean;
-};
-
-const HEADER_ICON_CLASS = "h-4 w-4 text-muted-foreground";
-const CHANNEL_HASH_ICON_CLASS = "h-4 w-4 translate-y-px";
-
-function ChannelIcon({
-  channelType,
-  visibility,
-  mode = "channel",
-}: {
-  channelType?: ChannelType;
-  visibility?: ChannelVisibility;
-  mode?: "home" | "channel" | "agents" | "workflows" | "pulse" | "projects";
-}) {
-  if (mode === "home") {
-    return <House className={HEADER_ICON_CLASS} />;
-  }
-
-  if (mode === "agents") {
-    return <Bot className={HEADER_ICON_CLASS} />;
-  }
-
-  if (mode === "workflows") {
-    return <Zap className={HEADER_ICON_CLASS} />;
-  }
-
-  if (mode === "pulse") {
-    return <Activity className={HEADER_ICON_CLASS} />;
-  }
-
-  if (mode === "projects") {
-    return <FolderGit2 className={HEADER_ICON_CLASS} />;
-  }
-
-  if (channelType === "dm") {
-    return <CircleDot className={HEADER_ICON_CLASS} />;
-  }
-
-  if (visibility === "private") {
-    return <Lock className={HEADER_ICON_CLASS} />;
-  }
-
-  if (channelType === "forum") {
-    return <FileText className={HEADER_ICON_CLASS} />;
-  }
-
-  return <Hash className={CHANNEL_HASH_ICON_CLASS} color="gray" />;
+interface RoomHeaderProps {
+  workforceSpaceId?: string | null;
+  membersOpen?: boolean;
+  infoOpen?: boolean;
+  onToggleMembers?: () => void;
+  onToggleInfo?: () => void;
 }
 
-export function ChatHeader({
-  actions,
-  belowSystemChrome = false,
-  chromeWrapperRef,
-  title,
-  description,
-  channelType,
-  visibility,
-  leadingContent,
-  mode = "channel",
-  overlaysContent = false,
-  statusBadge,
-  titleAdornment,
-  transparentChrome = false,
-}: ChatHeaderProps) {
-  const trimmedDescription = description?.trim() ?? "";
-
-  async function handleCopyTitle() {
-    const value = title.trim();
-    if (!value) return;
-
-    try {
-      await writeTextToClipboard(value);
-      toast.success("Channel name copied");
-    } catch {
-      toast.error("Failed to copy channel name");
-    }
-  }
-
-  const header = (
-    <header
-      className={cn(
-        "pointer-events-auto relative z-30 min-w-0 shrink-0 cursor-default select-none bg-transparent px-5 py-2 transition-[margin,padding] duration-200 ease-linear",
-        overlaysContent && !belowSystemChrome && "-mb-14",
-      )}
-      data-testid="chat-header"
-      data-tauri-drag-region
-    >
-      <div className="flex h-9 min-w-0 items-center gap-2.5">
-        <div className="min-w-0 flex-1">
-          <div className="group/title flex min-w-0 items-center gap-[4px] overflow-hidden">
-            <div className="flex shrink-0 items-center">
-              {leadingContent ?? (
-                <ChannelIcon
-                  channelType={channelType}
-                  mode={mode}
-                  visibility={visibility}
-                />
-              )}
-            </div>
-            <h1
-              className={cn(
-                "min-w-0 truncate text-base font-semibold leading-6 tracking-tight",
-                channelType !== "dm" && "translate-y-px",
-              )}
-              data-testid="chat-title"
-              title={trimmedDescription || undefined}
-            >
-              {title}
-            </h1>
-            {titleAdornment}
-            <Button
-              aria-label={`Copy channel name: ${title}`}
-              className="h-6 w-6 shrink-0 opacity-0 text-muted-foreground transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/title:opacity-100"
-              onClick={() => void handleCopyTitle()}
-              size="icon-xs"
-              title="Copy channel name"
-              type="button"
-              variant="ghost"
-            >
-              <Copy className="h-3.5 w-3.5" />
-            </Button>
-            {statusBadge ? (
-              <div className="flex shrink-0 flex-wrap items-center gap-1">
-                {statusBadge}
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-1">
-          <UpdateIndicator />
-          {actions ? <div className="shrink-0">{actions}</div> : null}
-        </div>
-      </div>
-    </header>
+/** Room title row: glyph, name (opens room info), status markers, members and actions. */
+export function RoomHeader({
+  workforceSpaceId,
+  membersOpen,
+  infoOpen,
+  onToggleMembers,
+  onToggleInfo,
+}: RoomHeaderProps) {
+  const roomId = useMatch("/room/:roomId")?.params.roomId ?? "";
+  const client = useSyncExternalStore(
+    (cb) => MatrixClientPeg.subscribe(cb),
+    () => MatrixClientPeg.safeGet(),
+    () => null,
   );
+  const members = useMemberRoles(roomId);
+  const topic = useRoomTopic(roomId);
+  const { isFavorite, toggle: toggleFavorite } = useRoomFavorite(roomId);
+  const { rule } = useJoinRule(roomId);
+  const { state: notifState } = useRoomNotifState(roomId);
+  const { isAgent } = useWorkforce(workforceSpaceId ?? "");
+  const isDm = useDirectRooms().some((r) => r.roomId === roomId);
 
-  if (!belowSystemChrome) {
-    return header;
-  }
+  const room = client?.getRoom(roomId);
+  if (!roomId || !client) return null;
+
+  const roomName = room?.name ?? roomId;
+  const dmUserId = isDm ? (room?.guessDMUserId() ?? null) : null;
+  const isAgentDm = !!dmUserId && isAgent(dmUserId);
+  const archived = !!room?.currentState.getStateEvents("m.room.tombstone", "");
+  const encrypted = !!room?.hasEncryptionStateEvent();
 
   return (
-    <div
-      ref={chromeWrapperRef}
-      className={cn(
-        "pointer-events-none relative z-40 overflow-visible rounded-tl-xl",
-        transparentChrome
-          ? "bg-transparent"
-          : "bg-background/80 backdrop-blur-md supports-backdrop-filter:bg-background/70 dark:bg-background/70 dark:backdrop-blur-xl dark:supports-backdrop-filter:bg-background/55",
-        channelChrome.negativeMargin,
-      )}
+    <header
+      className="relative z-30 flex h-12 min-w-0 shrink-0 cursor-default items-center gap-2.5 border-b border-border px-3 select-none md:px-4"
+      data-testid="room-header"
     >
-      {header}
-    </div>
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        <RoomGlyph
+          kind={isDm ? "dm" : "stream"}
+          isPrivate={rule === "invite"}
+          dmUserId={dmUserId}
+          isAgent={isAgentDm}
+          className="text-text-tertiary"
+        />
+        <h1 className="min-w-0">
+          <button
+            type="button"
+            className="block max-w-full cursor-pointer truncate rounded-utility px-1 font-heading text-subtitle font-semibold tracking-tight hover:bg-surface-secondary"
+            onClick={onToggleInfo}
+            title={topic ?? undefined}
+          >
+            {roomName}
+          </button>
+        </h1>
+        {isAgentDm ? <Badge tone="agent">Agent</Badge> : null}
+        <RoomStatusBadge archived={archived} encrypted={encrypted} />
+        {notifState === "mute" ? (
+          <span
+            aria-label="Muted"
+            role="img"
+            className="flex size-5 items-center justify-center text-text-tertiary"
+          >
+            <BellOffIcon className="size-4" />
+          </span>
+        ) : null}
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {members.length > 0 ? (
+          <MemberStack
+            members={members}
+            open={membersOpen}
+            onToggle={onToggleMembers}
+          />
+        ) : null}
+        <IconButton
+          icon={
+            <StarIcon
+              className={cn(isFavorite && "fill-current text-accent-warning")}
+            />
+          }
+          label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+          onClick={() => void toggleFavorite()}
+          size="small"
+          tooltipSide="bottom"
+        />
+        <IconButton
+          aria-pressed={infoOpen}
+          icon={<InfoIcon />}
+          label="Room details"
+          onClick={onToggleInfo}
+          size="small"
+          tooltipSide="bottom"
+        />
+      </div>
+    </header>
   );
 }

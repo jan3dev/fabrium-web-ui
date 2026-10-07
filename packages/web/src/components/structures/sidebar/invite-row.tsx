@@ -12,17 +12,17 @@ export function InviteRow({ invite }: { invite: PendingInvite }) {
     : "someone";
 
   return (
-    <div className="flex flex-col gap-1 rounded-md px-2 py-1.5 hover:bg-muted">
-      <span className="truncate text-sm font-medium">{displayName}</span>
-      <span className="truncate text-xs text-muted-foreground">Invited by {inviterLabel}</span>
+    <li className="flex flex-col gap-1 rounded-utility px-2 py-1.5 hover:bg-sidebar-accent">
+      <span className="truncate text-body2 font-medium">{displayName}</span>
+      <span className="truncate text-caption1 text-muted-foreground">Invited by {inviterLabel}</span>
       <div className="flex gap-1">
-        <Button size="sm" className="h-6 px-2 text-xs" onClick={accept}>
+        <Button size="xs" onClick={accept}>
           Accept
         </Button>
-        <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={decline}>
+        <Button size="xs" variant="outline" onClick={decline}>
           Decline
         </Button>
       </div>
-    </div>
+    </li>
   );
 }

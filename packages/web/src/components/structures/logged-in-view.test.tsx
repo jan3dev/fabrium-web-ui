@@ -9,6 +9,12 @@ import { mswServer, relaxUnhandled, stubStartClient, stubSyncWithRooms } from ".
 const HS = "https://h.example";
 const me = "@alice:h.example";
 
+/** The rail button marked as the current workspace. */
+const activeWorkspace = () => {
+  const el = document.querySelector('nav[aria-label="Workspaces"] [aria-current="true"]');
+  return el?.getAttribute("aria-label") ?? "";
+};
+
 describe("<LoggedInView /> sidebar polish", () => {
   beforeEach(() => {
     relaxUnhandled();
@@ -28,16 +34,17 @@ describe("<LoggedInView /> sidebar polish", () => {
     localStorage.clear();
   });
 
-  it("renders a sidebar whose header is the space switcher", async () => {
+  it("renders the workspace rail, top bar and sidebar", async () => {
     render(<App config={{ homeserverUrl: HS }} />);
     await waitFor(() =>
       expect(screen.getByTestId("logged-in-view")).toBeInTheDocument(),
     );
     expect(document.querySelector('[data-slot="sidebar"]')).not.toBeNull();
+    expect(screen.getByTestId("top-bar")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /user menu/i })).toBeInTheDocument();
     // The minimal sync stub doesn't seed the workforce space, so scope falls
-    // back to Home and the switcher trigger is labeled accordingly.
-    const switcher = screen.getByRole("button", { name: /switch space/i });
-    expect(switcher).toHaveTextContent(/home/i);
+    // back to Home.
+    expect(activeWorkspace()).toBe("Home");
   });
 
   it("auto-selects the sole joined space when the workforce space doesn't resolve", async () => {
@@ -52,9 +59,7 @@ describe("<LoggedInView /> sidebar polish", () => {
       },
     ]);
     render(<App config={{ homeserverUrl: HS }} />);
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /switch space/i })).toHaveTextContent("Ops"),
-    );
+    await waitFor(() => expect(activeWorkspace()).toMatch(/^Ops/));
   });
 
   it("stays on Home when joined to multiple spaces and none resolves as the workforce space", async () => {
@@ -80,8 +85,7 @@ describe("<LoggedInView /> sidebar polish", () => {
     await waitFor(() =>
       expect(screen.getByTestId("logged-in-view")).toBeInTheDocument(),
     );
-    const switcher = screen.getByRole("button", { name: /switch space/i });
-    expect(switcher).toHaveTextContent(/home/i);
+    expect(activeWorkspace()).toBe("Home");
   });
 
   it("toggles the sidebar with Cmd-B / Ctrl-B", async () => {
@@ -99,6 +103,53 @@ describe("<LoggedInView /> sidebar polish", () => {
 
     await user.keyboard("{Meta>}b{/Meta}");
     await waitFor(() => expect(sidebar.getAttribute("data-state")).toBe("expanded"));
+  });
+
+  it("keeps a collapsed sidebar collapsed across a reload", async () => {
+    localStorage.setItem("fabrium:sidebar-open", "false");
+    render(<App config={{ homeserverUrl: HS }} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("logged-in-view")).toBeInTheDocument(),
+    );
+    expect(document.querySelector('[data-slot="sidebar"]')?.getAttribute("data-state")).toBe("collapsed");
+  });
+
+  it("opens the room pane from ?pane= and closes it with Escape", async () => {
+    stubSyncWithRooms(HS, [
+      {
+        roomId: "!r:h.example",
+        myUserId: me,
+        state: [{ type: "m.room.name", sender: me, stateKey: "", content: { name: "general" } }],
+      },
+    ]);
+    const user = userEvent.setup();
+    render(<App config={{ homeserverUrl: HS }} initialRoute="/room/!r:h.example?pane=info" />);
+    expect(await screen.findByRole("complementary", { name: "Room info" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Room info" })).toBeNull());
+  });
+
+  it("moves between sidebar rooms with Alt+ArrowDown", async () => {
+    stubSyncWithRooms(HS, [
+      {
+        roomId: "!a:h.example",
+        myUserId: me,
+        state: [{ type: "m.room.name", sender: me, stateKey: "", content: { name: "alpha" } }],
+      },
+      {
+        roomId: "!b:h.example",
+        myUserId: me,
+        state: [{ type: "m.room.name", sender: me, stateKey: "", content: { name: "beta" } }],
+      },
+    ]);
+    const user = userEvent.setup();
+    render(<App config={{ homeserverUrl: HS }} initialRoute="/room/!a:h.example" />);
+    const alpha = await screen.findByRole("link", { name: /alpha/ });
+    await waitFor(() => expect(alpha).toHaveAttribute("data-active", "true"));
+    await user.keyboard("{Alt>}{ArrowDown}{/Alt}");
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /beta/ })).toHaveAttribute("data-active", "true"),
+    );
   });
 });
 
@@ -143,7 +194,6 @@ describe("<LoggedInView /> workforce space from runtime config", () => {
     localStorage.clear();
   });
 
-  const switcherLabel = () => screen.getByRole("button", { name: /switch space/i });
 
   async function renderWith(workforceSpace: string | undefined, rooms = [
     space("!dev:h.example", "Dev"),
@@ -157,17 +207,17 @@ describe("<LoggedInView /> workforce space from runtime config", () => {
 
   it("defaults to #dev when workforce_space is omitted", async () => {
     await renderWith(undefined);
-    await waitFor(() => expect(switcherLabel()).toHaveTextContent("Dev"));
+    await waitFor(() => expect(activeWorkspace()).toMatch(/^Dev/));
   });
 
   it("selects the configured space", async () => {
     await renderWith("ops");
-    await waitFor(() => expect(switcherLabel()).toHaveTextContent("Ops"));
+    await waitFor(() => expect(activeWorkspace()).toMatch(/^Ops/));
   });
 
   it("serves different spaces from the same app with different runtime config", async () => {
     await renderWith("ops");
-    await waitFor(() => expect(switcherLabel()).toHaveTextContent("Ops"));
+    await waitFor(() => expect(activeWorkspace()).toMatch(/^Ops/));
     cleanup();
     MatrixClientPeg.reset();
     localStorage.setItem(
@@ -175,26 +225,32 @@ describe("<LoggedInView /> workforce space from runtime config", () => {
       JSON.stringify({ homeserverUrl: HS, accessToken: "tok", userId: me, deviceId: "DEV1" }),
     );
     await renderWith("eng");
-    await waitFor(() => expect(switcherLabel()).toHaveTextContent("Eng"));
+    await waitFor(() => expect(activeWorkspace()).toMatch(/^Eng/));
   });
 
   it("falls back to the sole joined space when the configured alias doesn't resolve", async () => {
     await renderWith("missing", [space("!ops:h.example", "Ops")]);
-    await waitFor(() => expect(switcherLabel()).toHaveTextContent("Ops"));
+    await waitFor(() => expect(activeWorkspace()).toMatch(/^Ops/));
   });
 
   it("falls back to the sole joined space when the value is invalid", async () => {
     await renderWith("#ops:h.example", [space("!eng:h.example", "Eng")]);
-    await waitFor(() => expect(switcherLabel()).toHaveTextContent("Eng"));
+    await waitFor(() => expect(activeWorkspace()).toMatch(/^Eng/));
   });
 
   it("falls back to Home when unresolved and several spaces are joined", async () => {
     await renderWith("missing");
-    await waitFor(() => expect(switcherLabel()).toHaveTextContent(/home/i));
+    await waitFor(() => expect(activeWorkspace()).toBe("Home"));
+  });
+
+  it("remembers the chosen workspace across a reload", async () => {
+    localStorage.setItem("fabrium:workspace", "!eng:h.example");
+    await renderWith("ops");
+    await waitFor(() => expect(activeWorkspace()).toMatch(/^Eng/));
   });
 
   it("falls back to Home when the value is invalid and several spaces are joined", async () => {
     await renderWith("a b");
-    await waitFor(() => expect(switcherLabel()).toHaveTextContent(/home/i));
+    await waitFor(() => expect(activeWorkspace()).toBe("Home"));
   });
 });

@@ -1,134 +1,106 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/sidebar/ui/MoreUnreadButton.tsx. Modified.
-import { topChromeInset } from "@/shared/layout/chromeLayout";
-import { UserAvatar } from "@/shared/ui/UserAvatar";
-import { UnreadPill } from "@/shared/ui/UnreadPill";
+import { type RefObject, useEffect, useState } from "react";
 
-export type UnreadDmPreview = {
-  accessibleLabel: string;
-  avatarUrl: string | null;
-  channelId: string;
-  label: string;
-  isAgent?: boolean;
+import { UnreadPill } from "@/components/ui/unread-pill";
+
+type Side = { count: number; highlight: boolean };
+type Overflow = { above: Side; below: Side };
+
+const NONE: Overflow = {
+  above: { count: 0, highlight: false },
+  below: { count: 0, highlight: false },
 };
 
-export function canPreviewUnreadDm(
-  participantPubkeyCount: number,
-  resolvedParticipantCount: number,
-) {
-  return participantPubkeyCount === 2 && resolvedParticipantCount === 1;
+/** Unread rows (`[data-unread]`) scrolled out of view above and below the container. */
+function unreadOutOfView(container: HTMLElement) {
+  const box = container.getBoundingClientRect();
+  const above: HTMLElement[] = [];
+  const below: HTMLElement[] = [];
+  for (const row of container.querySelectorAll<HTMLElement>("[data-unread]")) {
+    const r = row.getBoundingClientRect();
+    if (r.bottom <= box.top) above.push(row);
+    else if (r.top >= box.bottom) below.push(row);
+  }
+  return { above, below };
 }
 
-export function visibleUnreadDmPreviews(dmPreviews: UnreadDmPreview[]) {
-  return dmPreviews.slice(0, 3);
+function summarize(rows: HTMLElement[]): Side {
+  return {
+    count: rows.length,
+    highlight: rows.some((r) => r.dataset.unread === "highlight"),
+  };
 }
 
-export function unreadDmAccessibleLabel({
-  count,
-  dmPreviews,
-  label,
-  position,
-  targetChannelId,
-}: {
-  count: number;
-  dmPreviews: UnreadDmPreview[];
-  label?: string;
-  position: "top" | "bottom";
-  targetChannelId?: string;
-}) {
-  const direction = position === "top" ? "above" : "below";
-  const resolvedLabel = label ?? `${count} unread`;
-  const targetPreview = dmPreviews.find(
-    ({ channelId }) => channelId === targetChannelId,
-  );
-  return targetPreview
-    ? `Go to unread direct message from ${targetPreview.accessibleLabel}. ${resolvedLabel} ${direction}.`
-    : `${resolvedLabel} ${direction}`;
-}
+/** Tracks unread rows hidden by scrolling, so the sidebar can point at them. */
+export function useUnreadOverflow(scrollRef: RefObject<HTMLElement | null>) {
+  const [overflow, setOverflow] = useState<Overflow>(NONE);
 
-export function preferredUnreadTarget(
-  unreadChannelIds: string[],
-  dmChannelIds: ReadonlySet<string>,
-) {
-  return (
-    unreadChannelIds.find((channelId) => dmChannelIds.has(channelId)) ??
-    unreadChannelIds[0]
-  );
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const update = () => {
+      const { above, below } = unreadOutOfView(container);
+      const next = { above: summarize(above), below: summarize(below) };
+      setOverflow((prev) =>
+        JSON.stringify(prev) === JSON.stringify(next) ? prev : next,
+      );
+    };
+    update();
+    container.addEventListener("scroll", update, { passive: true });
+    const resize = new ResizeObserver(update);
+    resize.observe(container);
+    const mutations = new MutationObserver(update);
+    mutations.observe(container, {
+      subtree: true,
+      childList: true,
+      attributeFilter: ["data-unread"],
+    });
+    return () => {
+      container.removeEventListener("scroll", update);
+      resize.disconnect();
+      mutations.disconnect();
+    };
+  }, [scrollRef]);
+
+  const scrollTo = (position: "top" | "bottom") => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const { above, below } = unreadOutOfView(container);
+    // The nearest hidden row in that direction.
+    const target = position === "top" ? above.at(-1) : below[0];
+    target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
+
+  return { overflow, scrollTo };
 }
 
 export function MoreUnreadButton({
-  bottomClassName = "bottom-0",
   count,
-  dmPreviews = [],
   emphasis,
-  label,
   onClick,
   position,
-  targetChannelId,
-  testId,
 }: {
-  bottomClassName?: string;
   count: number;
-  dmPreviews?: UnreadDmPreview[];
   emphasis: "default" | "primary";
-  label?: string;
   onClick: () => void;
   position: "top" | "bottom";
-  targetChannelId?: string;
-  testId: string;
 }) {
-  const positionClassName =
-    position === "top" ? topChromeInset.top : bottomClassName;
-  const visibleDmPreviews = visibleUnreadDmPreviews(dmPreviews);
-  const resolvedLabel = label ?? `${count} unread`;
-  const accessibleLabel = unreadDmAccessibleLabel({
-    count,
-    dmPreviews,
-    label: resolvedLabel,
-    position,
-    targetChannelId,
-  });
+  const label = `${count} unread`;
+  const direction = position === "top" ? "above" : "below";
 
   return (
     <div
-      className={`pointer-events-none absolute inset-x-0 z-10 flex justify-center px-2 py-1 ${positionClassName}`}
+      className={`pointer-events-none absolute inset-x-0 z-10 flex justify-center px-2 py-1 ${
+        position === "top" ? "top-0" : "bottom-0"
+      }`}
     >
       <UnreadPill
-        accessibleLabel={accessibleLabel}
-        className="max-w-full overflow-hidden text-xs"
+        accessibleLabel={`${label} ${direction}`}
+        className="max-w-full overflow-hidden"
         direction={position === "top" ? "up" : "down"}
         emphasis={emphasis}
-        label={resolvedLabel}
-        leading={
-          visibleDmPreviews.length > 0 ? (
-            <span
-              aria-hidden="true"
-              className="flex shrink-0 items-center gap-1.5"
-            >
-              <span className="flex -space-x-1.5">
-                {visibleDmPreviews.map((preview, index) => (
-                  <span
-                    className="relative"
-                    key={preview.channelId}
-                    style={{ zIndex: visibleDmPreviews.length - index }}
-                  >
-                    <UserAvatar
-                      avatarUrl={preview.avatarUrl}
-                      className="ring-2 ring-primary"
-                      displayName={preview.label}
-                      shape={preview.isAgent ? "squircle" : "circle"}
-                      fallbackDelayMs={0}
-                      size="xs"
-                      testId={`sidebar-unread-dm-avatar-${preview.channelId}`}
-                    />
-                  </span>
-                ))}
-              </span>
-              <span>·</span>
-            </span>
-          ) : undefined
-        }
+        label={label}
         onClick={onClick}
-        testId={testId}
       />
     </div>
   );

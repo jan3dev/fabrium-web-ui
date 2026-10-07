@@ -1,286 +1,69 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/shared/lib/keyboard-shortcuts.ts. Modified.
-import { isMacPlatform } from "@/shared/lib/platform";
-
-export const HUDDLE_SHORTCUT_EVENT = "buzz:huddle-shortcut";
-
-export type HuddleShortcutDetail = {
-  channelId: string;
-};
-
-export type ShortcutCategory =
-  | "Navigation"
-  | "Messages"
-  | "Formatting"
-  | "Zoom";
 
 export type KeyboardShortcut = {
   id: string;
   label: string;
-  description: string;
-  keys: string;
-  keysWindows: string;
-  category: ShortcutCategory;
+  /** One entry per key, for one `<Kbd>` each. */
+  keys: string[];
+  keysWindows: string[];
 };
 
+/** App-wide shortcuts, bound in `hooks/use-app-shortcuts.ts` and the sidebar. */
 export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
-  // Navigation
   {
-    id: "quick-search",
-    label: "Quick search",
-    description: "Open the search dialog",
-    keys: "⌘K",
-    keysWindows: "Ctrl+K",
-    category: "Navigation",
+    id: "quick-switcher",
+    label: "Jump to a room",
+    keys: ["⌘", "K"],
+    keysWindows: ["Ctrl", "K"],
   },
   {
-    id: "browse-channels",
-    label: "Browse channels",
-    description: "Open the channel browser",
-    keys: "⇧⌘O",
-    keysWindows: "Shift+Ctrl+O",
-    category: "Navigation",
+    id: "search",
+    label: "Search messages",
+    keys: ["⌘", "/"],
+    keysWindows: ["Ctrl", "/"],
   },
   {
-    id: "browse-dms",
-    label: "New direct message",
-    description: "Open the new message composer",
-    keys: "⇧⌘K",
-    keysWindows: "Shift+Ctrl+K",
-    category: "Navigation",
+    id: "previous-room",
+    label: "Previous room",
+    keys: ["⌥", "↑"],
+    keysWindows: ["Alt", "↑"],
   },
   {
-    id: "new-channel",
-    label: "New channel",
-    description: "Open the create channel dialog",
-    keys: "⇧⌘N",
-    keysWindows: "Shift+Ctrl+N",
-    category: "Navigation",
-  },
-  {
-    id: "open-settings",
-    label: "Settings",
-    description: "Open or close settings",
-    keys: "⌘,",
-    keysWindows: "Ctrl+,",
-    category: "Navigation",
-  },
-  {
-    id: "go-back",
-    label: "Go back",
-    description: "Navigate to the previous page",
-    keys: "⌘[",
-    keysWindows: "Alt+←",
-    category: "Navigation",
-  },
-  {
-    id: "go-forward",
-    label: "Go forward",
-    description: "Navigate to the next page",
-    keys: "⌘]",
-    keysWindows: "Alt+→",
-    category: "Navigation",
-  },
-  {
-    id: "find-in-channel",
-    label: "Find in channel",
-    description: "Search messages in current channel",
-    keys: "⌘F",
-    keysWindows: "Ctrl+F",
-    category: "Navigation",
-  },
-  {
-    id: "go-home",
-    label: "Home",
-    description: "Navigate to the home feed",
-    keys: "⇧⌘A",
-    keysWindows: "Shift+Ctrl+A",
-    category: "Navigation",
+    id: "next-room",
+    label: "Next room",
+    keys: ["⌥", "↓"],
+    keysWindows: ["Alt", "↓"],
   },
   {
     id: "toggle-sidebar",
     label: "Toggle sidebar",
-    description: "Show or hide the sidebar",
-    keys: "⌘S",
-    keysWindows: "Ctrl+S",
-    category: "Navigation",
+    keys: ["⌘", "B"],
+    keysWindows: ["Ctrl", "B"],
   },
   {
-    id: "mark-current-read",
-    label: "Mark as read",
-    description: "Mark the current conversation as read",
-    keys: "Escape",
-    keysWindows: "Escape",
-    category: "Navigation",
+    id: "close-pane",
+    label: "Close the side panel",
+    keys: ["Esc"],
+    keysWindows: ["Esc"],
   },
   {
     id: "mark-all-read",
     label: "Mark all as read",
-    description: "Mark all conversations as read",
-    keys: "⇧Escape",
-    keysWindows: "Shift+Escape",
-    category: "Navigation",
-  },
-
-  // Zoom
-  {
-    id: "zoom-in",
-    label: "Zoom in",
-    description: "Increase the zoom level",
-    keys: "⌘+",
-    keysWindows: "Ctrl+=",
-    category: "Zoom",
-  },
-  {
-    id: "zoom-out",
-    label: "Zoom out",
-    description: "Decrease the zoom level",
-    keys: "⌘-",
-    keysWindows: "Ctrl+-",
-    category: "Zoom",
-  },
-  {
-    id: "zoom-reset",
-    label: "Reset zoom",
-    description: "Reset zoom to default level",
-    keys: "⌘0",
-    keysWindows: "Ctrl+0",
-    category: "Zoom",
-  },
-
-  // Messages
-  {
-    id: "send-message",
-    label: "Send message",
-    description: "Send the current message",
-    keys: "Enter",
-    keysWindows: "Enter",
-    category: "Messages",
-  },
-  {
-    id: "new-line",
-    label: "New line",
-    description: "Insert a line break in the composer",
-    keys: "Shift+Enter",
-    keysWindows: "Shift+Enter",
-    category: "Messages",
-  },
-  {
-    id: "always-address-agent",
-    label: "Always address agent",
-    description: "Address the default agent, or toggle the highlighted agent",
-    keys: "⇧⌘M",
-    keysWindows: "Ctrl+Shift+M",
-    category: "Messages",
-  },
-  {
-    id: "publish-note",
-    label: "Publish note",
-    description: "Publish a Pulse note",
-    keys: "⌘Enter",
-    keysWindows: "Ctrl+Enter",
-    category: "Messages",
-  },
-  {
-    id: "close-dialog",
-    label: "Close dialog",
-    description: "Close the current dialog or settings",
-    keys: "Escape",
-    keysWindows: "Escape",
-    category: "Messages",
-  },
-  {
-    id: "toggle-huddle",
-    label: "Start or leave huddle",
-    description:
-      "Start or join a huddle in the current channel; leave when connected",
-    keys: "Ctrl+Shift+Space",
-    keysWindows: "Ctrl+Shift+Space",
-    category: "Messages",
-  },
-  {
-    id: "push-to-talk",
-    label: "Push to talk",
-    description: "Hold to unmute in a huddle",
-    keys: "Ctrl+Space",
-    keysWindows: "Ctrl+Space",
-    category: "Messages",
-  },
-
-  // Formatting
-  {
-    id: "format-bold",
-    label: "Bold",
-    description: "Toggle bold formatting",
-    keys: "⌘B",
-    keysWindows: "Ctrl+B",
-    category: "Formatting",
-  },
-  {
-    id: "format-italic",
-    label: "Italic",
-    description: "Toggle italic formatting",
-    keys: "⌘I",
-    keysWindows: "Ctrl+I",
-    category: "Formatting",
-  },
-  {
-    id: "format-strikethrough",
-    label: "Strikethrough",
-    description: "Toggle strikethrough formatting",
-    keys: "⌘⇧X",
-    keysWindows: "Ctrl+Shift+X",
-    category: "Formatting",
-  },
-  {
-    id: "format-code",
-    label: "Inline code",
-    description: "Toggle inline code formatting",
-    keys: "⌘E",
-    keysWindows: "Ctrl+E",
-    category: "Formatting",
-  },
-  {
-    id: "format-link",
-    label: "Insert link",
-    description:
-      "Link the selected composer text, or edit the link under the caret",
-    keys: "⌘K",
-    keysWindows: "Ctrl+K",
-    category: "Formatting",
+    keys: ["⇧", "Esc"],
+    keysWindows: ["Shift", "Esc"],
   },
 ];
 
-const CATEGORY_ORDER: ShortcutCategory[] = [
-  "Navigation",
-  "Messages",
-  "Formatting",
-  "Zoom",
-];
-
-export function getShortcutsByCategory(): Map<
-  ShortcutCategory,
-  KeyboardShortcut[]
-> {
-  const map = new Map<ShortcutCategory, KeyboardShortcut[]>();
-  for (const cat of CATEGORY_ORDER) {
-    map.set(
-      cat,
-      KEYBOARD_SHORTCUTS.filter((s) => s.category === cat),
-    );
-  }
-  return map;
+export function isMacPlatform(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    /Mac|iPhone|iPad/.test(navigator.platform)
+  );
 }
 
-export function getPlatformKeys(shortcut: KeyboardShortcut): string {
-  return isMacPlatform() ? shortcut.keys : shortcut.keysWindows;
-}
-
-/**
- * Platform-appropriate key hint for a shortcut in {@link KEYBOARD_SHORTCUTS},
- * or null when the id is unknown. Use this for inline hints (menus, tooltips)
- * so they stay in sync with the canonical shortcut registry.
- */
-export function getPlatformKeysById(id: string): string | null {
+/** Platform key list for a shortcut, or null when the id is unknown. */
+export function getPlatformKeysById(id: string): string[] | null {
   const shortcut = KEYBOARD_SHORTCUTS.find((s) => s.id === id);
-  return shortcut ? getPlatformKeys(shortcut) : null;
+  if (!shortcut) return null;
+  return isMacPlatform() ? shortcut.keys : shortcut.keysWindows;
 }

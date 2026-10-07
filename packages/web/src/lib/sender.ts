@@ -9,6 +9,16 @@ export function displayNameOf(userId: string): string {
   return m ? m[1] : userId;
 }
 
+/** Up to two initials for a name: "Payments Team" → "PT", "ops" → "O". */
+export function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0]!.toUpperCase())
+    .join("");
+}
+
 /**
  * Resolve a room member's visible name. Prefers matrix-js-sdk's calculated
  * `.name` (which folds in profile displayname, per-room override, and

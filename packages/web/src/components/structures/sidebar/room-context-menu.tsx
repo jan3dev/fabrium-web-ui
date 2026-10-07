@@ -1,379 +1,139 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/sidebar/ui/ChannelContextMenu.tsx. Modified.
-import {
-  Archive,
-  Bell,
-  BellOff,
-  Check,
-  CheckCircle2,
-  CircleDot,
-  Copy,
-  LogOut,
-  LoaderCircle,
-  Plus,
-  Star,
-  StarOff,
-  Trash2,
-  TriangleAlert,
-} from "lucide-react";
+import type * as React from "react";
+import { useMatch, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
-import { useAppShell } from "@/app/AppShellContext";
 import {
-  useArchiveChannelMutation,
-  useChannelMembersQuery,
-} from "@/features/channels/hooks";
-import { useChannelModerationCapabilities } from "@/features/channels/ui/ChannelManagementModerationActions";
-import type { ChannelSection } from "@/features/sidebar/lib/useChannelSections";
-import {
-  ContextMenuIconSlot,
-  deferMenuAction,
-} from "@/features/sidebar/ui/sidebarMenuHelpers";
-import { StatusEmoji } from "@/features/user-status/ui/StatusEmoji";
-import type { Channel } from "@/shared/api/types";
-import { useIdentityQuery } from "@/shared/api/hooks";
-import { copyTextToClipboard } from "@/shared/lib/clipboard";
+  BellIcon,
+  CircleCheckIcon,
+  LinkIcon,
+  SignOutIcon,
+  StarIcon,
+} from "@/components/icons";
 import {
   ContextMenuItem,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
-} from "@/shared/ui/context-menu";
+} from "@/components/ui/context-menu";
+import { MatrixClientPeg } from "../../../client/peg";
+import { markRoomRead } from "../../../hooks/use-mark-read";
+import { useRoomFavorite } from "../../../hooks/use-room-favorite";
+import { useRoomNotifState } from "../../../hooks/use-room-notif-state";
+import { useUnread } from "../../../hooks/use-unread";
+import { buildRoomLink } from "../../../lib/matrix/permalinks";
+import type { RoomNotifState } from "../../../lib/matrix/notification-prefs";
 
-function MoveToSectionSubmenu({
-  channelId,
-  sections,
-  assignments,
-  onAssignChannel,
-  onUnassignChannel,
-  onCreateSectionForChannel,
-}: {
-  channelId: string;
-  sections: ChannelSection[];
-  assignments: Record<string, string>;
-  onAssignChannel: (channelId: string, sectionId: string) => void;
-  onUnassignChannel: (channelId: string) => void;
-  onCreateSectionForChannel: (channelId: string) => void;
-}) {
-  const currentSectionId = assignments[channelId];
-
-  return (
-    <ContextMenuSub>
-      <ContextMenuSubTrigger>
-        <ContextMenuIconSlot />
-        <span>Move to section</span>
-      </ContextMenuSubTrigger>
-      <ContextMenuSubContent>
-        {sections.map((section) => (
-          <ContextMenuItem
-            key={section.id}
-            onSelect={() =>
-              deferMenuAction(() => onAssignChannel(channelId, section.id))
-            }
-          >
-            <ContextMenuIconSlot>
-              {currentSectionId === section.id ? (
-                <Check className="h-4 w-4" />
-              ) : section.icon ? (
-                <StatusEmoji className="h-4 w-4" value={section.icon} />
-              ) : null}
-            </ContextMenuIconSlot>
-            <span>{section.name}</span>
-          </ContextMenuItem>
-        ))}
-        {sections.length > 0 ? <ContextMenuSeparator /> : null}
-        <ContextMenuItem
-          onSelect={() =>
-            deferMenuAction(() => onCreateSectionForChannel(channelId))
-          }
-        >
-          <ContextMenuIconSlot>
-            <Plus className="h-4 w-4" />
-          </ContextMenuIconSlot>
-          <span>New section...</span>
-        </ContextMenuItem>
-        {currentSectionId ? (
-          <ContextMenuItem
-            onSelect={() => deferMenuAction(() => onUnassignChannel(channelId))}
-          >
-            <ContextMenuIconSlot />
-            <span>Remove from section</span>
-          </ContextMenuItem>
-        ) : null}
-      </ContextMenuSubContent>
-    </ContextMenuSub>
-  );
-}
+const NOTIF_LABELS: Record<RoomNotifState, string> = {
+  all: "All messages",
+  mentions: "Mentions only",
+  mute: "Mute",
+};
 
 /**
- * The channel/DM context menu's Copy actions, grouped under a single
- * "Copy" submenu (channel name / channel ID).
+ * A fixed-width leading slot for menu rows so labels stay left-aligned whether
+ * or not a row has an icon.
  */
-function CopyChannelSubmenu({ channel }: { channel: Channel }) {
+function IconSlot({ children }: { children?: React.ReactNode }) {
   return (
-    <ContextMenuSub>
-      <ContextMenuSubTrigger>
-        <ContextMenuIconSlot>
-          <Copy className="h-4 w-4" />
-        </ContextMenuIconSlot>
-        <span>Copy</span>
-      </ContextMenuSubTrigger>
-      <ContextMenuSubContent>
-        <ContextMenuItem
-          onSelect={() =>
-            copyTextToClipboard(
-              channel.name,
-              "Channel name copied to clipboard",
-            )
-          }
-        >
-          <span>Copy channel name</span>
-        </ContextMenuItem>
-        <ContextMenuItem
-          onSelect={() =>
-            copyTextToClipboard(channel.id, "Channel ID copied to clipboard")
-          }
-        >
-          <span>Copy channel ID</span>
-        </ContextMenuItem>
-      </ContextMenuSubContent>
-    </ContextMenuSub>
+    <span
+      aria-hidden="true"
+      className="flex size-4 shrink-0 items-center justify-center [&>svg]:size-4"
+    >
+      {children}
+    </span>
   );
 }
 
-export function ChannelContextMenuItems({
-  channel,
-  hasUnread,
-  isMuted,
-  isStarred,
-  sections,
-  assignments,
-  onMarkChannelRead,
-  onMarkChannelUnread,
-  onMuteChannel,
-  onUnmuteChannel,
-  onStarChannel,
-  onUnstarChannel,
-  onAssignChannel,
-  onUnassignChannel,
-  onCreateSectionForChannel,
-  onDeleteChannel,
-  onLeaveChannel,
-}: {
-  channel: Channel;
-  hasUnread: boolean;
-  isMuted?: boolean;
-  isStarred?: boolean;
-  sections?: ChannelSection[];
-  assignments?: Record<string, string>;
-  onMarkChannelRead?: (
-    channelId: string,
-    lastMessageAt: string | null | undefined,
-  ) => void;
-  onMarkChannelUnread?: (channelId: string) => void;
-  onMuteChannel?: (channelId: string) => void;
-  onUnmuteChannel?: (channelId: string) => void;
-  onStarChannel?: (channelId: string) => void;
-  onUnstarChannel?: (channelId: string) => void;
-  onAssignChannel?: (channelId: string, sectionId: string) => void;
-  onUnassignChannel?: (channelId: string) => void;
-  onCreateSectionForChannel?: (channelId: string) => void;
-  onDeleteChannel?: (channel: Channel) => void;
-  onLeaveChannel?: (channel: Channel) => void;
-}) {
-  const {
-    feedItemState,
-    hasSidebarUnreadProjections,
-    locallyUnreadFeedItems,
-    unreadThreadChannelIds,
-  } = useAppShell();
-  const channelUnreadOverrideIds = locallyUnreadFeedItems.flatMap((item) =>
-    item.channelId === channel.id && feedItemState.unreadSet.has(item.id)
-      ? [item.id]
-      : [],
-  );
-  const hasProjectedUnread =
-    hasUnread ||
-    (channel.channelType !== "dm" &&
-      hasSidebarUnreadProjections &&
-      unreadThreadChannelIds.has(channel.id));
-  const canLoadOwnerActions =
-    channel.channelType !== "dm" && Boolean(onDeleteChannel);
-  const membersQuery = useChannelMembersQuery(channel.id, canLoadOwnerActions);
-  const currentPubkey = useIdentityQuery().data?.pubkey;
-  const archiveChannel = useArchiveChannelMutation(channel.id);
-  const {
-    canDeleteChannel,
-    canManageChannel,
-    error: capabilityError,
-    isLoading: isCapabilityLoading,
-  } = useChannelModerationCapabilities(
-    membersQuery.data,
-    currentPubkey,
-    canLoadOwnerActions,
-  );
-  const ownerActionsError = membersQuery.error ?? capabilityError;
-  const ownerActionsLoading =
-    canLoadOwnerActions && (membersQuery.isLoading || isCapabilityLoading);
-  const showChannelActions = Boolean(
-    onLeaveChannel ||
-      ownerActionsLoading ||
-      ownerActionsError ||
-      canManageChannel ||
-      canDeleteChannel,
-  );
-  const showStar = Boolean(onStarChannel && onUnstarChannel);
-  const showReadToggle = hasProjectedUnread
-    ? Boolean(onMarkChannelRead)
-    : Boolean(onMarkChannelUnread);
-  const showMuteToggle = Boolean(onMuteChannel && onUnmuteChannel);
-  const showMove = Boolean(
-    sections &&
-      assignments &&
-      onAssignChannel &&
-      onUnassignChannel &&
-      onCreateSectionForChannel,
-  );
+/** Right-click menu for a sidebar room row. */
+export function RoomContextMenuItems({ roomId }: { roomId: string }) {
+  const navigate = useNavigate();
+  const current = useMatch("/room/:roomId")?.params.roomId === roomId;
+  const { total } = useUnread(roomId);
+  const { isFavorite, toggle: toggleFavorite } = useRoomFavorite(roomId);
+  const { state: notifState, setState: setNotifState } =
+    useRoomNotifState(roomId);
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(
+        buildRoomLink(window.location.origin, roomId),
+      );
+      toast.success("Link copied");
+    } catch {
+      toast.error("Could not copy the link");
+    }
+  };
+
+  const markRead = () => {
+    const room = MatrixClientPeg.safeGet()?.getRoom(roomId);
+    if (room) markRoomRead(room);
+  };
+
+  const leave = async () => {
+    await MatrixClientPeg.safeGet()?.leave(roomId);
+    if (current) navigate("/");
+  };
 
   return (
     <>
-      <CopyChannelSubmenu channel={channel} />
-      {showMove ? (
-        <MoveToSectionSubmenu
-          channelId={channel.id}
-          sections={sections ?? []}
-          assignments={assignments ?? {}}
-          onAssignChannel={onAssignChannel ?? (() => {})}
-          onUnassignChannel={onUnassignChannel ?? (() => {})}
-          onCreateSectionForChannel={onCreateSectionForChannel ?? (() => {})}
-        />
-      ) : null}
-      {showReadToggle ? <ContextMenuSeparator /> : null}
-      {hasProjectedUnread && onMarkChannelRead ? (
-        <ContextMenuItem
-          onSelect={() =>
-            deferMenuAction(() => {
-              for (const itemId of channelUnreadOverrideIds) {
-                feedItemState.undoUnread(itemId);
-              }
-              onMarkChannelRead(channel.id, channel.lastMessageAt);
-            })
-          }
-        >
-          <ContextMenuIconSlot>
-            <CheckCircle2 className="h-4 w-4" />
-          </ContextMenuIconSlot>
-          <span>Mark as read</span>
-        </ContextMenuItem>
-      ) : !hasProjectedUnread && onMarkChannelUnread ? (
-        <ContextMenuItem
-          onSelect={() =>
-            deferMenuAction(() => onMarkChannelUnread(channel.id))
-          }
-        >
-          <ContextMenuIconSlot>
-            <CircleDot className="h-4 w-4" />
-          </ContextMenuIconSlot>
-          <span>Mark unread</span>
+      <ContextMenuItem onSelect={() => void copyLink()}>
+        <IconSlot>
+          <LinkIcon />
+        </IconSlot>
+        Copy link
+      </ContextMenuItem>
+      {total > 0 ? (
+        <ContextMenuItem onSelect={markRead}>
+          <IconSlot>
+            <CircleCheckIcon />
+          </IconSlot>
+          Mark as read
         </ContextMenuItem>
       ) : null}
-      {showMuteToggle || showStar ? <ContextMenuSeparator /> : null}
-      {showMuteToggle ? (
-        isMuted ? (
-          <ContextMenuItem
-            onSelect={() =>
-              deferMenuAction(() => onUnmuteChannel?.(channel.id))
+      <ContextMenuSeparator />
+      <ContextMenuItem onSelect={() => void toggleFavorite()}>
+        <IconSlot>
+          <StarIcon
+            className={
+              isFavorite ? "fill-current text-accent-warning" : undefined
+            }
+          />
+        </IconSlot>
+        {isFavorite ? "Remove from favorites" : "Add to favorites"}
+      </ContextMenuItem>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <IconSlot>
+            <BellIcon />
+          </IconSlot>
+          Notifications
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+          <ContextMenuRadioGroup
+            value={notifState}
+            onValueChange={(value) =>
+              void setNotifState(value as RoomNotifState)
             }
           >
-            <ContextMenuIconSlot>
-              <Bell className="h-4 w-4" />
-            </ContextMenuIconSlot>
-            <span>Unmute channel</span>
-          </ContextMenuItem>
-        ) : (
-          <ContextMenuItem
-            onSelect={() => deferMenuAction(() => onMuteChannel?.(channel.id))}
-          >
-            <ContextMenuIconSlot>
-              <BellOff className="h-4 w-4" />
-            </ContextMenuIconSlot>
-            <span>Mute channel</span>
-          </ContextMenuItem>
-        )
-      ) : null}
-      {showStar ? (
-        isStarred ? (
-          <ContextMenuItem
-            onSelect={() =>
-              deferMenuAction(() => onUnstarChannel?.(channel.id))
-            }
-          >
-            <ContextMenuIconSlot>
-              <StarOff className="h-4 w-4" />
-            </ContextMenuIconSlot>
-            <span>Unstar channel</span>
-          </ContextMenuItem>
-        ) : (
-          <ContextMenuItem
-            onSelect={() => deferMenuAction(() => onStarChannel?.(channel.id))}
-          >
-            <ContextMenuIconSlot>
-              <Star className="h-4 w-4" />
-            </ContextMenuIconSlot>
-            <span>Star channel</span>
-          </ContextMenuItem>
-        )
-      ) : null}
-      {showChannelActions ? <ContextMenuSeparator /> : null}
-      {onLeaveChannel ? (
-        <ContextMenuItem
-          className="text-destructive focus:text-destructive"
-          onSelect={() => deferMenuAction(() => onLeaveChannel(channel))}
-        >
-          <ContextMenuIconSlot>
-            <LogOut className="h-4 w-4" />
-          </ContextMenuIconSlot>
-          <span>Leave channel</span>
-        </ContextMenuItem>
-      ) : null}
-      {ownerActionsLoading ? (
-        <ContextMenuItem disabled>
-          <ContextMenuIconSlot>
-            <LoaderCircle className="h-4 w-4 animate-spin" />
-          </ContextMenuIconSlot>
-          <span>Loading channel actions...</span>
-        </ContextMenuItem>
-      ) : ownerActionsError ? (
-        <ContextMenuItem disabled>
-          <ContextMenuIconSlot>
-            <TriangleAlert className="h-4 w-4" />
-          </ContextMenuIconSlot>
-          <span>Channel actions unavailable</span>
-        </ContextMenuItem>
-      ) : null}
-      {canManageChannel ? (
-        <ContextMenuItem
-          data-testid={`archive-channel-${channel.name}`}
-          disabled={archiveChannel.isPending}
-          onSelect={() => deferMenuAction(() => archiveChannel.mutate())}
-        >
-          <ContextMenuIconSlot>
-            <Archive className="h-4 w-4" />
-          </ContextMenuIconSlot>
-          <span>Archive channel</span>
-        </ContextMenuItem>
-      ) : null}
-      {canDeleteChannel ? (
-        <ContextMenuItem
-          className="text-destructive focus:text-destructive"
-          data-testid={`delete-channel-${channel.name}`}
-          onSelect={() => deferMenuAction(() => onDeleteChannel?.(channel))}
-        >
-          <ContextMenuIconSlot>
-            <Trash2 className="h-4 w-4" />
-          </ContextMenuIconSlot>
-          <span>Delete channel</span>
-        </ContextMenuItem>
-      ) : null}
+            {(Object.keys(NOTIF_LABELS) as RoomNotifState[]).map((value) => (
+              <ContextMenuRadioItem key={value} value={value}>
+                {NOTIF_LABELS[value]}
+              </ContextMenuRadioItem>
+            ))}
+          </ContextMenuRadioGroup>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <ContextMenuSeparator />
+      <ContextMenuItem variant="destructive" onSelect={() => void leave()}>
+        <IconSlot>
+          <SignOutIcon />
+        </IconSlot>
+        Leave room
+      </ContextMenuItem>
     </>
   );
 }

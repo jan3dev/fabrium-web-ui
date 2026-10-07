@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { displayNameOf, nameOfMember, splitMentions, expandMentions } from "./sender";
+import { displayNameOf, expandMentions, initials, nameOfMember, splitMentions } from "./sender";
 import type { RoomMember } from "matrix-js-sdk";
 
 function fakeMember(userId: string, name?: string): RoomMember {
@@ -52,5 +52,13 @@ describe("expandMentions", () => {
     const out = expandMentions("contact foo@bar.com", []);
     expect(out.body).toBe("contact foo@bar.com");
     expect(out.userIds).toEqual([]);
+  });
+});
+
+describe("initials", () => {
+  it("takes the first letter of up to two words", () => {
+    expect(initials("Payments Team Alpha")).toBe("PT");
+    expect(initials("ops")).toBe("O");
+    expect(initials("  ")).toBe("");
   });
 });

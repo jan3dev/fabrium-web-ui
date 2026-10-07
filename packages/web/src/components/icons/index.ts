@@ -57,6 +57,8 @@ export { default as WarningIcon } from "./warning.svg?react";
 
 // lucide-react fallbacks: no drawn icon exists for these yet.
 export {
+  Archive as ArchiveIcon,
+  ArrowDown as ArrowDownIcon,
   ArrowLeft as ArrowLeftIcon,
   Ban as BanIcon,
   Bell as BellIcon,
@@ -69,6 +71,8 @@ export {
   FileSearch as FileSearchIcon,
   Flag as FlagIcon,
   Forward as ForwardIcon,
+  Hash as HashIcon,
+  House as HomeIcon,
   Link2 as LinkIcon,
   ListChecks as ListChecksIcon,
   Loader2 as LoaderIcon,

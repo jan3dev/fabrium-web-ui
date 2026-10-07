@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { type Room, type MatrixEvent, RoomEvent } from "matrix-js-sdk";
+import { type Room, type MatrixEvent, NotificationCountType, RoomEvent } from "matrix-js-sdk";
 import { MatrixClientPeg } from "../client/peg";
 
 function lastLiveEvent(room: Room): MatrixEvent | null {
@@ -10,6 +10,23 @@ function lastLiveEvent(room: Room): MatrixEvent | null {
     if (ev.getType() === "m.room.message") return ev;
   }
   return events[events.length - 1] ?? null;
+}
+
+/** Send a read receipt for the room's latest event. Failures are tolerated: the next visit retries. */
+export function markRoomRead(room: Room): void {
+  const ev = lastLiveEvent(room);
+  if (!ev) return;
+  void MatrixClientPeg.safeGet()
+    ?.sendReadReceipt(ev)
+    .catch(() => {});
+}
+
+/** Mark every unread room in `rooms` (default: all joined rooms) as read. */
+export function markAllRead(rooms?: Room[]): void {
+  const all = rooms ?? MatrixClientPeg.safeGet()?.getRooms() ?? [];
+  for (const room of all) {
+    if (room.getUnreadNotificationCount(NotificationCountType.Total) > 0) markRoomRead(room);
+  }
 }
 
 export function useMarkRead(roomId: string): void {

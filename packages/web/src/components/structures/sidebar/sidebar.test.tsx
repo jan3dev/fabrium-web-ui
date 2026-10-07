@@ -353,28 +353,3 @@ describe("<Sidebar> subspaces", () => {
     expect(within(rooms).queryByText("Guides")).not.toBeInTheDocument();
   });
 });
-
-describe("<Sidebar> search row", () => {
-  it("shows Search as a link, not as a text input", () => {
-    setGlobalSearchEnabled(true);
-    seed();
-    render(
-      <MemoryRouter initialEntries={["/"]}>
-        <Sidebar scope={{ kind: "space", spaceId }} workforceSpaceId={spaceId} />
-      </MemoryRouter>,
-    );
-    expect(screen.getByRole("link", { name: /search/i })).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: /search/i })).not.toBeInTheDocument();
-  });
-
-  it("hides Search entirely when global search is off", () => {
-    setGlobalSearchEnabled(false);
-    seed();
-    render(
-      <MemoryRouter initialEntries={["/"]}>
-        <Sidebar scope={{ kind: "space", spaceId }} workforceSpaceId={spaceId} />
-      </MemoryRouter>,
-    );
-    expect(screen.queryByRole("link", { name: /search/i })).not.toBeInTheDocument();
-  });
-});

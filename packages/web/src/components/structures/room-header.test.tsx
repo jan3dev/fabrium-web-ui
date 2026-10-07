@@ -121,17 +121,42 @@ function setupRoom(opts: { myLevel: number; joinRule?: string }) {
   return room;
 }
 
-describe("<RoomHeader> join-rule indicator", () => {
-  it("renders a join-rule indicator reflecting the rule", () => {
+function renderHeader() {
+  render(
+    <MemoryRouter initialEntries={[`/room/${roomId}`]}>
+      <Routes>
+        <Route path="/room/:roomId" element={<RoomHeader />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe("<RoomHeader> glyph and status", () => {
+  it("marks an invite-only room with the private glyph", () => {
+    setupRoom({ myLevel: 0, joinRule: "invite" });
+    renderHeader();
+    expect(screen.getByLabelText("Private")).toBeInTheDocument();
+  });
+
+  it("shows no private glyph for a public room", () => {
     setupRoom({ myLevel: 0, joinRule: "public" });
-    render(
-      <MemoryRouter initialEntries={[`/room/${roomId}`]}>
-        <Routes>
-          <Route path="/room/:roomId" element={<RoomHeader />} />
-        </Routes>
-      </MemoryRouter>,
+    renderHeader();
+    expect(screen.queryByLabelText("Private")).toBeNull();
+  });
+
+  it("marks archived and encrypted rooms", () => {
+    const room = setupRoom({ myLevel: 0, joinRule: "public" });
+    injectStateEvent(
+      room,
+      mkMatrixEvent({ roomId, sender: "@a:h.example", type: "m.room.tombstone", stateKey: "", content: { body: "moved", replacement_room: "!new:h.example" } }),
     );
-    expect(screen.getByLabelText(/anyone can join/i)).toBeInTheDocument();
+    injectStateEvent(
+      room,
+      mkMatrixEvent({ roomId, sender: "@a:h.example", type: "m.room.encryption", stateKey: "", content: { algorithm: "m.megolm.v1.aes-sha2" } }),
+    );
+    renderHeader();
+    expect(screen.getByLabelText(/archived/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/end-to-end encrypted/i)).toBeInTheDocument();
   });
 });
 
@@ -158,31 +183,33 @@ describe("<RoomHeader> members toggle", () => {
 describe("<RoomHeader> Slack layout", () => {
   it("opens the panel home when the room name is clicked; no dropdown menu", async () => {
     const room = setupRoom({ myLevel: 50 });
-    const onOpenInfo = vi.fn();
+    const onToggleInfo = vi.fn();
     render(
       <MemoryRouter initialEntries={[`/room/${roomId}`]}>
         <Routes>
-          <Route path="/room/:roomId" element={<RoomHeader onOpenInfo={onOpenInfo} />} />
+          <Route path="/room/:roomId" element={<RoomHeader onToggleInfo={onToggleInfo} />} />
         </Routes>
       </MemoryRouter>,
     );
     await userEvent.click(screen.getByRole("button", { name: room.name }));
-    expect(onOpenInfo).toHaveBeenCalled();
+    expect(onToggleInfo).toHaveBeenCalled();
     expect(screen.queryByText(/leave room/i)).toBeNull();
   });
 
-  it("opens the panel via the ellipsis (more) button", async () => {
+  it("opens the panel via the room details button", async () => {
     setupRoom({ myLevel: 50 });
-    const onOpenMore = vi.fn();
+    const onToggleInfo = vi.fn();
     render(
       <MemoryRouter initialEntries={[`/room/${roomId}`]}>
         <Routes>
-          <Route path="/room/:roomId" element={<RoomHeader onOpenMore={onOpenMore} />} />
+          <Route path="/room/:roomId" element={<RoomHeader onToggleInfo={onToggleInfo} infoOpen />} />
         </Routes>
       </MemoryRouter>,
     );
-    await userEvent.click(screen.getByRole("button", { name: /more|room (details|options)/i }));
-    expect(onOpenMore).toHaveBeenCalled();
+    const details = screen.getByRole("button", { name: /room details/i });
+    expect(details).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(details);
+    expect(onToggleInfo).toHaveBeenCalled();
   });
 
   it("does not render a room avatar or inline topic in the header bar", () => {

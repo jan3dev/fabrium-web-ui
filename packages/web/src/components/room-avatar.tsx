@@ -8,7 +8,7 @@ import { useAuthedMediaUrl } from "@/lib/matrix/authed-media";
 import { cn } from "@/lib/utils";
 
 /** The room's `mxc://` avatar, or null if it has none. */
-function useRoomAvatarMxc(roomId: string): string | null {
+export function useRoomAvatarMxc(roomId: string): string | null {
   return useSyncExternalStore(
     (cb) => {
       const room = MatrixClientPeg.safeGet()?.getRoom(roomId);

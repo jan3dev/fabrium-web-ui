@@ -33,6 +33,10 @@ export function buildThreadLink(origin: string, t: ThreadTarget): string {
   return `${origin}${threadTargetPath(t)}`;
 }
 
+export function buildRoomLink(origin: string, roomId: string): string {
+  return `${origin}/room/${encodeURIComponent(roomId)}`;
+}
+
 /**
  * Recognise links the client can open itself: its own /room/<id>?thread=…
  * URLs, and matrix.to event permalinks (which carry no thread, so the event

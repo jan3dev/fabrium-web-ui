@@ -1,93 +1,52 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/shared/hooks/useThreadPanelWidth.ts. Modified.
 import * as React from "react";
 
-import {
-  AUXILIARY_PANEL_DEFAULT_WIDTH_PX,
-  AUXILIARY_PANEL_MIN_WIDTH_PX,
-  getAuxiliaryPanelMaxWidth,
-} from "@/shared/layout/AuxiliaryPanel";
-
-const THREAD_PANEL_WIDTH_SESSION_KEY = "buzz.desktop.thread-panel-width";
-
-type ThreadPanelWidthOptions = {
-  defaultWidthPx?: number;
-  minWidthPx?: number;
-  sessionKey?: string;
-};
-
-function getViewportWidth(): number {
-  return typeof window === "undefined" ? 0 : window.innerWidth;
-}
+export const AUX_PANEL_DEFAULT_WIDTH_PX = 380;
+export const AUX_PANEL_MIN_WIDTH_PX = 300;
+const AUX_PANEL_MAX_WIDTH_PX = 720;
+const AUX_PANEL_WIDTH_STORAGE_KEY = "fabrium:aux-width";
 
 /**
- * Clamp the stored panel width for the current viewport.
- *
- * The upper bound grows with the viewport (see {@link clampAuxiliaryPanelWidth}) so
- * the pane can expand on ultrawide displays. `AuxiliaryPanelShell` additionally
- * clamps the rendered width to `calc(100% - MIN)` at paint time, so a stored width
- * larger than the current viewport never collapses the main pane.
+ * Upper bound for the panel width. On ultrawide displays the static cap is too
+ * small, so the panel may grow with the viewport while always leaving
+ * {@link AUX_PANEL_MIN_WIDTH_PX} for the main pane.
  */
-function clampThreadPanelWidth(width: number, minWidthPx: number): number {
+function maxWidth(): number {
   return Math.max(
-    minWidthPx,
-    Math.min(getAuxiliaryPanelMaxWidth(getViewportWidth()), width),
+    AUX_PANEL_MAX_WIDTH_PX,
+    window.innerWidth - AUX_PANEL_MIN_WIDTH_PX,
   );
 }
 
-function getInitialThreadPanelWidth({
-  defaultWidthPx,
-  minWidthPx,
-  sessionKey,
-}: Required<ThreadPanelWidthOptions>): number {
-  if (typeof window === "undefined") {
-    return defaultWidthPx;
-  }
+export function clampAuxPanelWidth(width: number): number {
+  return Math.max(AUX_PANEL_MIN_WIDTH_PX, Math.min(maxWidth(), width));
+}
 
+function readInitialWidth(): number {
   try {
-    const raw = window.sessionStorage.getItem(sessionKey);
-    if (!raw) {
-      return defaultWidthPx;
-    }
-
-    const parsed = Number.parseInt(raw, 10);
-    if (!Number.isFinite(parsed)) {
-      return defaultWidthPx;
-    }
-
-    return clampThreadPanelWidth(parsed, minWidthPx);
+    const parsed = Number.parseInt(
+      localStorage.getItem(AUX_PANEL_WIDTH_STORAGE_KEY) ?? "",
+      10,
+    );
+    return Number.isFinite(parsed)
+      ? clampAuxPanelWidth(parsed)
+      : AUX_PANEL_DEFAULT_WIDTH_PX;
   } catch {
-    return defaultWidthPx;
+    return AUX_PANEL_DEFAULT_WIDTH_PX;
   }
 }
 
-export function useThreadPanelWidth(
-  availableWidthPx?: number,
-  options: ThreadPanelWidthOptions = {},
-) {
-  const defaultWidthPx =
-    options.defaultWidthPx ?? AUXILIARY_PANEL_DEFAULT_WIDTH_PX;
-  const minWidthPx = options.minWidthPx ?? AUXILIARY_PANEL_MIN_WIDTH_PX;
-  const sessionKey = options.sessionKey ?? THREAD_PANEL_WIDTH_SESSION_KEY;
-  const getAvailableWidth = React.useCallback(
-    () => availableWidthPx ?? getViewportWidth(),
-    [availableWidthPx],
-  );
-  const [widthPx, setWidthPx] = React.useState<number>(() =>
-    getInitialThreadPanelWidth({ defaultWidthPx, minWidthPx, sessionKey }),
-  );
-  const [isResizing, setIsResizing] = React.useState(false);
+/** Width of the right pane: drag to resize, double-click to reset, kept across reloads. */
+export function useAuxPanelWidth() {
+  const [widthPx, setWidthPx] = React.useState(readInitialWidth);
 
   React.useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
     try {
-      window.sessionStorage.setItem(sessionKey, String(widthPx));
+      localStorage.setItem(AUX_PANEL_WIDTH_STORAGE_KEY, String(widthPx));
     } catch {
-      // Ignore storage failures and keep in-memory width for this session.
+      // Keep the in-memory width for this session.
     }
-  }, [sessionKey, widthPx]);
+  }, [widthPx]);
 
   const onResizeStart = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -100,24 +59,14 @@ export function useThreadPanelWidth(
 
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
-      setIsResizing(true);
 
       const handlePointerMove = (moveEvent: PointerEvent) => {
-        const deltaX = startX - moveEvent.clientX;
-        const nextWidth = Math.max(
-          minWidthPx,
-          Math.min(
-            getAuxiliaryPanelMaxWidth(getAvailableWidth()),
-            startWidth + deltaX,
-          ),
-        );
-        setWidthPx(nextWidth);
+        setWidthPx(clampAuxPanelWidth(startWidth + startX - moveEvent.clientX));
       };
 
       const handlePointerEnd = () => {
         document.body.style.cursor = previousCursor;
         document.body.style.userSelect = previousUserSelect;
-        setIsResizing(false);
         window.removeEventListener("pointermove", handlePointerMove);
         window.removeEventListener("pointerup", handlePointerEnd);
         window.removeEventListener("pointercancel", handlePointerEnd);
@@ -127,16 +76,16 @@ export function useThreadPanelWidth(
       window.addEventListener("pointerup", handlePointerEnd);
       window.addEventListener("pointercancel", handlePointerEnd);
     },
-    [getAvailableWidth, minWidthPx, widthPx],
+    [widthPx],
   );
 
-  const onResetWidth = React.useCallback(() => {
-    setWidthPx(defaultWidthPx);
-  }, [defaultWidthPx]);
+  const onResetWidth = React.useCallback(
+    () => setWidthPx(AUX_PANEL_DEFAULT_WIDTH_PX),
+    [],
+  );
 
   return {
-    canReset: widthPx !== defaultWidthPx,
-    isResizing,
+    canReset: widthPx !== AUX_PANEL_DEFAULT_WIDTH_PX,
     onResetWidth,
     onResizeStart,
     widthPx,

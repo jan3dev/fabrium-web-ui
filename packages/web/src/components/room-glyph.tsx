@@ -1,30 +1,42 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/channels/ui/ChannelGlyph.tsx. Modified.
-import { FileText, Hash, Lock } from "lucide-react";
+import { HashIcon, LockIcon } from "@/components/icons";
+import { UserAvatar } from "@/components/user-avatar";
+import { cn } from "@/lib/utils";
 
-import { useIsProjectHomeChannel } from "@/features/projects/lib/projectHomeChannel";
-import { ProjectChannelIcon } from "@/features/projects/ui/ProjectChannelIcon";
-import type { Channel } from "@/shared/api/types";
-import { cn } from "@/shared/lib/cn";
+export type RoomGlyphKind = "stream" | "dm";
 
-/** Stream/forum glyph for a channel, using the project mark on project homes. */
-export function ChannelGlyph({
-  channel,
+/** `#` for a channel, a lock when it is invite-only, the other person's avatar for a DM. */
+export function RoomGlyph({
+  kind,
+  isPrivate = false,
+  dmUserId,
+  isAgent = false,
   className,
 }: {
-  channel: Pick<Channel, "channelType" | "id" | "visibility">;
+  kind: RoomGlyphKind;
+  isPrivate?: boolean;
+  /** The other member of a DM. */
+  dmUserId?: string | null;
+  isAgent?: boolean;
   className?: string;
 }) {
-  const projectHome = useIsProjectHomeChannel(channel.id);
+  if (kind === "dm" && dmUserId) {
+    return (
+      <span className={cn("relative flex size-5 shrink-0", className)}>
+        <UserAvatar userId={dmUserId} size="sm" className="size-5!" />
+        {isAgent ? (
+          <span
+            role="img"
+            aria-label="Agent"
+            className="absolute -right-0.5 -bottom-0.5 size-2 rounded-xs bg-actor-agent ring-2 ring-sidebar"
+          />
+        ) : null}
+      </span>
+    );
+  }
   const iconClass = cn("size-4 shrink-0", className);
-
-  if (projectHome) {
-    return <ProjectChannelIcon className={iconClass} />;
+  if (isPrivate) {
+    return <LockIcon className={iconClass} aria-label="Private" role="img" />;
   }
-  if (channel.visibility === "private") {
-    return <Lock className={iconClass} />;
-  }
-  if (channel.channelType === "forum") {
-    return <FileText className={iconClass} />;
-  }
-  return <Hash className={iconClass} />;
+  return <HashIcon className={iconClass} aria-hidden />;
 }

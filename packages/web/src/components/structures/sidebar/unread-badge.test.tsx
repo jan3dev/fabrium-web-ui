@@ -17,7 +17,7 @@ describe("<UnreadBadge>", () => {
     render(<UnreadBadge total={4} highlight={2} />);
     const badge = screen.getByText("4");
     expect(badge).toBeInTheDocument();
-    expect(badge.className).toMatch(/destructive|red|bg-red/i);
+    expect(badge.className).toMatch(/button-primary-background/);
   });
 
   it("caps display at 99+", () => {

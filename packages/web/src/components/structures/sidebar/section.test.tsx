@@ -10,7 +10,8 @@ describe("<Section>", () => {
         <div>row</div>
       </Section>,
     );
-    expect(screen.getByRole("heading", { name: "Rooms" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Rooms" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /toggle Rooms section/i })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("button", { name: "+" })).toBeInTheDocument();
     expect(screen.getByText("row")).toBeInTheDocument();
   });
