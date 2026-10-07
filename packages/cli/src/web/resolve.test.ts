@@ -1,78 +1,56 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ensureWebRoot, webSourcePackage } from './resolve.js'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { resolveWebRoot, webPackageDir } from "./resolve.js";
 
-let root: string
+let root: string;
+let cliRoot: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'zooid-resolve-'))
-})
+  root = mkdtempSync(join(tmpdir(), "zooid-resolve-"));
+  cliRoot = join(root, "packages", "cli");
+  mkdirSync(cliRoot, { recursive: true });
+});
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true })
-  delete process.env.ZOOID_DEV_WEB_ROOT_OVERRIDE
-})
+  rmSync(root, { recursive: true, force: true });
+  delete process.env.ZOOID_DEV_WEB_ROOT_OVERRIDE;
+});
 
-function makeSibling(rootDir: string): { cliRoot: string; webDist: string } {
-  const cliRoot = join(rootDir, 'zooid', 'packages', 'cli')
-  mkdirSync(cliRoot, { recursive: true })
-  const webPkg = join(rootDir, 'zooid-clients', 'packages', 'web')
-  const webDist = join(webPkg, 'dist')
-  mkdirSync(webDist, { recursive: true })
-  writeFileSync(join(webPkg, 'package.json'), '{"name":"@zooid/web"}')
-  writeFileSync(join(webDist, 'index.html'), '<html/>')
-  return { cliRoot, webDist }
+function buildWeb(): string {
+  const dist = join(root, "packages", "web", "dist");
+  mkdirSync(dist, { recursive: true });
+  writeFileSync(join(dist, "index.html"), "<html/>");
+  return dist;
 }
 
-describe('ensureWebRoot', () => {
-  it('env override wins over everything and skips the fetch', async () => {
-    const { cliRoot } = makeSibling(root)
-    const override = join(root, 'override')
-    mkdirSync(override, { recursive: true })
-    writeFileSync(join(override, 'index.html'), '<html/>')
-    process.env.ZOOID_DEV_WEB_ROOT_OVERRIDE = override
-    const fetchBundle = vi.fn()
-    const out = await ensureWebRoot({ cliRoot, cacheDir: join(root, 'cache'), version: '0.1.0', fetchBundle })
-    expect(out).toBe(override)
-    expect(fetchBundle).not.toHaveBeenCalled()
-  })
+describe("resolveWebRoot", () => {
+  it("env override wins over the in-repo dist", () => {
+    buildWeb();
+    const override = join(root, "override");
+    mkdirSync(override, { recursive: true });
+    writeFileSync(join(override, "index.html"), "<html/>");
+    process.env.ZOOID_DEV_WEB_ROOT_OVERRIDE = override;
+    expect(resolveWebRoot(cliRoot)).toBe(override);
+  });
 
-  it('prefers the monorepo sibling dist over the cache (contributor path)', async () => {
-    const { cliRoot, webDist } = makeSibling(root)
-    const fetchBundle = vi.fn()
-    const out = await ensureWebRoot({ cliRoot, cacheDir: join(root, 'cache'), version: '0.1.0', fetchBundle })
-    expect(out).toBe(webDist)
-    expect(fetchBundle).not.toHaveBeenCalled()
-  })
+  it("serves packages/web/dist from the repo", () => {
+    const dist = buildWeb();
+    expect(resolveWebRoot(cliRoot)).toBe(dist);
+  });
 
-  it('falls back to fetchBundle outside the monorepo (installed-package path)', async () => {
-    const cliRoot = join(root, 'lonely', 'cli')
-    mkdirSync(cliRoot, { recursive: true })
-    const cached = join(root, 'cache', '0.1.0')
-    const fetchBundle = vi.fn(async () => cached)
-    const out = await ensureWebRoot({ cliRoot, cacheDir: join(root, 'cache'), version: '0.1.0', fetchBundle })
-    expect(out).toBe(cached)
-    expect(fetchBundle).toHaveBeenCalledWith(
-      expect.objectContaining({ version: '0.1.0', cacheDir: join(root, 'cache') }),
-    )
-  })
+  it("ignores an override without index.html", () => {
+    const dist = buildWeb();
+    process.env.ZOOID_DEV_WEB_ROOT_OVERRIDE = join(root, "missing");
+    expect(resolveWebRoot(cliRoot)).toBe(dist);
+  });
 
-  it('throws an actionable error when no version pin is available outside the monorepo', async () => {
-    const cliRoot = join(root, 'lonely', 'cli')
-    mkdirSync(cliRoot, { recursive: true })
-    await expect(
-      ensureWebRoot({ cliRoot, cacheDir: join(root, 'cache'), version: undefined, fetchBundle: vi.fn() }),
-    ).rejects.toThrow(/webVersion/)
-  })
-})
+  it("tells the user to build when dist is missing", () => {
+    expect(() => resolveWebRoot(cliRoot)).toThrow("pnpm -C packages/web build");
+  });
+});
 
-describe('webSourcePackage', () => {
-  it('returns the source package dir when sibling zooid-clients/packages/web exists', () => {
-    const { cliRoot } = makeSibling(root)
-    expect(webSourcePackage(cliRoot)).toBe(join(root, 'zooid-clients', 'packages', 'web'))
-  })
-
-  it('returns null outside the monorepo', () => {
-    expect(webSourcePackage(root)).toBeNull()
-  })
-})
+describe("webPackageDir", () => {
+  it("is the sibling packages/web", () => {
+    expect(webPackageDir(cliRoot)).toBe(join(root, "packages", "web"));
+  });
+});

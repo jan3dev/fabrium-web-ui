@@ -1,0 +1,187 @@
+import { useEffect, useState } from "react";
+import { Outlet, useMatch } from "react-router-dom";
+import { UserAvatar } from "@/components/user-avatar";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { SettingsDialog } from "@/components/settings/settings-dialog";
+import { useNotifications } from "@/hooks/use-notifications";
+import { usePushSubscription } from "@/hooks/use-push-subscription";
+import { useClearRoomNotifications } from "@/hooks/use-clear-room-notifications";
+import { useServiceWorkerMessages } from "@/hooks/use-service-worker-messages";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
+import { MatrixClientPeg } from "../../client/peg";
+import { DEFAULT_WORKFORCE_SPACE } from "../../client/runtime-config";
+import { useActiveSpaceId } from "../../hooks/use-active-space-id";
+import { useJoinedSpaces } from "../../hooks/use-joined-spaces";
+import { useMatrixClient } from "../../hooks/use-matrix-client";
+import { useUserName } from "../../hooks/use-user-name";
+import { LeftPanel } from "./left-panel";
+import { RoomHeader } from "./room-header";
+import { RoomPanel } from "./room-panel";
+import type { Scope } from "./sidebar/scope";
+import { SpaceSwitcher } from "./sidebar/space-switcher";
+
+export interface LoggedInOutletContext {
+  spaceId: string | null;
+  activeScope: Scope;
+  setScope: (scope: Scope) => void;
+}
+
+export interface LoggedInViewProps {
+  pushGatewayUrl?: string;
+  vapidPublicKey?: string;
+  workforceSpace?: string;
+}
+
+export function LoggedInView({ pushGatewayUrl, vapidPublicKey, workforceSpace }: LoggedInViewProps = {}) {
+  const client = useMatrixClient();
+  const userId = client.getUserId() ?? "";
+  const myName = useUserName(userId);
+  const serverName = userId.split(":")[1] ?? userId;
+  const spaceLocalpart = workforceSpace ?? DEFAULT_WORKFORCE_SPACE;
+  const { ready: workforceSpaceReady, spaceId } = useActiveSpaceId(spaceLocalpart, serverName);
+  const joinedSpaces = useJoinedSpaces();
+  const [scope, setScope] = useState<Scope | null>(null);
+  const [rightPanel, setRightPanel] = useState<"home" | "people" | "notifications" | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const push = usePushSubscription({
+    push_gateway_url: pushGatewayUrl,
+    vapid_public_key: vapidPublicKey,
+  });
+  useNotifications(push.subscribed);
+  useServiceWorkerMessages();
+  const roomMatch = useMatch("/room/:roomId");
+  const roomId = roomMatch?.params.roomId ?? null;
+  useClearRoomNotifications(roomId);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const { persistent, reason } = await MatrixClientPeg.whenStoreReady();
+      if (cancelled) return;
+      if (!persistent) {
+        console.warn(
+          `[logged-in-view] starting sync without persistent storage${reason ? `: ${reason}` : ""}`,
+        );
+      }
+      // initialSyncLimit only applies when there is no saved sync to resume
+      // from; with IndexedDB warm we resume from the stored token instead.
+      client.startClient({ initialSyncLimit: 10 }).catch(() => {});
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
+  useEffect(() => {
+    if (scope) return;
+    if (spaceId) {
+      setScope({ kind: "space", spaceId });
+      return;
+    }
+    // Workforce space didn't resolve — if the user only belongs to one
+    // space, scope to it instead of stranding them on Home (ZNC008).
+    if (workforceSpaceReady && joinedSpaces.length === 1) {
+      setScope({ kind: "space", spaceId: joinedSpaces[0].roomId });
+    }
+  }, [spaceId, scope, workforceSpaceReady, joinedSpaces]);
+
+  const activeScope: Scope = scope ?? (spaceId ? { kind: "space", spaceId } : { kind: "home" });
+
+  const openPanel = (view: "home" | "people" | "notifications") =>
+    setRightPanel((p) => (p === view ? null : view));
+
+  return (
+    <SidebarProvider className="h-svh overflow-hidden">
+      <Sidebar collapsible="icon">
+        <SidebarHeader className="h-12 flex-row items-center border-b border-sidebar-border px-2">
+          <SpaceSwitcher scope={activeScope} onSelect={setScope} />
+        </SidebarHeader>
+        <SidebarContent>
+          <LeftPanel scope={activeScope} workforceSpaceId={spaceId} />
+        </SidebarContent>
+        <SidebarFooter className="border-t border-sidebar-border p-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                aria-label="User menu"
+                className="h-9 w-full justify-start gap-2 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
+              >
+                <UserAvatar userId={userId} size="sm" className="shrink-0" />
+                <span className="truncate text-sm font-medium group-data-[collapsible=icon]:hidden">
+                  {myName}
+                </span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" className="w-48">
+              <DropdownMenuItem disabled className="font-medium">
+                {myName}
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled className="text-xs text-muted-foreground">
+                {userId}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
+                Settings
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => void MatrixClientPeg.logout()}>
+                Log out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </SidebarFooter>
+      </Sidebar>
+      <SidebarInset data-testid="logged-in-view">
+        <header className="flex h-12 items-center gap-2 border-b border-border px-3">
+          <SidebarTrigger aria-label="Toggle sidebar" className="md:hidden" />
+          <div className="flex flex-1 min-w-0 items-center">
+            <RoomHeader
+              membersOpen={rightPanel === "people"}
+              onToggleMembers={() => openPanel("people")}
+              onOpenInfo={() => openPanel("home")}
+              onOpenMore={() => openPanel("home")}
+            />
+          </div>
+        </header>
+        <SettingsDialog
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          pushGatewayUrl={pushGatewayUrl}
+          vapidPublicKey={vapidPublicKey}
+        />
+        <main className="flex-1 min-h-0 overflow-hidden">
+          <div className="relative flex h-full min-h-0">
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <Outlet context={{ spaceId, activeScope, setScope } satisfies LoggedInOutletContext} />
+            </div>
+            {roomId && rightPanel && (
+              <RoomPanel
+                roomId={roomId}
+                spaceId={spaceId}
+                view={rightPanel}
+                onNavigate={setRightPanel}
+                onClose={() => setRightPanel(null)}
+              />
+            )}
+          </div>
+        </main>
+      </SidebarInset>
+    </SidebarProvider>
+  );
+}
