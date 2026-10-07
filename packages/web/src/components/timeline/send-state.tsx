@@ -1,5 +1,5 @@
 import type { MatrixEvent } from "matrix-js-sdk";
-import { TriangleAlertIcon } from "lucide-react";
+import { WarningIcon } from "@/components/icons";
 import { useMatrixClient } from "@/hooks/use-matrix-client";
 
 /** Short, human reason a send was rejected, from the error the SDK kept on the echo. */
@@ -30,7 +30,7 @@ export function SendFailure({
 }) {
   return (
     <div role="alert" className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-destructive">
-      <TriangleAlertIcon className="size-3.5 shrink-0" />
+      <WarningIcon className="size-3.5 shrink-0" />
       <span className="font-medium">Not sent</span>
       <span className="text-foreground/80">· {reason}</span>
       <span className="flex items-center gap-2 whitespace-nowrap">

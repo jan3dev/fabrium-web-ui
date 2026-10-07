@@ -1,4 +1,4 @@
-import { TriangleAlertIcon } from "lucide-react";
+import { WarningIcon } from "@/components/icons";
 import type { DecodedZooidEvent } from "../../events/zooid-events";
 
 type ErrorDecoded = Extract<DecodedZooidEvent, { kind: "error" }>;
@@ -17,7 +17,7 @@ export function ErrorTile({ decoded }: { decoded: ErrorDecoded }) {
   return (
     <div className="my-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm">
       <div className="flex items-start gap-2">
-        <TriangleAlertIcon className="mt-0.5 h-4 w-4 text-muted-foreground" />
+        <WarningIcon className="mt-0.5 h-4 w-4 text-muted-foreground" />
         <div className="flex-1">
           <div className="font-medium">{decoded.message}</div>
           {decoded.detail && (

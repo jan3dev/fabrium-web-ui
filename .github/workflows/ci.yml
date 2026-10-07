@@ -31,6 +31,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Web design guard
+        run: pnpm -C packages/web lint
+
       - name: Build
         run: pnpm build
 

@@ -8,7 +8,14 @@ Files derived from Buzz were modified. Each one carries a header naming its sour
 
 Derived files:
 
-- none yet
+- `src/lib/utils.ts` ← `desktop/src/shared/lib/cn.ts`
+- `src/components/ui/alert.tsx` ← `desktop/src/shared/ui/alert.tsx`
+- `src/components/ui/alert-dialog.tsx` ← `desktop/src/shared/ui/alert-dialog.tsx`
+- `src/components/ui/checkbox.tsx` ← `desktop/src/shared/ui/checkbox.tsx`
+- `src/components/ui/context-menu.tsx` ← `desktop/src/shared/ui/context-menu.tsx`
+- `src/components/ui/segmented-control.tsx` ← `desktop/src/shared/ui/segmented-control.tsx`
+- `src/components/ui/switch.tsx` ← `desktop/src/shared/ui/switch.tsx`
+- `src/components/ui/toggle.tsx` ← `desktop/src/shared/ui/toggle.tsx`
 
 ## Apache License 2.0
 

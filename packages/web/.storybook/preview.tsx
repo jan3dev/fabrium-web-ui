@@ -1,8 +1,6 @@
 import type { Preview } from "@storybook/react-vite";
-// Pull in the app's full Tailwind v4 layer + shadcn design tokens so stories
-// render with the real theme. The dark variant is class-based
-// (`@custom-variant dark (&:is(.dark *))`), so the decorator wraps stories in a
-// `.dark` element to exercise dark-mode styles.
+import { TooltipProvider } from "../src/components/ui/tooltip";
+// The app's full Tailwind layer and design tokens, so stories render with the real theme.
 import "../src/index.css";
 
 const preview: Preview = {
@@ -15,7 +13,7 @@ const preview: Preview = {
   globalTypes: {
     theme: {
       description: "App theme",
-      defaultValue: "light",
+      defaultValue: "dark",
       toolbar: {
         title: "Theme",
         icon: "circlehollow",
@@ -28,14 +26,18 @@ const preview: Preview = {
     },
   },
   decorators: [
+    // Themes switch on data-theme, like the app. Set on <html> so portalled
+    // content (menus, dialogs, tooltips) follows too.
     (Story, context) => {
-      const dark = context.globals.theme === "dark";
+      const theme = context.globals.theme === "light" ? "light" : "dark";
+      document.documentElement.dataset.theme = theme;
+      document.documentElement.style.colorScheme = theme;
       return (
-        <div className={dark ? "dark" : ""}>
-          <div className="bg-background text-foreground p-6">
+        <TooltipProvider>
+          <div className="bg-background p-6 text-foreground">
             <Story />
           </div>
-        </div>
+        </TooltipProvider>
       );
     },
   ],

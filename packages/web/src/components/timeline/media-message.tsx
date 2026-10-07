@@ -1,5 +1,5 @@
 import type { MatrixEvent } from "matrix-js-sdk";
-import { Download, FileIcon } from "lucide-react";
+import { DownloadIcon, FileTextIcon } from "@/components/icons";
 import { useEffect, useState } from "react";
 import { useMatrixClient } from "../../hooks/use-matrix-client";
 import { fetchAuthedMedia } from "../../lib/matrix/authed-media";
@@ -81,7 +81,7 @@ function DownloadButton({ mxcUrl, filename }: { mxcUrl: string; filename: string
       onClick={() => void handleDownload()}
       className="rounded p-1 hover:bg-muted text-muted-foreground hover:text-foreground"
     >
-      <Download className="h-4 w-4" />
+      <DownloadIcon className="h-4 w-4" />
     </button>
   );
 }
@@ -97,7 +97,7 @@ function FileTile({
 }) {
   return (
     <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
-      <FileIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <FileTextIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
       <span className="flex-1 truncate font-medium">{filename}</span>
       {info?.size !== undefined && (
         <span className="shrink-0 text-xs text-muted-foreground">{humanSize(info.size)}</span>

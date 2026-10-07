@@ -2,31 +2,36 @@
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 
-import { cn } from "@/shared/lib/cn";
+import { cn } from "@/lib/utils";
 
 const alertVariants = cva(
-  "relative w-full rounded-2xl px-3.5 py-2.5 text-xs text-foreground",
+  "relative flex w-full gap-3 rounded-card border p-4 text-body2 text-text-secondary [&>svg]:mt-0.5 [&>svg]:size-4 [&>svg]:shrink-0",
   {
     variants: {
-      variant: {
-        default: "bg-muted/40",
-        destructive: "bg-destructive/10",
+      tone: {
+        info: "border-surface-border-primary bg-surface-secondary [&>svg]:text-text-secondary",
+        success: "border-accent-success bg-accent-success-transparent [&>svg]:text-accent-success",
+        warning: "border-accent-warning bg-accent-warning-transparent [&>svg]:text-accent-warning",
+        danger: "border-accent-danger bg-accent-danger-transparent [&>svg]:text-accent-danger",
       },
     },
     defaultVariants: {
-      variant: "default",
+      tone: "info",
     },
   },
 );
 
+// Danger and warning are announced (role="alert"); info and success are not, so
+// they don't interrupt. A caller-supplied role wins.
 const Alert = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants>
->(({ className, variant, ...props }, ref) => (
+>(({ className, tone, role, ...props }, ref) => (
   <div
-    className={cn(alertVariants({ variant }), className)}
+    className={cn(alertVariants({ tone }), className)}
+    data-tone={tone ?? "info"}
     ref={ref}
-    role="alert"
+    role={role ?? (tone === "danger" || tone === "warning" ? "alert" : undefined)}
     {...props}
   />
 ));
@@ -37,7 +42,7 @@ const AlertTitle = React.forwardRef<
   React.HTMLAttributes<HTMLHeadingElement>
 >(({ className, ...props }, ref) => (
   <h5
-    className={cn("mb-1 font-medium leading-4 tracking-tight", className)}
+    className={cn("mb-1 font-sans text-body2 font-semibold text-text-primary", className)}
     ref={ref}
     {...props}
   />
@@ -48,7 +53,7 @@ const AlertDescription = React.forwardRef<
   HTMLParagraphElement,
   React.HTMLAttributes<HTMLParagraphElement>
 >(({ className, ...props }, ref) => (
-  <div className={cn("text-xs leading-5", className)} ref={ref} {...props} />
+  <div className={cn("text-body2", className)} ref={ref} {...props} />
 ));
 AlertDescription.displayName = "AlertDescription";
 

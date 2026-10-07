@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { BRAND_COLORS } from "@/components/brand/colors";
 
-type Theme = "dark" | "light" | "system";
+export type Theme = "dark" | "light" | "system";
 
 interface ThemeProviderState {
   theme: Theme;
@@ -8,46 +9,62 @@ interface ThemeProviderState {
 }
 
 const ThemeContext = createContext<ThemeProviderState>({
-  theme: "system",
+  theme: "dark",
   setTheme: () => null,
 });
 
-const STORAGE_KEY = "zoon-ui-theme";
+// Also read by the bootstrap script in index.html, which applies it before first paint.
+export const THEME_STORAGE_KEY = "fabrium:theme:v1";
+
+function readStoredTheme(): Theme | null {
+  try {
+    const value = localStorage.getItem(THEME_STORAGE_KEY);
+    return value === "dark" || value === "light" || value === "system" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyTheme(resolved: "dark" | "light") {
+  const root = document.documentElement;
+  root.dataset.theme = resolved;
+  root.style.colorScheme = resolved;
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute("content", resolved === "dark" ? BRAND_COLORS.background : BRAND_COLORS.foreground);
+}
 
 export function ThemeProvider({
   children,
-  defaultTheme = "system",
+  defaultTheme = "dark",
 }: {
   children: ReactNode;
   defaultTheme?: Theme;
 }) {
-  const [theme, setThemeState] = useState<Theme>(
-    () => (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? defaultTheme,
-  );
+  const [theme, setThemeState] = useState<Theme>(() => readStoredTheme() ?? defaultTheme);
 
   useEffect(() => {
-    const root = window.document.documentElement;
-    root.classList.remove("light", "dark");
-    if (theme === "system") {
-      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
-      root.classList.add(systemTheme);
-    } else {
-      root.classList.add(theme);
+    if (theme !== "system") {
+      applyTheme(theme);
+      return;
     }
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => applyTheme(query.matches ? "dark" : "light");
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
   }, [theme]);
 
   const setTheme = (next: Theme) => {
-    localStorage.setItem(STORAGE_KEY, next);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // Storage blocked: the choice still applies for this session.
+    }
     setThemeState(next);
   };
 
-  return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
+  return <ThemeContext.Provider value={{ theme, setTheme }}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme(): ThemeProviderState {

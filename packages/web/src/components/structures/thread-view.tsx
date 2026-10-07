@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeftIcon } from "@/components/icons";
 import { useThread } from "../../hooks/use-timeline";
 import { useLoadMoreThread } from "../../hooks/use-load-more-thread";
 import { EventTile } from "../timeline/event-tile";
@@ -109,7 +109,7 @@ export function ThreadView({
           aria-label="Back to room"
           className="flex items-center gap-1 rounded px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeftIcon className="h-4 w-4" />
           Back
         </button>
         <span className="text-sm font-medium">

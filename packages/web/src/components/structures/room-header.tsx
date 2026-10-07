@@ -1,4 +1,4 @@
-import { BellOff, Ellipsis, Globe, Lock, Star, Users } from "lucide-react";
+import { BellOffIcon, EllipsisIcon, GlobeIcon, LockIcon, StarIcon, UsersIcon } from "@/components/icons";
 import { useSyncExternalStore } from "react";
 import { useMatch } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -16,9 +16,9 @@ import { useRoomFavorite } from "../../hooks/use-room-favorite";
 import { useRoomNotifState } from "../../hooks/use-room-notif-state";
 
 const JOIN_RULE_INDICATOR = {
-  invite: { Icon: Lock, label: "Invite only" },
-  restricted: { Icon: Users, label: "Space members" },
-  public: { Icon: Globe, label: "Anyone can join" },
+  invite: { Icon: LockIcon, label: "Invite only" },
+  restricted: { Icon: UsersIcon, label: "Space members" },
+  public: { Icon: GlobeIcon, label: "Anyone can join" },
 } as const;
 
 interface RoomHeaderProps {
@@ -56,8 +56,8 @@ export function RoomHeader({ membersOpen, onToggleMembers, onOpenInfo, onOpenMor
         onClick={() => void toggleFavorite()}
         className="size-6 text-muted-foreground hover:text-foreground"
       >
-        <Star
-          className={`size-3.5 ${isFavorite ? "fill-current text-amber-500" : ""}`}
+        <StarIcon
+          className={`size-3.5 ${isFavorite ? "fill-current text-accent-warning" : ""}`}
         />
       </Button>
       <Button
@@ -86,7 +86,7 @@ export function RoomHeader({ membersOpen, onToggleMembers, onOpenInfo, onOpenMor
           aria-label="Muted"
           className="flex size-5 items-center justify-center text-muted-foreground"
         >
-          <BellOff className="size-3.5" />
+          <BellOffIcon className="size-3.5" />
         </span>
       )}
       <div className="flex-1" />
@@ -100,7 +100,7 @@ export function RoomHeader({ membersOpen, onToggleMembers, onOpenInfo, onOpenMor
         className="size-6 text-muted-foreground"
         onClick={onOpenMore}
       >
-        <Ellipsis className="size-3.5" />
+        <EllipsisIcon className="size-3.5" />
       </Button>
     </>
   );

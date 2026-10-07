@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { X } from "lucide-react";
+import { CloseIcon } from "@/components/icons";
 import type { Room } from "matrix-js-sdk";
 import { Command, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
@@ -56,7 +56,7 @@ export function RoomPicker({ rooms, value, onChange }: RoomPickerProps) {
                   onClick={clear}
                   className="shrink-0 rounded-sm p-0.5 hover:bg-background/60"
                 >
-                  <X className="h-3 w-3" />
+                  <CloseIcon className="h-3 w-3" />
                 </button>
               </span>
             ) : (

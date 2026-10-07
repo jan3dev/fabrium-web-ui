@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FileIcon, X } from "lucide-react";
+import { CloseIcon, FileTextIcon } from "@/components/icons";
 import { MAX_UPLOAD_BYTES } from "../../hooks/use-media-upload";
 
 /** Matches the per-turn pending-media cap the daemon enforces (ZOD057). */
@@ -111,7 +111,7 @@ function AttachmentChip({ attachment, progress, onRemove }: ChipProps) {
         {previewUrl ? (
           <img src={previewUrl} alt="" className="h-full w-full object-cover" />
         ) : (
-          <FileIcon className="h-4 w-4 text-muted-foreground" />
+          <FileTextIcon className="h-4 w-4 text-muted-foreground" />
         )}
       </span>
       <span className="flex min-w-0 flex-col leading-tight">
@@ -126,7 +126,7 @@ function AttachmentChip({ attachment, progress, onRemove }: ChipProps) {
         onClick={() => onRemove(id)}
         className="ml-auto shrink-0 self-start rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
       >
-        <X className="h-3 w-3" />
+        <CloseIcon className="h-3 w-3" />
       </button>
       {uploading && (
         <span

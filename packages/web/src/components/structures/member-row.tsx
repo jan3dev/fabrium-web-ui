@@ -1,4 +1,4 @@
-import { Ban, DoorOpen, MoreHorizontal, X } from "lucide-react";
+import { BanIcon, CloseIcon, DoorOpenIcon, EllipsisIcon } from "@/components/icons";
 import { useState } from "react";
 import { UserAvatar } from "@/components/user-avatar";
 import { MatrixClientPeg } from "../../client/peg";
@@ -69,7 +69,7 @@ export function MemberRow({
             className="size-6 text-muted-foreground hover:text-foreground"
             onClick={() => void onCancel()}
           >
-            <X className="size-3.5" />
+            <CloseIcon className="size-3.5" />
           </Button>
         )}
       </>
@@ -164,7 +164,7 @@ function MemberActions({
             aria-label="Member actions"
             className="size-6 text-muted-foreground hover:text-foreground"
           >
-            <MoreHorizontal className="size-3.5" />
+            <EllipsisIcon className="size-3.5" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -194,13 +194,13 @@ function MemberActions({
           {editable && (canKick || canBan) && <DropdownMenuSeparator />}
           {canKick && (
             <DropdownMenuItem variant="destructive" onSelect={() => setDialog("kick")}>
-              <DoorOpen className="size-3.5" />
+              <DoorOpenIcon className="size-3.5" />
               Kick
             </DropdownMenuItem>
           )}
           {canBan && (
             <DropdownMenuItem variant="destructive" onSelect={() => setDialog("ban")}>
-              <Ban className="size-3.5" />
+              <BanIcon className="size-3.5" />
               Ban
             </DropdownMenuItem>
           )}

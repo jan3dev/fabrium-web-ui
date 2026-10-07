@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { MoreHorizontal } from "lucide-react";
+import { EllipsisIcon } from "@/components/icons";
 import { type Room } from "matrix-js-sdk";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -43,7 +43,7 @@ export function RoomRow({ room }: RoomRowProps) {
               aria-label="room actions"
               className="absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus:opacity-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100"
             >
-              <MoreHorizontal className="size-3" />
+              <EllipsisIcon className="size-3" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent>

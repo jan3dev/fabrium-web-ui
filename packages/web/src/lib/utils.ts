@@ -2,15 +2,18 @@
 import { clsx, type ClassValue } from "clsx";
 import { extendTailwindMerge } from "tailwind-merge";
 
+// Teach tailwind-merge the design-system scales. Without this, `text-body2` reads
+// as a text colour and a later `text-text-primary` would drop it.
 const mergeClassNames = extendTailwindMerge({
   extend: {
     classGroups: {
       "font-size": [
         {
-          text: ["message", "message-timestamp"],
+          text: ["h1", "h2", "h3", "h4", "h5", "subtitle", "body1", "body2", "caption1", "caption2"],
         },
       ],
-      rounded: ["rounded-squircle"],
+      rounded: [{ rounded: ["utility", "card", "modal", "pill"] }],
+      shadow: [{ shadow: ["button", "surface", "modal"] }],
     },
   },
 });

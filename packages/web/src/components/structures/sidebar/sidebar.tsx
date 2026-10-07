@@ -1,4 +1,4 @@
-import { Flag, Plus } from "lucide-react";
+import { FlagIcon, PlusIcon } from "@/components/icons";
 import { type Room } from "matrix-js-sdk";
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -93,7 +93,7 @@ export function Sidebar({ scope, workforceSpaceId }: SidebarProps) {
               pathname === "/" ? "bg-sidebar-accent text-foreground" : "text-muted-foreground"
             }`}
           >
-            <Flag className="size-4 shrink-0" aria-hidden />
+            <FlagIcon className="size-4 shrink-0" aria-hidden />
             Lobby
           </Link>
         ) : null}
@@ -122,7 +122,7 @@ export function Sidebar({ scope, workforceSpaceId }: SidebarProps) {
                       onClick={() => setCreateRoomOpen(true)}
                       className={ICON_BTN_CLS}
                     >
-                      <Plus className="size-3" />
+                      <PlusIcon className="size-3" />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent>Create room</TooltipContent>
@@ -151,7 +151,7 @@ export function Sidebar({ scope, workforceSpaceId }: SidebarProps) {
                 onClick={() => setCreateDmOpen(true)}
                 className={ICON_BTN_CLS}
               >
-                <Plus className="size-3" />
+                <PlusIcon className="size-3" />
               </button>
             </div>
           }

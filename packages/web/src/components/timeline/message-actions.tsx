@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { MatrixClient } from "matrix-js-sdk";
-import { Copy, Forward, Link2, MoreHorizontal, Pencil, Quote, Trash2 } from "lucide-react";
+import { CopyIcon, EllipsisIcon, ForwardIcon, LinkIcon, PencilIcon, QuoteIcon, TrashIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,7 +23,7 @@ const BAR_BUTTON =
 export function ShareButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button type="button" aria-label={label} onClick={onClick} className={BAR_BUTTON}>
-      <Forward className="size-4" />
+      <ForwardIcon className="size-4" />
     </button>
   );
 }
@@ -45,32 +45,32 @@ export function MessageMoreMenu(p: MessageMoreMenuProps) {
     <DropdownMenu open={p.open} onOpenChange={p.onOpenChange} modal={false}>
       <DropdownMenuTrigger asChild>
         <button type="button" aria-label="More actions" className={BAR_BUTTON}>
-          <MoreHorizontal className="size-4" />
+          <EllipsisIcon className="size-4" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onSelect={p.onCopyLink}>
-          <Link2 />
+          <LinkIcon />
           Copy link
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={p.onCopyText}>
-          <Copy />
+          <CopyIcon />
           Copy text
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={p.onQuote}>
-          <Quote />
+          <QuoteIcon />
           Quote
         </DropdownMenuItem>
         {(p.onEdit || p.onDelete) && <DropdownMenuSeparator />}
         {p.onEdit && (
           <DropdownMenuItem onSelect={p.onEdit}>
-            <Pencil />
+            <PencilIcon />
             Edit
           </DropdownMenuItem>
         )}
         {p.onDelete && (
           <DropdownMenuItem variant="destructive" onSelect={p.onDelete}>
-            <Trash2 />
+            <TrashIcon />
             Delete
           </DropdownMenuItem>
         )}

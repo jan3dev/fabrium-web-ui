@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { EventStatus, type MatrixEvent } from "matrix-js-sdk";
-import { MessageSquare, TriangleAlertIcon } from "lucide-react";
+import { CommentIcon, WarningIcon } from "@/components/icons";
 import { toast } from "sonner";
 import { senderColor, splitMentions } from "@/lib/sender";
 import { splitUrls } from "@/lib/autolink";
@@ -101,7 +101,7 @@ function InlineReply({ event }: { event: MatrixEvent }) {
     const message = typeof c.message === "string" ? c.message : "Agent error";
     return (
       <div className="flex items-center gap-1.5 text-sm leading-5 text-muted-foreground">
-        <TriangleAlertIcon className="h-3.5 w-3.5 shrink-0" />
+        <WarningIcon className="h-3.5 w-3.5 shrink-0" />
         <span className="shrink-0 font-semibold" style={{ color: senderColor(sender) }}>
           {name}
         </span>
@@ -275,7 +275,7 @@ export function TextMessage({
             onClick={() => onReplyInThread?.(eventId)}
             className="inline-flex items-center rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            <MessageSquare className="size-4" />
+            <CommentIcon className="size-4" />
           </button>
         )}
         <ShareButton label={isThreadRoot ? "Share thread" : "Share message"} onClick={() => setSharing(true)} />

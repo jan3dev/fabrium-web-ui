@@ -20,9 +20,9 @@ export function DiffView({ diff }: { diff: DiffBlock }) {
             data-diff-row={r.type}
             className={
               r.type === "add"
-                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                ? "bg-accent-success-transparent text-accent-success"
                 : r.type === "del"
-                  ? "bg-destructive/10 text-destructive"
+                  ? "bg-accent-danger-transparent text-accent-danger"
                   : "text-muted-foreground"
             }
           >

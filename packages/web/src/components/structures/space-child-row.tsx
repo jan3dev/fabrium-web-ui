@@ -32,7 +32,7 @@ export function SpaceChildRow({
         <p className="truncate text-sm font-medium">
           {name}
           {kind === "space" && (
-            <Badge variant="outline" className="ml-2">
+            <Badge tone="outline" className="ml-2">
               Space
             </Badge>
           )}

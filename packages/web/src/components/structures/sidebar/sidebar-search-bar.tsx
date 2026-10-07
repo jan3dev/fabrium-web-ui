@@ -1,4 +1,4 @@
-import { Search } from "lucide-react";
+import { SearchIcon } from "@/components/icons";
 import { Link } from "react-router-dom";
 import { useGlobalSearchEnabled } from "../../../client/feature-flags";
 
@@ -11,7 +11,7 @@ export function SidebarSearchBar() {
       to="/search"
       className="flex h-8 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
     >
-      <Search className="size-4 shrink-0" aria-hidden />
+      <SearchIcon className="size-4 shrink-0" aria-hidden />
       Search
     </Link>
   );

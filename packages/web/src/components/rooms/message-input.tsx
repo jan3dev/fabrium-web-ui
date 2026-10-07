@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ImageUp, Paperclip, SendHorizontal } from "lucide-react";
+import { ImageIcon, PaperclipIcon, SendIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { displayNameOf, expandMentions, nameOfMember, senderColor } from "@/lib/sender";
 import { listSlashCommands, type SlashCommandMeta } from "@/lib/slash-commands";
@@ -367,7 +367,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     >
       {dragging && (
         <div className="pointer-events-none absolute inset-1 z-10 flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-ring bg-background/90 text-sm text-muted-foreground">
-          <ImageUp className="h-5 w-5" />
+          <ImageIcon className="h-5 w-5" />
           <span>Drop to attach — up to {MAX_ATTACHMENTS} files, 0.5 MB each</span>
         </div>
       )}
@@ -443,7 +443,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
               onClick={() => attachInputRef.current?.click()}
               className="ml-1 shrink-0 self-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              <Paperclip className="h-4 w-4" />
+              <PaperclipIcon className="h-4 w-4" />
             </button>
           </>
         )}
@@ -483,7 +483,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
             aria-label="Send message"
             className="shrink-0 self-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
           >
-            <SendHorizontal className="h-4 w-4" />
+            <SendIcon className="h-4 w-4" />
           </button>
         )}
       </div>

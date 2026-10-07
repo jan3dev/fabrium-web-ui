@@ -94,7 +94,7 @@ export function CreateDmDialog({ open, spaceId, onOpenChange }: CreateDmDialogPr
           </DialogDescription>
         </DialogHeader>
         {!ready && (
-          <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p className="rounded-utility border border-accent-warning bg-accent-warning-transparent px-3 py-2 text-caption1 text-text-primary">
             Agent list unavailable — the picker may include agents until the workforce roster
             publishes.
           </p>

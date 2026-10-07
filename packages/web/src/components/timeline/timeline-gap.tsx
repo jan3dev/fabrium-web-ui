@@ -1,4 +1,4 @@
-import { Loader2, MoreHorizontal } from "lucide-react";
+import { EllipsisIcon, LoaderIcon } from "@/components/icons";
 
 /**
  * Marks a hole in the timeline where messages exist on the server but were
@@ -29,9 +29,9 @@ export function TimelineGap({
         className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground hover:border-solid hover:bg-muted hover:text-foreground disabled:opacity-50"
       >
         {loading ? (
-          <Loader2 className="h-3 w-3 animate-spin" />
+          <LoaderIcon className="h-3 w-3 animate-spin" />
         ) : (
-          <MoreHorizontal className="h-3 w-3" />
+          <EllipsisIcon className="h-3 w-3" />
         )}
         {loading ? "Loading…" : "Load messages"}
       </button>

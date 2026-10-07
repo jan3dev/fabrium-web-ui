@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react";
+import { LoaderIcon } from "@/components/icons";
 
 export function LoadMoreButton({
   loading,
@@ -18,7 +18,7 @@ export function LoadMoreButton({
         disabled={loading || !hasMore}
         className="flex items-center gap-1.5 rounded-md px-3 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
       >
-        {loading && <Loader2 className="h-3 w-3 animate-spin" />}
+        {loading && <LoaderIcon className="h-3 w-3 animate-spin" />}
         {loading ? "Loading…" : "Load more"}
       </button>
     </div>

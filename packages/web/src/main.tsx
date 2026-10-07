@@ -37,7 +37,7 @@ async function bootstrap() {
   }
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <ThemeProvider defaultTheme="system">
+      <ThemeProvider>
         <App config={config} />
       </ThemeProvider>
     </StrictMode>,
@@ -49,7 +49,7 @@ bootstrap().catch((e) => {
   console.error("Bootstrap failed:", e);
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <ThemeProvider defaultTheme="system">
+      <ThemeProvider>
         <BootstrapError error={e} />
       </ThemeProvider>
     </StrictMode>,

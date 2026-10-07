@@ -1,4 +1,4 @@
-import { Pencil } from "lucide-react";
+import { PencilIcon } from "@/components/icons";
 import { MatrixClientPeg } from "../../client/peg";
 import { useMyPowerLevel } from "../../hooks/use-my-power-level";
 import { useRoomTopic } from "../../hooks/use-room-topic";
@@ -40,7 +40,7 @@ export function RoomBanner({
             onClick={onEdit}
             className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            <Pencil className="size-4" aria-hidden />
+            <PencilIcon className="size-4" aria-hidden />
           </button>
         )}
       </div>

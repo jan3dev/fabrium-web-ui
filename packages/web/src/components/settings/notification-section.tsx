@@ -188,7 +188,7 @@ export function NotificationSectionView({
         {keywords.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {keywords.map((kw) => (
-              <Badge key={kw} variant="secondary" className="gap-1">
+              <Badge key={kw} className="gap-1">
                 {kw}
                 <button
                   type="button"

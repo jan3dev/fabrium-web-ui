@@ -1,7 +1,7 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/shared/ui/segmented-control.tsx. Modified.
 import * as React from "react";
 
-import { cn } from "@/shared/lib/cn";
+import { cn } from "@/lib/utils";
 
 type SegmentOption<Value extends string> = {
   value: Value;
@@ -161,7 +161,7 @@ export function SegmentedControl<Value extends string>({
   return (
     <fieldset
       className={cn(
-        "relative isolate h-8 max-w-full shrink-0 overflow-hidden rounded-md bg-muted/45 p-0.5",
+        "relative isolate h-8 max-w-full shrink-0 overflow-hidden rounded-utility border border-surface-border-primary bg-surface-secondary p-0.5",
         SIZE_CLASSES[size],
         onPreviewChange && "touch-none select-none cursor-ew-resize",
         "disabled:pointer-events-none disabled:opacity-50",
@@ -181,7 +181,7 @@ export function SegmentedControl<Value extends string>({
       <div
         aria-hidden="true"
         className={cn(
-          "absolute bottom-0.5 left-0.5 top-0.5 z-0 rounded-md bg-background shadow-sm transition-transform duration-200 ease-in-out motion-reduce:transition-none",
+          "absolute bottom-0.5 left-0.5 top-0.5 z-0 rounded-[6px] bg-surface-primary shadow-button transition-transform duration-(--duration-base) ease-standard motion-reduce:transition-none",
           previewValue && "duration-0",
         )}
         data-testid={indicatorTestId ?? `${testId}-indicator`}
@@ -197,10 +197,10 @@ export function SegmentedControl<Value extends string>({
           <button
             aria-pressed={value === optionValue}
             className={cn(
-              "relative z-10 flex h-full items-center justify-center gap-1.5 rounded-md bg-transparent px-2.5 text-xs font-medium transition-colors duration-150 ease-out focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
+              "relative z-10 flex h-full cursor-pointer items-center justify-center gap-1.5 rounded-[6px] bg-transparent px-2.5 text-caption1 font-medium transition-colors duration-(--duration-fast) ease-standard focus-visible:outline-offset-0 motion-reduce:transition-none",
               displayedValue === optionValue
-                ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground",
+                ? "text-text-primary"
+                : "text-text-secondary hover:text-text-primary",
             )}
             data-testid={`${optionTestIdPrefix}-${optionValue}`}
             key={optionValue}
@@ -213,7 +213,7 @@ export function SegmentedControl<Value extends string>({
             }}
             type="button"
           >
-            {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
+            {Icon ? <Icon className="size-3.5" /> : null}
             {label}
           </button>
         ))}

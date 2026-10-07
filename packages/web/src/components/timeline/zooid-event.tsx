@@ -1,15 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  AlertTriangle,
-  Check,
-  ChevronRight,
-  FileEdit,
-  FileSearch,
-  Globe,
-  Loader2,
-  Terminal,
-  X,
-} from "lucide-react";
+import { CheckIcon, ChevronRightIcon, CloseIcon, FileEditIcon, FileSearchIcon, GlobeIcon, LoaderIcon, TerminalIcon, WarningIcon } from "@/components/icons";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import type { DecodedZooidEvent } from "../../events/zooid-events";
@@ -99,36 +89,36 @@ function Divider({ text }: { text: string }) {
 function toolIcon(kind: string | undefined) {
   switch (kind) {
     case "edit":
-      return FileEdit;
+      return FileEditIcon;
     case "read":
-      return FileSearch;
+      return FileSearchIcon;
     case "fetch":
-      return Globe;
+      return GlobeIcon;
     case "execute":
-      return Terminal;
+      return TerminalIcon;
     default:
-      return Terminal;
+      return TerminalIcon;
   }
 }
 
 function StatusIndicator({ status }: { status: string | null }) {
   if (!status) return null;
   if (status === "completed") {
-    return <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />;
+    return <CheckIcon className="h-3.5 w-3.5 shrink-0 text-accent-success" />;
   }
   if (status === "failed") {
-    return <X className="h-3.5 w-3.5 shrink-0 text-destructive" />;
+    return <CloseIcon className="h-3.5 w-3.5 shrink-0 text-destructive" />;
   }
   if (status === "stalled") {
     return (
-      <AlertTriangle
-        className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+      <WarningIcon
+        className="h-3.5 w-3.5 shrink-0 text-accent-warning"
         aria-label="stalled"
       />
     );
   }
   if (status === "in_progress" || status === "pending") {
-    return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />;
+    return <LoaderIcon className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />;
   }
   return null;
 }
@@ -205,7 +195,7 @@ function ToolCallCard({
         )}
         <span className="ml-auto flex items-center gap-1.5">
           <StatusIndicator status={effectiveStatus} />
-          <ChevronRight
+          <ChevronRightIcon
             className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
           />
         </span>
@@ -213,7 +203,7 @@ function ToolCallCard({
       {open && (
         <div className="border-t border-border px-2.5 py-2 text-xs text-muted-foreground space-y-1">
           {stalled && (
-            <div className="rounded-sm bg-amber-500/10 px-2 py-1 text-amber-700 dark:text-amber-400">
+            <div className="rounded-utility bg-accent-warning-transparent px-2 py-1 text-accent-warning">
               No updates for over 5 minutes — the tool may be stuck. Try
               <code className="font-mono"> /interrupt</code> to cancel.
             </div>

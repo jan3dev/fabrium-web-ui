@@ -18,9 +18,9 @@ function avatarSeed(userId: string): string {
 }
 
 const PRESENCE_COLORS: Record<string, string> = {
-  online: "bg-green-400",
-  unavailable: "bg-yellow-400",
-  offline: "bg-zinc-500",
+  online: "bg-accent-success",
+  unavailable: "bg-accent-warning",
+  offline: "bg-text-tertiary",
 };
 
 /** The user's `mxc://` avatar, or null if they have none we know of yet. */

@@ -38,7 +38,7 @@ export function TypingIndicator({ typingUserIds: allTyping, awaitingUserIds = []
 
   return (
     <div className="h-5 px-3 text-xs text-muted-foreground leading-5">
-      {awaitingUserIds.length > 0 && <span className="text-amber-600 dark:text-amber-400">
+      {awaitingUserIds.length > 0 && <span className="text-accent-warning">
         {awaitingUserIds.map((id, index) => <span key={id}>{index > 0 ? ", " : ""}<TypingName userId={id} roomId={roomId} /></span>)}
         {awaitingUserIds.length === 1 ? " is awaiting your input" : " are awaiting your input"}
       </span>}

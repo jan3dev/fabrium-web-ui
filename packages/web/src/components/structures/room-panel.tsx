@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Bell, Globe, Lock, LogOut, Pencil, Star, Users, X } from "lucide-react";
+import { ArrowLeftIcon, BellIcon, CloseIcon, GlobeIcon, LockIcon, PencilIcon, SignOutIcon, StarIcon, UsersIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,9 +17,9 @@ import { RoomAvatar } from "../room-avatar";
 import { MemberPanel } from "./member-panel";
 
 const RULE_LABEL = {
-  invite: { Icon: Lock, text: "Invite only" },
-  restricted: { Icon: Users, text: "Space members" },
-  public: { Icon: Globe, text: "Anyone can join" },
+  invite: { Icon: LockIcon, text: "Invite only" },
+  restricted: { Icon: UsersIcon, text: "Space members" },
+  public: { Icon: GlobeIcon, text: "Anyone can join" },
 } as const;
 
 interface RoomPanelProps {
@@ -127,7 +127,7 @@ function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" |
                   aria-label="Edit name"
                   onClick={() => { setNameValue(roomName); setEditingName(true); }}
                 >
-                  <Pencil className="size-3" />
+                  <PencilIcon className="size-3" />
                 </Button>
               )}
             </div>
@@ -143,7 +143,7 @@ function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" |
           <span>{ruleText}{rule === "restricted" && spaceName ? ` · ${spaceName}` : ""}</span>
         </div>
         <div className={`${ROW} text-muted-foreground`}>
-          <Users className="size-4 shrink-0" />
+          <UsersIcon className="size-4 shrink-0" />
           <span>{memberCount} members</span>
         </div>
       </div>
@@ -176,7 +176,7 @@ function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" |
                 className={`${ACTION_ROW} text-muted-foreground`}
                 onClick={() => { setTopicValue(topic ?? ""); setEditingTopic(true); }}
               >
-                <Pencil className="size-4 shrink-0" />
+                <PencilIcon className="size-4 shrink-0" />
                 Edit topic
               </button>
             )}
@@ -193,7 +193,7 @@ function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" |
           className={ACTION_ROW}
           onClick={() => void toggleFavorite()}
         >
-          <Star className={`size-4 shrink-0 ${isFavorite ? "fill-current text-amber-500" : ""}`} />
+          <StarIcon className={`size-4 shrink-0 ${isFavorite ? "fill-current text-accent-warning" : ""}`} />
           {isFavorite ? "Remove from Favourites" : "Add to Favourites"}
         </button>
         <button
@@ -201,7 +201,7 @@ function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" |
           className={ACTION_ROW}
           onClick={() => onNavigate("people")}
         >
-          <Users className="size-4 shrink-0" />
+          <UsersIcon className="size-4 shrink-0" />
           People
         </button>
         <button
@@ -209,7 +209,7 @@ function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" |
           className={ACTION_ROW}
           onClick={() => onNavigate("notifications")}
         >
-          <Bell className="size-4 shrink-0" />
+          <BellIcon className="size-4 shrink-0" />
           Notifications
         </button>
       </div>
@@ -222,7 +222,7 @@ function HomeView({ roomId, onNavigate, onClose }: Omit<RoomPanelProps, "view" |
           className={`${ACTION_ROW} text-destructive hover:bg-destructive/10 hover:text-destructive`}
           onClick={() => void onLeave()}
         >
-          <LogOut className="size-4 shrink-0" />
+          <SignOutIcon className="size-4 shrink-0" />
           Leave room
         </button>
       </div>
@@ -237,7 +237,7 @@ function NotificationsView({ roomId, onNavigate }: { roomId: string; onNavigate:
     <div className="flex flex-col">
       <div className="flex h-10 items-center gap-1 px-2">
         <Button variant="ghost" size="icon" aria-label="Back" onClick={() => onNavigate("home")}>
-          <ArrowLeft className="size-4" />
+          <ArrowLeftIcon className="size-4" />
         </Button>
         <h2 className="text-sm font-semibold">Notifications</h2>
       </div>
@@ -277,7 +277,7 @@ function PeopleView({
     <div className="flex flex-col">
       <div className="flex h-10 items-center gap-1 px-2">
         <Button variant="ghost" size="icon" aria-label="Back" onClick={() => onNavigate("home")}>
-          <ArrowLeft className="size-4" />
+          <ArrowLeftIcon className="size-4" />
         </Button>
         <h2 className="text-sm font-semibold">People</h2>
       </div>
@@ -293,7 +293,7 @@ export function RoomPanel({ roomId, spaceId, view, onNavigate, onClose }: RoomPa
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
         <span className="text-sm font-semibold">Room info</span>
         <Button variant="ghost" size="icon" aria-label="Close panel" onClick={onClose}>
-          <X className="size-4" />
+          <CloseIcon className="size-4" />
         </Button>
       </div>
       {view === "home" && (

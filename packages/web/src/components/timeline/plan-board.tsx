@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, ListChecks, X } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, CloseIcon, ListChecksIcon } from "@/components/icons";
 import type { PlanSnapshot } from "@/hooks/use-plan";
 
 interface PlanBoardProps {
@@ -15,7 +15,7 @@ export function PlanBoard({ plan, collapsed, onCollapse, onExpand, onDismiss }: 
   return (
     <div className="rounded-md border border-border bg-muted/30 px-2.5 py-2">
       <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <ListChecks className="h-3.5 w-3.5 shrink-0" />
+        <ListChecksIcon className="h-3.5 w-3.5 shrink-0" />
         <span>Plan</span>
         <span className="tabular-nums">
           {done}/{plan.entries.length}
@@ -28,9 +28,9 @@ export function PlanBoard({ plan, collapsed, onCollapse, onExpand, onDismiss }: 
             className="rounded p-0.5 hover:bg-muted"
           >
             {collapsed ? (
-              <ChevronDown className="h-3.5 w-3.5" />
+              <ChevronDownIcon className="h-3.5 w-3.5" />
             ) : (
-              <ChevronUp className="h-3.5 w-3.5" />
+              <ChevronUpIcon className="h-3.5 w-3.5" />
             )}
           </button>
           <button
@@ -39,7 +39,7 @@ export function PlanBoard({ plan, collapsed, onCollapse, onExpand, onDismiss }: 
             onClick={onDismiss}
             className="rounded p-0.5 hover:bg-muted"
           >
-            <X className="h-3.5 w-3.5" />
+            <CloseIcon className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
@@ -67,9 +67,9 @@ function statusBullet(status: string) {
   const base = "mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full ";
   switch (status) {
     case "completed":
-      return base + "bg-emerald-500";
+      return base + "bg-accent-success";
     case "in_progress":
-      return base + "bg-amber-500 animate-pulse";
+      return base + "bg-accent-warning animate-pulse";
     case "failed":
     case "cancelled":
       return base + "bg-destructive";

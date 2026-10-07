@@ -1,21 +1,9 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/shared/ui/alert-dialog.tsx. Modified.
-"use client";
-
 import * as React from "react";
-import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
+import { AlertDialog as AlertDialogPrimitive } from "radix-ui";
 
-import { cn } from "@/shared/lib/cn";
-import { buttonVariants } from "@/shared/ui/button";
-import {
-  type CardTextureSize,
-  type CardTextureTone,
-  texturedSurfaceClasses,
-} from "@/shared/ui/card";
-import { MODAL_BACKDROP_BLUR_CLASS } from "@/shared/ui/modalBackdrop";
-import {
-  MODAL_CONTENT_MOTION_CLASS,
-  MODAL_OVERLAY_MOTION_CLASS,
-} from "@/shared/ui/modalMotion";
+import { cn } from "@/lib/utils";
+import { buttonVariants } from "@/components/ui/button";
 
 const AlertDialog = AlertDialogPrimitive.Root;
 const AlertDialogTrigger = AlertDialogPrimitive.Trigger;
@@ -26,9 +14,7 @@ const AlertDialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Overlay
     className={cn(
-      "fixed inset-0 z-50 bg-black/60",
-      MODAL_OVERLAY_MOTION_CLASS,
-      MODAL_BACKDROP_BLUR_CLASS,
+      "fixed inset-0 z-50 bg-black/40 backdrop-blur-xs backdrop-motion",
       className,
     )}
     ref={ref}
@@ -37,59 +23,24 @@ const AlertDialogOverlay = React.forwardRef<
 ));
 AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
 
-type AlertDialogContentProps = React.ComponentPropsWithoutRef<
-  typeof AlertDialogPrimitive.Content
-> & {
-  surface?: "default" | "textured";
-  textureSize?: CardTextureSize;
-  textureTone?: CardTextureTone;
-};
-
+// Same surface and motion as DialogContent: centred above `md`, bottom sheet below.
 const AlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
-  AlertDialogContentProps
->(
-  (
-    {
-      className,
-      surface = "default",
-      textureSize = "regular",
-      textureTone = "light",
-      ...props
-    },
-    ref,
-  ) => (
-    <AlertDialogPortal>
-      <AlertDialogOverlay />
-      <div
-        className={cn(
-          "pointer-events-none fixed inset-0 z-50 grid place-items-center overflow-y-auto",
-          surface === "textured"
-            ? textureSize === "compact"
-              ? "p-10"
-              : "p-28 max-sm:p-18"
-            : "p-4",
-        )}
-      >
-        <AlertDialogPrimitive.Content
-          className={cn(
-            "pointer-events-auto grid w-[calc(100vw-2rem)] max-w-md gap-4 outline-hidden",
-            surface === "default" && "rounded-3xl bg-background p-6 shadow-2xl",
-            surface === "textured" &&
-              texturedSurfaceClasses({
-                size: textureSize,
-                tone: textureTone,
-              }),
-            MODAL_CONTENT_MOTION_CLASS,
-            className,
-          )}
-          ref={ref}
-          {...props}
-        />
-      </div>
-    </AlertDialogPortal>
-  ),
-);
+  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
+>(({ className, ...props }, ref) => (
+  <AlertDialogPortal>
+    <AlertDialogOverlay />
+    <AlertDialogPrimitive.Content
+      data-sheet=""
+      className={cn(
+        "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-modal border border-surface-border-primary bg-surface-primary p-6 text-body2 text-text-primary shadow-modal outline-hidden sm:max-w-md modal-motion max-md:top-auto max-md:bottom-0 max-md:max-w-full max-md:translate-y-0 max-md:rounded-b-none",
+        className,
+      )}
+      ref={ref}
+      {...props}
+    />
+  </AlertDialogPortal>
+));
 AlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName;
 
 const AlertDialogHeader = ({
@@ -97,7 +48,7 @@ const AlertDialogHeader = ({
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
-    className={cn("flex flex-col space-y-2 text-left", className)}
+    className={cn("flex flex-col gap-1 text-left", className)}
     {...props}
   />
 );
@@ -122,7 +73,7 @@ const AlertDialogTitle = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Title>
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Title
-    className={cn("text-xl font-semibold tracking-tight", className)}
+    className={cn("font-heading text-h5 font-semibold", className)}
     ref={ref}
     {...props}
   />
@@ -134,7 +85,7 @@ const AlertDialogDescription = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Description>
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Description
-    className={cn("text-sm text-muted-foreground", className)}
+    className={cn("text-body2 text-text-secondary", className)}
     ref={ref}
     {...props}
   />
@@ -147,7 +98,7 @@ const AlertDialogAction = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Action>
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Action
-    className={cn(buttonVariants(), className)}
+    className={cn(buttonVariants({ size: "sm", variant: "utility" }), className)}
     ref={ref}
     {...props}
   />
@@ -159,7 +110,7 @@ const AlertDialogCancel = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Cancel>
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Cancel
-    className={cn(buttonVariants({ variant: "outline" }), className)}
+    className={cn(buttonVariants({ size: "sm", variant: "tertiary" }), "rounded-utility", className)}
     ref={ref}
     {...props}
   />

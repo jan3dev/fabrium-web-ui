@@ -1,4 +1,4 @@
-import { ChevronsUpDown } from "lucide-react";
+import { ChevronsUpDownIcon } from "@/components/icons";
 import { type Room } from "matrix-js-sdk";
 import {
   DropdownMenu,
@@ -49,7 +49,7 @@ export function SpaceSwitcher({ scope, onSelect }: SpaceSwitcherProps) {
         <span className="truncate">{label}</span>
         <div className="flex shrink-0 items-center gap-1">
           <UnreadBadge total={inactiveUnread.total} highlight={inactiveUnread.highlight} />
-          <ChevronsUpDown className="size-3.5 text-muted-foreground" />
+          <ChevronsUpDownIcon className="size-3.5 text-muted-foreground" />
         </div>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">

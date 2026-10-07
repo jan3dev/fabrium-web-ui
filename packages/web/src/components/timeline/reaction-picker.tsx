@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from "react";
-import { SmilePlus } from "lucide-react";
+import { SmilePlusIcon } from "@/components/icons";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { MatrixClientPeg } from "../../client/peg";
 
@@ -32,7 +32,7 @@ export function ReactionPicker({ roomId, eventId }: ReactionPickerProps) {
           aria-label="add reaction"
           className="inline-flex items-center rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
-          <SmilePlus className="size-4" />
+          <SmilePlusIcon className="size-4" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-auto p-0">

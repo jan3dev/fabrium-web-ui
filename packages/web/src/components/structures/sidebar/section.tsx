@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
 
 interface SectionProps {
   title: string;
@@ -49,7 +49,7 @@ export function Section({ title, action, children, defaultExpanded = true, stora
           onClick={toggle}
           className="flex items-center gap-1"
         >
-          {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+          {expanded ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
           <h3 className="font-semibold">{title}</h3>
         </button>
         <div className="ml-auto">{action}</div>

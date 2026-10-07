@@ -41,15 +41,15 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const SingleImage: Story = {
-  args: { attachments: stage([swatchPng("#4f46e5", "pasted-20260830-090503.png", 42_000)]) },
+  args: { attachments: stage([swatchPng("hsl(243 75% 59%)", "pasted-20260830-090503.png", 42_000)]) },
 };
 
 export const MixedImagesAndFiles: Story = {
   args: {
     attachments: stage([
-      swatchPng("#4f46e5", "pasted-20260830-090503.png", 42_000),
+      swatchPng("hsl(243 75% 59%)", "pasted-20260830-090503.png", 42_000),
       doc("incident-report.pdf", "application/pdf", 310_000),
-      swatchPng("#059669", "architecture-diagram.png", 128_000),
+      swatchPng("hsl(161 94% 30%)", "architecture-diagram.png", 128_000),
       doc("daemon.log", "text/plain", 900),
     ]),
   },
@@ -58,7 +58,7 @@ export const MixedImagesAndFiles: Story = {
 export const Uploading: Story = {
   args: {
     attachments: stage([
-      swatchPng("#4f46e5", "screenshot.png", 42_000),
+      swatchPng("hsl(243 75% 59%)", "screenshot.png", 42_000),
       doc("incident-report.pdf", "application/pdf", 310_000),
     ]),
     uploadingId: "s0",

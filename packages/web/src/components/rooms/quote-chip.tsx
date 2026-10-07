@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { CloseIcon } from "@/components/icons";
 import { MessageTimestamp } from "@/components/timeline/message-timestamp";
 import type { QuoteDraft } from "@/lib/quote-draft-store";
 import { senderColor } from "@/lib/sender";
@@ -24,7 +24,7 @@ export function QuoteChip({ draft, onRemove }: { draft: QuoteDraft; onRemove: ()
         onClick={onRemove}
         className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
       >
-        <X className="size-3.5" />
+        <CloseIcon className="size-3.5" />
       </button>
     </div>
   );

@@ -1,0 +1,57 @@
+/*
+ * Fabrium semantic tokens: identity and trust markers (agent, human, system,
+ * enclave, control plane, risk, money). Built from --fab-* primitives only; no new
+ * hex. Use them for actor badges and trust chips, not for general UI chrome.
+ */
+
+:root,
+[data-theme="light"] {
+  --actor-agent: var(--fab-neon-blue-500);
+  --actor-human: var(--fab-harvest-gold-500);
+  --actor-system: var(--fab-metal-500);
+  --trust-enclave: var(--fab-wave-cyan);
+  --control-plane: var(--fab-violet-600);
+  --risk: var(--accent-danger);
+  --money: var(--fab-wave-orange);
+}
+
+[data-theme="dark"] {
+  --actor-agent: var(--fab-neon-blue-300);
+  --actor-system: var(--fab-metal-400);
+  --control-plane: var(--fab-violet-400);
+}
+
+/*
+ * Chip backgrounds. Declared on every theme root, not only :root: var() resolves where
+ * the property is declared, so a [data-theme] island needs its own copy.
+ */
+:root,
+[data-theme] {
+  --actor-agent-transparent: color-mix(
+    in srgb,
+    var(--actor-agent) 16%,
+    transparent
+  );
+  --actor-human-transparent: color-mix(
+    in srgb,
+    var(--actor-human) 16%,
+    transparent
+  );
+  --actor-system-transparent: color-mix(
+    in srgb,
+    var(--actor-system) 16%,
+    transparent
+  );
+  --trust-enclave-transparent: color-mix(
+    in srgb,
+    var(--trust-enclave) 16%,
+    transparent
+  );
+  --control-plane-transparent: color-mix(
+    in srgb,
+    var(--control-plane) 16%,
+    transparent
+  );
+  --risk-transparent: color-mix(in srgb, var(--risk) 16%, transparent);
+  --money-transparent: color-mix(in srgb, var(--money) 16%, transparent);
+}
