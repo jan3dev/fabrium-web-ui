@@ -30,6 +30,13 @@ export interface Roster {
 // can rename it; read it from the roster sender when that matters.
 const SYSTEM_LOCALPARTS = new Set(["zooid"]);
 
+const serverOf = (userId: string) => userId.slice(userId.indexOf(":") + 1);
+
+/** The daemon's user on our own homeserver; `@zooid:` on another server is just a user. */
+function isSystemUser(userId: string, room: Room | null): boolean {
+  return !!room && SYSTEM_LOCALPARTS.has(displayNameOf(userId)) && serverOf(userId) === serverOf(room.myUserId);
+}
+
 const MEDIA_MSGTYPES = new Set(["m.image", "m.file", "m.video", "m.audio"]);
 const TEXT_MSGTYPES = new Set(["m.text", "m.notice", "m.emote"]);
 const MAX_THREAD_PARTICIPANTS = 3;
@@ -42,7 +49,7 @@ export function toActor(
   const member = room?.getMember(userId);
   const kind = roster?.isAgent(userId)
     ? "agent"
-    : SYSTEM_LOCALPARTS.has(displayNameOf(userId))
+    : isSystemUser(userId, room)
       ? "system"
       : "human";
   return {
@@ -54,8 +61,8 @@ export function toActor(
 }
 
 interface RelationIndex {
-  /** Targets of the redaction events in the room. */
-  redacted: Set<string>;
+  /** Redaction events in the room, by target. */
+  redactions: Map<string, MatrixEvent[]>;
   reactions: Map<string, MatrixEvent[]>;
   /** m.replace events per target; validity is checked against the target's sender. */
   edits: Map<string, MatrixEvent[]>;
@@ -64,20 +71,26 @@ interface RelationIndex {
 
 /**
  * Redacted by the server, by us and still pending, or the target of a
- * redaction in the room. The last catches what the SDK flags late: a local
- * redaction empties the content at once but sets `redacted_because` only on a
- * later sync, and the remote echo can clear the local mark before that.
+ * redaction its sender was allowed to make. The last catches what the SDK flags
+ * late: a local redaction empties the content at once but sets
+ * `redacted_because` only on a later sync, and the remote echo can clear the
+ * local mark before that. Anyone can put a redaction event in the timeline; the
+ * server only applies the authorised ones, so only those count here.
  */
-function isRedacted(ev: MatrixEvent, redacted: ReadonlySet<string>): boolean {
-  return ev.isRedacted() || ev.localRedactionEvent() !== null || redacted.has(ev.getId() ?? "");
+function isRedacted(ev: MatrixEvent, redactions: RelationIndex["redactions"], room: Room | null): boolean {
+  if (ev.isRedacted() || ev.localRedactionEvent() !== null) return true;
+  return (redactions.get(ev.getId() ?? "") ?? []).some((r) => {
+    const sender = r.getSender() ?? "";
+    return sender === ev.getSender() || (room?.currentState.maySendRedactionForEvent(ev, sender) ?? false);
+  });
 }
 
-function indexRelations(events: readonly MatrixEvent[]): RelationIndex {
-  const redacted = new Set<string>();
+function indexRelations(events: readonly MatrixEvent[], room: Room | null): RelationIndex {
+  const redactions = new Map<string, MatrixEvent[]>();
   for (const ev of events) {
     if (ev.getType() !== "m.room.redaction" || ev.status === EventStatus.CANCELLED) continue;
     const target = ev.event.redacts ?? (ev.getContent() as { redacts?: string }).redacts;
-    if (target) redacted.add(target);
+    if (target) push(redactions, target, ev);
   }
   const reactions = new Map<string, MatrixEvent[]>();
   const edits = new Map<string, MatrixEvent[]>();
@@ -89,12 +102,12 @@ function indexRelations(events: readonly MatrixEvent[]): RelationIndex {
     if (
       rel.rel_type === "m.annotation" &&
       ev.getType() === "m.reaction" &&
-      !isRedacted(ev, redacted)
+      !isRedacted(ev, redactions, room)
     ) {
       push(reactions, rel.event_id, ev);
     } else if (
       rel.rel_type === "m.replace" &&
-      !isRedacted(ev, redacted) &&
+      !isRedacted(ev, redactions, room) &&
       ev.getContent()["m.new_content"]
     ) {
       push(edits, rel.event_id, ev);
@@ -102,7 +115,7 @@ function indexRelations(events: readonly MatrixEvent[]): RelationIndex {
       push(threads, rel.event_id, ev);
     }
   }
-  return { redacted, reactions, edits, threads };
+  return { redactions, reactions, edits, threads };
 }
 
 function push<K, V>(map: Map<K, V[]>, key: K, value: V) {
@@ -153,13 +166,13 @@ function editedContent(ev: MatrixEvent, edits: RelationIndex["edits"]): IContent
 function classify(
   ev: MatrixEvent,
   room: Room | null,
-  redacted: ReadonlySet<string>,
+  redactions: RelationIndex["redactions"],
 ): Pick<TimelineMessage, "kind" | "body" | "raw"> | null {
   const type = ev.getType();
   if (type === "m.room.message") {
     const msgtype = (ev.getContent() as { msgtype?: string }).msgtype;
     if (
-      isRedacted(ev, redacted) ||
+      isRedacted(ev, redactions, room) ||
       TEXT_MSGTYPES.has(msgtype ?? "") ||
       MEDIA_MSGTYPES.has(msgtype ?? "")
     ) {
@@ -228,8 +241,8 @@ function toMessage(
   index: RelationIndex,
   me: string | null,
 ): TimelineMessage | null {
-  const base = classify(ev, room, index.redacted);
-  const redacted = isRedacted(ev, index.redacted);
+  const base = classify(ev, room, index.redactions);
+  const redacted = isRedacted(ev, index.redactions, room);
   if (!base) return null;
   const id = ev.getId() ?? `${ev.getType()}-${ev.getTs()}`;
   const rel = ev.getRelation();
@@ -341,7 +354,7 @@ export function toTimelineEntries(
   room: Room | null,
   roster: Roster | null,
 ): TimelineEntry[] {
-  const index = indexRelations(room ? allRoomEvents(room) : events);
+  const index = indexRelations(room ? allRoomEvents(room) : events, room);
   const me = room?.myUserId ?? null;
   const out: TimelineEntry[] = [];
   for (const ev of events) {

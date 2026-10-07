@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { allRoomEvents } from "@/hooks/use-timeline";
 import { QUOTE_FIELD, type QuoteRef } from "@/lib/matrix/quote";
 import {
+  injectStateEvent,
   makeFakeClient,
   makeMatrixEvent,
   makeRoom,
@@ -54,13 +55,14 @@ function entries(room: Room) {
 
 describe("toActor", () => {
   it("tells agents, the daemon and humans apart", () => {
-    expect(toActor(agent, null, roster).kind).toBe("agent");
-    expect(toActor("@zooid:h.example", null, roster).kind).toBe("system");
-    expect(toActor(ana, null, roster)).toMatchObject({
-      kind: "human",
-      displayName: "ana",
-      avatarUrl: null,
-    });
+    const room = roomWith();
+    expect(toActor(agent, room, roster).kind).toBe("agent");
+    expect(toActor("@zooid:h.example", room, roster).kind).toBe("system");
+    expect(toActor(ana, null, roster)).toMatchObject({ kind: "human", displayName: "ana", avatarUrl: null });
+  });
+
+  it("does not mark a zooid user from another server as system", () => {
+    expect(toActor("@zooid:evil.example", roomWith(), roster).kind).toBe("human");
   });
 });
 
@@ -218,6 +220,33 @@ describe("toTimelineEntries", () => {
     const [entry] = toTimelineEntries([m, ev(ana, "m.room.redaction", { redacts: "$m" })], null, roster);
     expect(m.isRedacted()).toBe(false);
     expect(entry.message).toMatchObject({ kind: "message", redacted: true });
+  });
+
+  // The fixture's redactions carry `redacts` in content only, so the SDK does not
+  // apply them itself; these exercise the mapper's own redaction index.
+  it("ignores a redaction from a member who may not redact others", () => {
+    const room = roomWith(text(ana, "mine", "$m"), ev(agent, "m.room.redaction", { redacts: "$m" }));
+    expect(entries(room)[0].message.redacted).toBe(false);
+  });
+
+  it("honours a redaction from a member whose power level allows it", () => {
+    const room = makeRoom(roomId, {
+      client: makeFakeClient({ userId: me }),
+      myUserId: me,
+      powerLevels: { [agent]: 50 },
+    });
+    injectStateEvent(
+      room,
+      mkMatrixEvent({ roomId, sender: agent, type: "m.room.member", stateKey: agent, content: { membership: "join" } }),
+    );
+    pushTimelineEvent(room, text(ana, "mine", "$m"));
+    pushTimelineEvent(room, ev(agent, "m.room.redaction", { redacts: "$m" }));
+    expect(entries(room)[0].message.redacted).toBe(true);
+  });
+
+  it("honours an author redacting their own message", () => {
+    const room = roomWith(text(ana, "mine", "$m"), ev(ana, "m.room.redaction", { redacts: "$m" }));
+    expect(entries(room)[0].message.redacted).toBe(true);
   });
 
   it("drops a reaction we are taking back", () => {
