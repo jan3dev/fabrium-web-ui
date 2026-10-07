@@ -1,21 +1,16 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/messages/ui/UnreadDivider.tsx. Modified.
-/**
- * Inline "New" divider rendered directly above the oldest unread top-level
- * message, mirroring Slack's read/unread boundary. Computed from the
- * channel's read frontier as it stood when the channel was opened.
- */
+
+/** "New" rule above the oldest message that was unread when the room opened. */
 export function UnreadDivider() {
   return (
     <section
       aria-label="New messages"
-      className="relative flex items-center py-1"
+      className="flex items-center py-1"
       data-testid="message-unread-divider"
     >
-      <div className="h-px flex-1 bg-primary/40" />
-      <span className="shrink-0 px-2 text-2xs font-semibold uppercase tracking-[0.04em] text-primary">
-        New
-      </span>
-      <div className="h-px flex-1 bg-primary/40" />
+      <div className="h-px flex-1 bg-accent-danger/40" />
+      <span className="shrink-0 px-2 text-caption2 font-semibold uppercase text-accent-danger">New</span>
+      <div className="h-px flex-1 bg-accent-danger/40" />
     </section>
   );
 }

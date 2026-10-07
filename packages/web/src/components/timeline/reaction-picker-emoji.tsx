@@ -1,131 +1,52 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/custom-emoji/ui/EmojiPicker.tsx. Modified.
+import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
 import * as React from "react";
 
-import { buildCustomEmojiCategory } from "@/features/custom-emoji/emojiMartCategory";
-import { useCustomEmoji } from "@/features/custom-emoji/hooks";
-import { emojiMartData } from "@/features/custom-emoji/ui/emojiMartPrewarm";
-
 /**
- * Reach into the `em-emoji-picker` shadow root and disable spellcheck,
- * autocorrect, and autocapitalize on its search input. When `autoFocus` is
- * true, also focus the input so the cursor lands there immediately — this
- * makes focus deterministic and owned by us, preventing Radix's focus-scope
- * from racing emoji-mart's own async focus call and winning.
- *
- * emoji-mart mounts the custom element and its shadow content asynchronously,
- * so the input is not present on first render. A MutationObserver on the
- * shadow root watches for the input to appear, applies the attributes once,
- * then disconnects. Returns a cleanup function for `useEffect`.
+ * emoji-mart mounts its search input inside a shadow root, asynchronously.
+ * Turn off spellcheck/autocorrect on it and focus it ourselves, so focus does
+ * not race Radix's focus scope.
  */
-function disableSearchInputCorrections(
-  host: HTMLElement,
-  autoFocus: boolean,
-): () => void {
-  const picker = host.querySelector("em-emoji-picker");
-  const shadowRoot = picker?.shadowRoot ?? null;
-  if (!shadowRoot) {
-    return () => undefined;
-  }
-  // shadowRoot is ShadowRoot here; capture as a typed const so the nested
-  // closure doesn't re-widen to ShadowRoot | null.
-  const root: ShadowRoot = shadowRoot;
-
-  function applyAttributes() {
+function prepareSearchInput(host: HTMLElement): () => void {
+  const root = host.querySelector("em-emoji-picker")?.shadowRoot;
+  if (!root) return () => undefined;
+  const apply = () => {
     const input = root.querySelector<HTMLInputElement>('input[type="search"]');
     if (!input) return false;
     input.spellcheck = false;
     input.setAttribute("autocorrect", "off");
     input.setAttribute("autocapitalize", "off");
-    if (autoFocus) {
-      input.focus();
-    }
+    input.focus();
     return true;
-  }
-
-  // Fast path: input already present (e.g. picker re-mount from hot cache).
-  if (applyAttributes()) {
-    return () => undefined;
-  }
-
-  // Slow path: wait for the shadow subtree to include the input.
+  };
+  if (apply()) return () => undefined;
   const observer = new MutationObserver(() => {
-    if (applyAttributes()) {
-      observer.disconnect();
-    }
+    if (apply()) observer.disconnect();
   });
   observer.observe(root, { childList: true, subtree: true });
   return () => observer.disconnect();
 }
 
-/**
- * The one emoji picker for the whole app. Every place that lets a user choose
- * an emoji — composing a message, reacting to a regular or system message,
- * setting a status — renders this, so the config and custom-emoji wiring can't
- * drift across call sites (they used to, and that's why custom emoji were
- * missing from some pickers).
- *
- * It always wires the community custom-emoji palette in via `useCustomEmoji()`,
- * so custom emoji show up everywhere for free. Selection is normalized to a
- * single string: a standard emoji emits its `native` glyph; a custom emoji has
- * no `native`, so it emits its `:shortcode:` (the emoji-mart `id` is the
- * shortcode). Consumers store/send that string and let the existing renderers
- * (reactions' `emojiUrl`, the remark shortcode plugin) resolve it to an image.
- *
- * Only the raw picker lives here — not the Popover/trigger. Those differ per
- * site (ghost button vs status swatch, popover vs dialog content) and forcing
- * them into one wrapper would be less clear, not more. The thing that drifted
- * was the picker config + custom wiring + select handling; that's what this
- * centralizes.
- */
-type EmojiPickerProps = {
-  /** Autofocus the search field when the picker mounts (e.g. reaction popovers). */
-  autoFocus?: boolean;
-  /** Called with the chosen emoji as a string: `native` glyph or `:shortcode:`. */
-  onSelect: (emoji: string) => void;
-  /** Number of emoji columns. Defaults to the compact picker used elsewhere. */
-  perLine?: number;
-};
-
-export const EmojiPicker = React.memo(function EmojiPicker({
-  autoFocus = false,
-  onSelect,
-  perLine = 8,
-}: EmojiPickerProps) {
-  const customEmoji = useCustomEmoji();
-  const custom = React.useMemo(
-    () => buildCustomEmojiCategory(customEmoji),
-    [customEmoji],
-  );
+/** The emoji picker. Lazy-loaded: emoji-mart's data is large. */
+export default function PickerEmoji({ onPick }: { onPick: (emoji: string) => void }) {
   const hostRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    if (!hostRef.current) return;
-    return disableSearchInputCorrections(hostRef.current, autoFocus);
-  }, [autoFocus]);
-
+  React.useEffect(() => (hostRef.current ? prepareSearchInput(hostRef.current) : undefined), []);
   return (
     <div ref={hostRef}>
       <Picker
-        autoFocus={autoFocus}
-        custom={custom}
-        data={emojiMartData}
-        maxFrequentRows={2}
-        onEmojiSelect={(emoji: { native?: string; id?: string }) => {
-          // Standard emoji carry a `native` glyph. Custom emoji don't — emit
-          // their `:shortcode:` (emoji-mart `id` == shortcode) instead. Ignore a
-          // malformed selection that has neither.
-          const value = emoji.native ?? (emoji.id ? `:${emoji.id}:` : "");
-          if (value) {
-            onSelect(value);
-          }
+        data={data}
+        onEmojiSelect={(e: { native?: string }) => {
+          if (e.native) onPick(e.native);
         }}
-        perLine={perLine}
-        previewPosition="bottom"
+        autoFocus
+        maxFrequentRows={2}
+        perLine={8}
+        previewPosition="none"
+        skinTonePosition="none"
         set="native"
-        skinTonePosition="search"
-        theme="auto"
+        theme={document.documentElement.dataset.theme === "light" ? "light" : "dark"}
       />
     </div>
   );
-});
+}

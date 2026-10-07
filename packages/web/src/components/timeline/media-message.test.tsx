@@ -9,17 +9,6 @@ import { MediaMessage } from "./media-message";
 const HS = "https://hs.test";
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 
-function mediaEvent(content: Record<string, unknown>) {
-  // Minimal MatrixEvent-like stub for MediaMessage
-  return {
-    getType: () => "m.room.message",
-    getContent: () => content,
-    getSender: () => "@alice:hs.test",
-    getTs: () => 1_700_000_000_000,
-    getId: () => "$media_evt",
-  } as never;
-}
-
 afterEach(() => {
   cleanup();
   MatrixClientPeg.reset();
@@ -56,12 +45,7 @@ describe("<MediaMessage />", () => {
     );
     render(
       <MediaMessage
-        event={mediaEvent({
-          msgtype: "m.image",
-          body: "dog.png",
-          url: "mxc://hs.test/abc",
-          info: { mimetype: "image/png", size: 4, w: 100, h: 100 },
-        })}
+        media={{ mxc: "mxc://hs.test/abc", mimetype: "image/png", name: "dog.png", size: 4, w: 100, h: 100 }}
       />,
     );
     await waitFor(() => expect(screen.getByRole("img", { name: "dog.png" })).toBeDefined(), {
@@ -74,13 +58,7 @@ describe("<MediaMessage />", () => {
     injectClient();
     render(
       <MediaMessage
-        event={mediaEvent({
-          msgtype: "m.file",
-          body: "report.pdf",
-          filename: "report.pdf",
-          url: "mxc://hs.test/def",
-          info: { mimetype: "application/pdf", size: 2048 },
-        })}
+        media={{ mxc: "mxc://hs.test/def", mimetype: "application/pdf", name: "report.pdf", size: 2048 }}
       />,
     );
     expect(screen.getByText("report.pdf")).toBeDefined();
@@ -91,12 +69,7 @@ describe("<MediaMessage />", () => {
     injectClient();
     render(
       <MediaMessage
-        event={mediaEvent({
-          msgtype: "m.video",
-          body: "demo.mp4",
-          url: "mxc://hs.test/ghi",
-          info: { mimetype: "video/mp4", size: 4096 },
-        })}
+        media={{ mxc: "mxc://hs.test/ghi", mimetype: "video/mp4", name: "demo.mp4", size: 4096 }}
       />,
     );
     expect(screen.getByText("demo.mp4")).toBeDefined();

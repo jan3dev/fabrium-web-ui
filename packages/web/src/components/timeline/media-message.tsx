@@ -1,8 +1,8 @@
-import type { MatrixEvent } from "matrix-js-sdk";
 import { DownloadIcon, FileTextIcon } from "@/components/icons";
 import { useEffect, useState } from "react";
 import { useMatrixClient } from "../../hooks/use-matrix-client";
 import { fetchAuthedMedia } from "../../lib/matrix/authed-media";
+import type { TimelineMessage } from "@/model/types";
 
 interface MediaInfo {
   mimetype?: string;
@@ -79,7 +79,7 @@ function DownloadButton({ mxcUrl, filename }: { mxcUrl: string; filename: string
       type="button"
       aria-label="Download"
       onClick={() => void handleDownload()}
-      className="rounded p-1 hover:bg-muted text-muted-foreground hover:text-foreground"
+      className="rounded-utility p-1 hover:bg-muted text-muted-foreground hover:text-foreground"
     >
       <DownloadIcon className="h-4 w-4" />
     </button>
@@ -96,11 +96,11 @@ function FileTile({
   info?: MediaInfo;
 }) {
   return (
-    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+    <div className="flex items-center gap-2 rounded-card border border-border bg-muted/40 px-3 py-2 text-body2">
       <FileTextIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
       <span className="flex-1 truncate font-medium">{filename}</span>
       {info?.size !== undefined && (
-        <span className="shrink-0 text-xs text-muted-foreground">{humanSize(info.size)}</span>
+        <span className="shrink-0 text-caption1 text-muted-foreground">{humanSize(info.size)}</span>
       )}
       <DownloadButton mxcUrl={mxcUrl} filename={filename} />
     </div>
@@ -124,14 +124,14 @@ function ImageTile({
         <img
           src={blobUrl}
           alt={filename}
-          className="max-h-80 rounded-md border border-border object-contain"
+          className="max-h-80 rounded-card border border-border object-contain"
         />
       ) : (
-        <div className="flex h-24 items-center justify-center rounded-md border border-border bg-muted/40 text-xs text-muted-foreground">
+        <div className="flex h-24 items-center justify-center rounded-card border border-border bg-muted/40 text-caption1 text-muted-foreground">
           Loading…
         </div>
       )}
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="flex items-center gap-2 text-caption1 text-muted-foreground">
         <span className="truncate">{filename}</span>
         {info?.size !== undefined && <span>{humanSize(info.size)}</span>}
         <DownloadButton mxcUrl={mxcUrl} filename={filename} />
@@ -140,23 +140,11 @@ function ImageTile({
   );
 }
 
-export function MediaMessage({ event }: { event: MatrixEvent }) {
-  const content = event.getContent() as {
-    msgtype?: string;
-    body?: string;
-    filename?: string;
-    url?: string;
-    info?: MediaInfo;
-  };
-
-  const msgtype = content.msgtype ?? "";
-  const filename = content.filename ?? content.body ?? "untitled";
-  const mxcUrl = content.url ?? "";
-  const info = content.info;
-
-  if (msgtype === "m.image") {
-    return <ImageTile mxcUrl={mxcUrl} filename={filename} info={info} />;
+/** An uploaded image (inline preview) or file (name, size, download). */
+export function MediaMessage({ media }: { media: NonNullable<TimelineMessage["media"]> }) {
+  const info: MediaInfo = { mimetype: media.mimetype, size: media.size, w: media.w, h: media.h };
+  if (media.mimetype.startsWith("image/")) {
+    return <ImageTile mxcUrl={media.mxc} filename={media.name} info={info} />;
   }
-
-  return <FileTile mxcUrl={mxcUrl} filename={filename} info={info} />;
+  return <FileTile mxcUrl={media.mxc} filename={media.name} info={info} />;
 }

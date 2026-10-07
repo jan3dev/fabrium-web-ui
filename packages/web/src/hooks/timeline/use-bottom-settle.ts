@@ -20,7 +20,7 @@ function isEditableKeyboardTarget(target: EventTarget | null) {
   );
 }
 
-export function useVirtualizedBottomSettle(
+export function useBottomSettle(
   hostRef: React.RefObject<HTMLDivElement | null>,
   listRef: React.RefObject<VListHandle | null>,
   itemsLengthRef: React.RefObject<number>,

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeftIcon } from "@/components/icons";
-import { useThread } from "../../hooks/use-timeline";
+import { useThreadEntries } from "../../hooks/use-timeline-entries";
 import { useLoadMoreThread } from "../../hooks/use-load-more-thread";
-import { EventTile } from "../timeline/event-tile";
+import { TimelineRow } from "../timeline/timeline-row";
+import { useMessageActions } from "../timeline/use-message-actions";
 import { LoadMoreButton } from "../timeline/load-more-button";
 
 const PREFETCH_THRESHOLD = 5;
@@ -31,14 +32,17 @@ export function ThreadView({
   rootEventId,
   onBack,
   highlightEventId,
+  workforceSpaceId = null,
 }: {
   roomId: string;
   rootEventId: string;
   onBack: () => void;
   /** A reply to scroll to and flash, from a `?event=` link. */
   highlightEventId?: string;
+  workforceSpaceId?: string | null;
 }) {
-  const { root, rootPending, events, totalCount } = useThread(roomId, rootEventId);
+  const { root, rootPending, replies: events, totalCount } = useThreadEntries(roomId, rootEventId, workforceSpaceId);
+  const { actions, dialogs } = useMessageActions(roomId, { inThread: true });
   const { loadMore, loading, hasMore: canPaginate } = useLoadMoreThread(roomId, rootEventId);
   // Two conditions, both required: the server says replies are outstanding,
   // and there's somewhere left to paginate from. Offering the button on the
@@ -60,12 +64,12 @@ export function ThreadView({
 
   useEffect(() => {
     if (!highlightEventId || scrolledForRef.current === highlightEventId) return;
-    if (!events.some((ev) => ev.getId() === highlightEventId)) return; // not loaded: open at the top
+    if (!events.some((m) => m.id === highlightEventId)) return; // not loaded: open at the top
     scrolledForRef.current = highlightEventId;
     atBottomRef.current = false; // stop the stick-to-bottom effect from yanking us away
     setFlash(highlightEventId);
-    const el = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>("[data-event-id]") ?? []).find(
-      (n) => n.dataset.eventId === highlightEventId,
+    const el = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>("[data-message-id]") ?? []).find(
+      (n) => n.dataset.messageId === highlightEventId,
     );
     el?.scrollIntoView?.({ block: "center" });
   }, [highlightEventId, events]);
@@ -125,7 +129,7 @@ export function ThreadView({
         <ol className="flex flex-col gap-0.5 px-4 py-3">
           {root ? (
             <li className="contents">
-              <EventTile event={root} disableThreadAffordances truncateBody />
+              <TimelineRow entry={{ message: root, thread: null }} roomId={roomId} actions={actions} truncateBody />
             </li>
           ) : rootPending ? (
             <li>
@@ -138,19 +142,19 @@ export function ThreadView({
               </div>
             </li>
           )}
-          {events.map((ev) => (
-            <li key={ev.getId() ?? `${ev.getType()}-${ev.getTs()}`} className="contents">
-              <div
-                data-event-id={ev.getId()}
-                data-highlighted={flash === ev.getId() || undefined}
-                className="rounded-md transition-colors data-[highlighted]:bg-primary/10"
-              >
-                <EventTile event={ev} disableThreadAffordances />
-              </div>
+          {events.map((m) => (
+            <li key={m.id} className="contents">
+              <TimelineRow
+                entry={{ message: m, thread: null }}
+                roomId={roomId}
+                actions={actions}
+                highlighted={flash === m.id}
+              />
             </li>
           ))}
         </ol>
       </div>
+      {dialogs}
     </div>
   );
 }

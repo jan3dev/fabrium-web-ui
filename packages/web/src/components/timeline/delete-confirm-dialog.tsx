@@ -8,17 +8,11 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/shared/ui/alert-dialog";
-import { Button } from "@/shared/ui/button";
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 
-/**
- * The "Delete message?" confirmation. Single definition shared by every
- * surface that deletes a message — the message action menu (MessageActionBar)
- * and the empty-edit delete path (clearing an edit to empty and hitting accept
- * routes here, so it prompts exactly like the menu's Delete does). `onConfirm`
- * fires when the user presses Delete; the caller owns the actual deletion.
- */
-export function DeleteMessageConfirmDialog({
+/** The "Delete message?" confirmation. The caller owns the deletion. */
+export function DeleteConfirmDialog({
   open,
   onOpenChange,
   onConfirm,
@@ -32,18 +26,16 @@ export function DeleteMessageConfirmDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete message?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This will permanently delete this message and cannot be undone.
-          </AlertDialogDescription>
+          <AlertDialogDescription>This deletes the message for everyone. You can't undo it.</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel asChild>
-            <Button type="button" variant="outline">
+            <Button type="button" variant="secondary">
               Cancel
             </Button>
           </AlertDialogCancel>
           <AlertDialogAction asChild>
-            <Button onClick={onConfirm} type="button" variant="destructive">
+            <Button onClick={onConfirm} type="button" variant="utility" tone="danger">
               Delete
             </Button>
           </AlertDialogAction>

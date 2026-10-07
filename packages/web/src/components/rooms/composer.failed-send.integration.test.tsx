@@ -3,9 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { EventStatus, MatrixError, MatrixEvent, type Room } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MatrixClientPeg } from "@/client/peg";
-import { useTimeline } from "@/hooks/use-timeline";
 import { makeFakeClient, makeRoom } from "../../../test/factories";
-import { MessagePanel } from "../structures/message-panel";
+import { TimelinePanel } from "../structures/timeline-panel";
 import { Composer } from "./composer";
 
 const roomId = "!r:h.example";
@@ -18,10 +17,9 @@ afterEach(() => {
 });
 
 function Harness({ thread }: { thread?: string }) {
-  const { events } = useTimeline(roomId);
   return (
     <>
-      <MessagePanel events={events} />
+      <TimelinePanel roomId={roomId} />
       <Composer roomId={roomId} threadRootEventId={thread} />
     </>
   );

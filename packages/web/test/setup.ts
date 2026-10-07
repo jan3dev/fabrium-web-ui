@@ -10,7 +10,7 @@ import type {} from "@testing-library/jest-dom/vitest";
 // workspace root's older Vitest, so its matchers never reach these tests.
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { logger } from "matrix-js-sdk/lib/logger";
-import { afterAll, afterEach, beforeAll, expect } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 
@@ -241,3 +241,31 @@ export function stubSyncWithInvites(homeserverUrl: string, invites: StubInvite[]
     }),
   );
 }
+
+// jsdom has no layout, so virtua's VList measures a 0px viewport and renders no
+// rows. Tests render every row instead; scrolling itself is covered in e2e.
+vi.mock("virtua", async () => {
+  const React = await import("react");
+  type Props = {
+    data: unknown[];
+    children: (item: unknown, index: number) => React.ReactNode;
+    className?: string;
+    style?: React.CSSProperties;
+    ref?: React.Ref<unknown>;
+  } & Record<string, unknown>;
+  function VList({ data, children, ref, shift: _shift, bufferSize: _b, onScroll: _s, onScrollEnd: _e, keepMounted: _k, itemSize: _i, ...rest }: Props) {
+    React.useImperativeHandle(ref, () => ({
+      scrollOffset: 0,
+      scrollSize: 0,
+      viewportSize: 0,
+      scrollToIndex: () => {},
+      scrollTo: () => {},
+      scrollBy: () => {},
+      getItemOffset: () => 0,
+      getItemSize: () => 0,
+      findItemIndex: () => 0,
+    }));
+    return React.createElement("div", rest, React.createElement("div", null, data.map((item, i) => children(item, i))));
+  }
+  return { VList };
+});

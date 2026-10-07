@@ -14,7 +14,7 @@ export function QuoteChip({ draft, onRemove }: { draft: QuoteDraft; onRemove: ()
           <span className="font-semibold" style={{ color: senderColor(draft.quote.sender) }}>
             {draft.senderName}
           </span>
-          <MessageTimestamp ts={draft.quote.origin_server_ts} />
+          <MessageTimestamp createdAt={draft.quote.origin_server_ts} />
         </div>
         <p className="line-clamp-2 whitespace-pre-wrap text-foreground/80">{draft.quote.snapshot.body.replace(/\n{2,}/g, "\n")}</p>
       </div>

@@ -8,12 +8,22 @@ import {
   makeRoom,
   pushTimelineEvent,
 } from "../../../test/factories";
-import { TextMessage } from "./text-message";
+import { MemoryRouter } from "react-router-dom";
+import { TimelinePanel } from "../structures/timeline-panel";
 
 const roomId = "!r:h.example";
 const me = "@me:h.example";
 
 afterEach(() => MatrixClientPeg.reset());
+
+function renderRoom() {
+  return render(
+    <MemoryRouter>
+      <TimelinePanel roomId={roomId} />
+    </MemoryRouter>,
+  );
+}
+
 
 function setup(opts: { sender?: string } = {}) {
   const sender = opts.sender ?? me;
@@ -37,8 +47,8 @@ function setup(opts: { sender?: string } = {}) {
 
 describe("message edit", () => {
   it("shows an Edit action on own messages and sends an m.replace on save", async () => {
-    const { client, event } = setup();
-    render(<TextMessage event={event} />);
+    const { client } = setup();
+    renderRoom();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /more actions/i }));
@@ -63,16 +73,16 @@ describe("message edit", () => {
   });
 
   it("does not offer Edit on someone else's message", async () => {
-    const { event } = setup({ sender: "@alice:h.example" });
-    render(<TextMessage event={event} />);
+    setup({ sender: "@alice:h.example" });
+    renderRoom();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /more actions/i }));
-    await screen.findByRole("menuitem", { name: /copy link/i });
+    await screen.findByRole("menuitem", { name: /copy text/i });
     expect(screen.queryByRole("menuitem", { name: /^edit$/i })).toBeNull();
   });
 
   it("renders the latest edit with an (edited) marker", () => {
-    const { room, event } = setup({ sender: "@alice:h.example" });
+    const { room } = setup({ sender: "@alice:h.example" });
     pushTimelineEvent(
       room,
       makeMatrixEvent({
@@ -88,7 +98,7 @@ describe("message edit", () => {
         },
       }),
     );
-    render(<TextMessage event={event} />);
+    renderRoom();
     expect(screen.getByText("hello world")).toBeInTheDocument();
     expect(screen.getByText(/\(edited\)/i)).toBeInTheDocument();
   });
@@ -96,8 +106,8 @@ describe("message edit", () => {
 
 describe("message delete", () => {
   it("redacts own message after confirm", async () => {
-    const { client, event } = setup();
-    render(<TextMessage event={event} />);
+    const { client } = setup();
+    renderRoom();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /more actions/i }));
@@ -113,7 +123,7 @@ describe("message delete", () => {
   it("renders a tombstone for redacted events", () => {
     const { event } = setup({ sender: "@alice:h.example" });
     (event as unknown as { isRedacted: () => boolean }).isRedacted = () => true;
-    render(<TextMessage event={event} />);
+    renderRoom();
     expect(screen.getByText(/message deleted/i)).toBeInTheDocument();
   });
 });

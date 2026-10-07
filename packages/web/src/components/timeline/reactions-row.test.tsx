@@ -1,89 +1,45 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeFakeClient, makeRoom } from "../../../test/factories";
-import { MatrixClientPeg } from "../../client/peg";
+import { describe, expect, it, vi } from "vitest";
+import type { TimelineReaction } from "@/model/types";
 import { ReactionsRow } from "./reactions-row";
 
-const me = "@me:h.example";
+vi.mock("./reaction-picker-emoji", () => ({
+  default: ({ onPick }: { onPick: (emoji: string) => void }) => (
+    <button type="button" data-testid="stub-emoji" onClick={() => onPick("🚀")}>
+      stub
+    </button>
+  ),
+}));
+
 const roomId = "!r:h.example";
-
-afterEach(() => MatrixClientPeg.reset());
-
-function setup() {
-  const client = makeFakeClient({ userId: me });
-  const room = makeRoom(roomId, { client, myUserId: me });
-  (client as unknown as { getRoom: (id: string) => unknown }).getRoom = () => room;
-  MatrixClientPeg.injectClientForTest(client);
-  return client;
-}
+const thumbs: TimelineReaction = { emoji: "👍", count: 3, reactedByMe: false, actorIds: ["@a:h", "@b:h", "@c:h"] };
+const party: TimelineReaction = { emoji: "🎉", count: 1, reactedByMe: true, myEventId: "$mine", actorIds: ["@me:h"] };
 
 describe("<ReactionsRow>", () => {
-  it("renders nothing when reactions is empty", () => {
-    setup();
-    const { container } = render(
-      <ReactionsRow roomId={roomId} eventId="$t" reactions={new Map()} />,
-    );
+  it("renders nothing without reactions", () => {
+    const { container } = render(<ReactionsRow roomId={roomId} reactions={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("renders a pill per emoji with its count", () => {
-    setup();
-    render(
-      <ReactionsRow
-        roomId={roomId}
-        eventId="$t"
-        reactions={new Map([
-          ["👍", { count: 3, mine: false, myEventId: undefined }],
-          ["🎉", { count: 1, mine: true, myEventId: "$mine" }],
-        ])}
-      />,
-    );
-    expect(screen.getByRole("button", { name: /👍 3/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /🎉 1/ })).toBeInTheDocument();
+  it("renders a pill per emoji with its count, pressed when it is mine", () => {
+    render(<ReactionsRow roomId={roomId} reactions={[thumbs, party]} />);
+    expect(screen.getByRole("button", { name: "👍 3" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "🎉 1" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("clicking a pill the user already reacted to redacts their reaction", async () => {
-    const client = setup();
-    const redactEvent = vi.fn(async () => ({ event_id: "$redaction" }));
-    (client as unknown as { redactEvent: typeof redactEvent }).redactEvent = redactEvent;
-    const user = userEvent.setup();
-
-    render(
-      <ReactionsRow
-        roomId={roomId}
-        eventId="$t"
-        reactions={new Map([
-          ["👍", { count: 1, mine: true, myEventId: "$mine" }],
-        ])}
-      />,
-    );
-    await user.click(screen.getByRole("button", { name: /👍 1/ }));
-    expect(redactEvent).toHaveBeenCalledWith(roomId, "$mine");
+  it("toggles the clicked emoji", async () => {
+    const onToggle = vi.fn();
+    render(<ReactionsRow roomId={roomId} reactions={[party]} onToggle={onToggle} />);
+    await userEvent.click(screen.getByRole("button", { name: "🎉 1" }));
+    expect(onToggle).toHaveBeenCalledWith("🎉");
   });
 
-  it("clicking a pill the user has not reacted to sends a new m.reaction", async () => {
-    const client = setup();
-    const sendEvent = vi.fn(async () => ({ event_id: "$new" }));
-    (client as unknown as { sendEvent: typeof sendEvent }).sendEvent = sendEvent;
-    const user = userEvent.setup();
-
-    render(
-      <ReactionsRow
-        roomId={roomId}
-        eventId="$t"
-        reactions={new Map([
-          ["👍", { count: 2, mine: false, myEventId: undefined }],
-        ])}
-      />,
-    );
-    await user.click(screen.getByRole("button", { name: /👍 2/ }));
-    expect(sendEvent).toHaveBeenCalledWith(
-      roomId,
-      "m.reaction",
-      expect.objectContaining({
-        "m.relates_to": { rel_type: "m.annotation", event_id: "$t", key: "👍" },
-      }),
-    );
+  it("adds a reaction from the picker", async () => {
+    const onToggle = vi.fn();
+    render(<ReactionsRow roomId={roomId} reactions={[thumbs]} onToggle={onToggle} />);
+    await userEvent.click(screen.getByRole("button", { name: /add reaction/i }));
+    await userEvent.click(await screen.findByTestId("stub-emoji"));
+    expect(onToggle).toHaveBeenCalledWith("🚀");
   });
 });

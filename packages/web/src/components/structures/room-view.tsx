@@ -1,6 +1,7 @@
 import { useAwaitingInput } from "../../hooks/use-timeline";
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useOutletContext, useParams, useSearchParams } from "react-router-dom";
+import type { LoggedInOutletContext } from "./logged-in-view";
 import { Composer } from "../rooms/composer";
 import { TypingIndicator } from "../rooms/typing-indicator";
 import { PlanBoard } from "../timeline/plan-board";
@@ -17,6 +18,8 @@ export function RoomView() {
   const [searchParams, setSearchParams] = useSearchParams();
   const threadRootEventId = searchParams.get("thread");
   const highlightEventId = searchParams.get("event") ?? undefined;
+  // Undefined outside the logged-in shell (tests, stories).
+  const workforceSpaceId = useOutletContext<LoggedInOutletContext | undefined>()?.spaceId ?? null;
   const known = useRoomKnown(roomId ?? "");
   const awaitingUserIds = useAwaitingInput(roomId ?? "");
   const typingUserIds = useTyping(roomId ?? "");
@@ -59,12 +62,15 @@ export function RoomView() {
             rootEventId={threadRootEventId}
             onBack={exitThread}
             highlightEventId={highlightEventId}
+            workforceSpaceId={workforceSpaceId}
           />
         ) : (
           <TimelinePanel
+            key={roomId}
             roomId={roomId}
-            onReplyInThread={enterThread}
-            onViewThread={enterThread}
+            workforceSpaceId={workforceSpaceId}
+            highlightEventId={highlightEventId}
+            onOpenThread={enterThread}
           />
         )}
       </div>

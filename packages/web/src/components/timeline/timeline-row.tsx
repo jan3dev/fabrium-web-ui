@@ -1,247 +1,102 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/messages/ui/TimelineMessageRow.tsx. Modified.
-import * as React from "react";
+import type { MatrixEvent } from "matrix-js-sdk";
+import type * as React from "react";
 
-import type { MainTimelineEntry } from "@/features/messages/lib/threadPanel";
-import { THREAD_REPLY_ROW_MARGIN_INLINE_REM } from "@/features/messages/lib/threadTreeLayout";
-import type { buildVideoReviewContextForMessage } from "@/features/messages/lib/videoReviewContext";
-import { canManageMessageForCurrentUser } from "@/features/messages/lib/canManageMessage";
-import type { TimelineMessage } from "@/features/messages/types";
-import type { UserProfileLookup } from "@/features/profile/lib/identity";
-import { cn } from "@/shared/lib/cn";
-import { MessageRow } from "./MessageRow";
-import { MessageThreadSummaryRow } from "./MessageThreadSummaryRow";
-import { SystemMessageRow } from "./SystemMessageRow";
+import type { DecodedZooidEvent } from "@/events/zooid-events";
+import type { TimelineEntry } from "@/model/types";
+import { ApprovalCard } from "./approval-card";
+import { ErrorTile } from "./error-tile";
+import { MessageRow, type MessageRowActions } from "./message-row";
+import { QuestionCard } from "./question-card";
+import { SystemRow } from "./system-row";
+import { TimelineGap } from "./timeline-gap";
+import { ZooidEventTile } from "./zooid-event";
 
-type ToggleReaction = (
-  message: TimelineMessage,
-  emoji: string,
-  remove: boolean,
-) => Promise<void>;
-
-type SystemRowProps = {
-  currentPubkey?: string;
-  entries?: MainTimelineEntry[];
-  entry?: MainTimelineEntry;
-  footer: React.ReactNode;
-  onToggleReaction?: ToggleReaction;
-  profiles?: UserProfileLookup;
-  ownerProfiles?: UserProfileLookup;
-};
-
-export function SystemRow({
-  currentPubkey,
-  entries,
-  entry,
-  footer,
-  onToggleReaction,
-  profiles,
-  ownerProfiles,
-}: SystemRowProps) {
-  const systemEntries = entries ?? (entry ? [entry] : []);
-  const firstEntry = systemEntries[0];
-  const groupedMessages = React.useMemo(
-    () => entries?.map((systemEntry) => systemEntry.message),
-    [entries],
-  );
-  if (!firstEntry) return null;
-
-  return (
-    <div className="flex flex-col gap-1 pb-2.5">
-      <SystemMessageRow
-        groupedMessages={groupedMessages}
-        message={firstEntry.message}
-        currentPubkey={currentPubkey}
-        onToggleReaction={onToggleReaction}
-        profiles={profiles}
-        ownerProfiles={ownerProfiles}
-      />
-      {footer}
-    </div>
-  );
-}
-
-type MessageRowItemProps = {
-  channelId?: string | null;
-  currentPubkey?: string;
-  entry: MainTimelineEntry;
-  followThreadById?: (rootId: string) => void;
-  footer: React.ReactNode;
-  highlightedMessageId?: string | null;
-  huddleMemberPubkeys?: readonly string[];
-  huddleMemberPubkeysPending?: boolean;
-  hideAgentAccessBadges?: boolean;
+export interface TimelineRowProps {
+  entry: TimelineEntry;
+  roomId: string;
+  actions: MessageRowActions;
   isContinuation?: boolean;
   isFollowedByContinuation?: boolean;
-  isFollowingThreadById?: (rootId: string) => boolean;
-  isUnread?: boolean;
-  playEntrance?: boolean;
-  onEntranceComplete?: (messageId: string) => void;
-  onDelete?: (message: TimelineMessage) => void;
-  onEdit?: (message: TimelineMessage) => void;
-  onMarkUnread?: (message: TimelineMessage) => void;
-  onMarkRead?: (message: TimelineMessage) => void;
-  onReply?: (message: TimelineMessage) => void;
-  onOpenThread?: (message: TimelineMessage) => void;
-  onToggleReaction?: ToggleReaction;
-  profiles?: UserProfileLookup;
-  searchActiveMessageId?: string | null;
-  searchMatchingMessageIds?: Set<string>;
-  searchQuery?: string;
-  threadUnreadCounts?: ReadonlyMap<string, number>;
-  unfollowThreadById?: (rootId: string) => void;
-  videoReviewContext: ReturnType<typeof buildVideoReviewContextForMessage>;
-};
+  highlighted?: boolean;
+  truncateBody?: boolean;
+  /** The gap currently being backfilled. */
+  fillingGapId?: string | null;
+  onFillGap?: (eventId: string) => void;
+}
 
-export function MessageRowItem({
-  channelId,
-  currentPubkey,
+function AgentCard({ children }: { children: React.ReactNode }) {
+  return <div className="px-3 py-1">{children}</div>;
+}
+
+/** One timeline row, chosen by the entry's kind. */
+export function TimelineRow({
   entry,
-  followThreadById,
-  footer,
-  highlightedMessageId,
-  huddleMemberPubkeys,
-  huddleMemberPubkeysPending,
-  hideAgentAccessBadges,
-  isContinuation = false,
-  isFollowedByContinuation = false,
-  isFollowingThreadById,
-  isUnread,
-  playEntrance = false,
-  onEntranceComplete,
-  onDelete,
-  onEdit,
-  onMarkUnread,
-  onMarkRead,
-  onReply,
-  onOpenThread,
-  onToggleReaction,
-  profiles,
-  searchActiveMessageId,
-  searchMatchingMessageIds,
-  searchQuery,
-  threadUnreadCounts,
-  unfollowThreadById,
-  videoReviewContext,
-}: MessageRowItemProps) {
-  const { message, summary } = entry;
-  const canManage = canManageMessageForCurrentUser(
-    message,
-    currentPubkey,
-    profiles,
-  );
-  const canDelete = canManage && onDelete ? onDelete : undefined;
-  const canEdit = canManage && onEdit ? onEdit : undefined;
-  const effectiveThreadRootId = message.rootId ?? message.id;
-
-  if (summary && onOpenThread) {
-    const isHighlighted = message.id === highlightedMessageId;
-    return (
-      <div
-        className={cn(
-          "group/message relative mx-1 mb-1 flex flex-col gap-0 rounded-2xl px-0 py-1 transition-colors hover:bg-muted/50 focus-within:bg-muted/50",
-          isHighlighted &&
-            "-mx-4 px-4 before:absolute before:-inset-y-1.5 before:inset-x-0 before:animate-[route-target-highlight-fade_2s_ease-out_forwards] before:bg-primary/10 before:content-[''] motion-reduce:before:animate-none sm:-mx-6 sm:px-6",
-        )}
-      >
+  roomId,
+  actions,
+  isContinuation,
+  isFollowedByContinuation,
+  highlighted,
+  truncateBody,
+  fillingGapId,
+  onFillGap,
+}: TimelineRowProps) {
+  const { message } = entry;
+  switch (message.kind) {
+    case "message":
+      return (
         <MessageRow
-          channelId={channelId}
-          highlighted={false}
-          hoverBackground={false}
-          huddleMemberPubkeys={huddleMemberPubkeys}
-          huddleMemberPubkeysPending={huddleMemberPubkeysPending}
-          hideAgentAccessBadge={hideAgentAccessBadges}
-          isFollowingThread={
-            !message.pending && isFollowingThreadById
-              ? isFollowingThreadById(effectiveThreadRootId)
-              : undefined
-          }
-          isUnread={isUnread}
+          message={message}
+          thread={entry.thread}
+          roomId={roomId}
+          actions={actions}
           isContinuation={isContinuation}
-          playEntrance={playEntrance}
-          onEntranceComplete={onEntranceComplete}
-          message={message}
-          onDelete={canDelete}
-          onEdit={canEdit}
-          onFollowThread={
-            !message.pending && followThreadById
-              ? () => followThreadById(effectiveThreadRootId)
-              : undefined
-          }
-          onMarkRead={onMarkRead}
-          onMarkUnread={onMarkUnread}
-          onToggleReaction={onToggleReaction}
-          onReply={onReply}
-          onUnfollowThread={
-            !message.pending && unfollowThreadById
-              ? () => unfollowThreadById(effectiveThreadRootId)
-              : undefined
-          }
-          profiles={profiles}
-          showDepthGuides={false}
-          videoReviewContext={videoReviewContext}
+          isFollowedByContinuation={isFollowedByContinuation}
+          highlighted={highlighted}
+          truncateBody={truncateBody}
         />
-        <MessageThreadSummaryRow
-          depth={message.depth}
-          message={message}
-          onOpenThread={onOpenThread}
-          showDepthGuides={false}
-          summary={summary}
-          summaryIndentOffsetRem={-THREAD_REPLY_ROW_MARGIN_INLINE_REM}
-          unreadCount={threadUnreadCounts?.get(message.id)}
-        />
-        {footer}
-      </div>
-    );
+      );
+    case "membership":
+    case "state":
+    case "divider":
+      return <SystemRow message={message} />;
+    case "gap": {
+      const eventId = message.raw as string;
+      return (
+        <div className="px-3">
+          <TimelineGap loading={fillingGapId === eventId} onClick={() => onFillGap?.(eventId)} />
+        </div>
+      );
+    }
+    // ponytail: the agent cards still read Matrix events; W5 moves them onto the view model.
+    case "approval":
+      return (
+        <AgentCard>
+          <ApprovalCard event={message.raw as MatrixEvent} />
+        </AgentCard>
+      );
+    case "question":
+      return (
+        <AgentCard>
+          <QuestionCard event={message.raw as MatrixEvent} />
+        </AgentCard>
+      );
+    case "error":
+      return (
+        <AgentCard>
+          <ErrorTile decoded={message.raw as Extract<DecodedZooidEvent, { kind: "error" }>} />
+        </AgentCard>
+      );
+    case "agent-turn":
+      return (
+        <AgentCard>
+          <ZooidEventTile
+            decoded={message.raw as DecodedZooidEvent}
+            sender={message.author.id}
+            roomId={roomId}
+            ts={message.createdAt}
+          />
+        </AgentCard>
+      );
   }
-
-  const isSearchMatch = searchMatchingMessageIds?.has(message.id) ?? false;
-  const isSearchActive = message.id === searchActiveMessageId;
-
-  return (
-    <div
-      className={cn(
-        "flex flex-col gap-1",
-        isFollowedByContinuation ? "pb-0" : "pb-2.5",
-      )}
-    >
-      <MessageRow
-        channelId={channelId}
-        highlighted={message.id === highlightedMessageId || isSearchActive}
-        huddleMemberPubkeys={huddleMemberPubkeys}
-        huddleMemberPubkeysPending={huddleMemberPubkeysPending}
-        hideAgentAccessBadge={hideAgentAccessBadges}
-        isContinuation={isContinuation}
-        isFollowingThread={
-          !message.pending && isFollowingThreadById
-            ? isFollowingThreadById(effectiveThreadRootId)
-            : undefined
-        }
-        isUnread={isUnread}
-        playEntrance={playEntrance}
-        onEntranceComplete={onEntranceComplete}
-        message={message}
-        onDelete={canDelete}
-        onEdit={canEdit}
-        onFollowThread={
-          !message.pending && followThreadById
-            ? () => followThreadById(effectiveThreadRootId)
-            : undefined
-        }
-        onMarkRead={onMarkRead}
-        onMarkUnread={onMarkUnread}
-        onToggleReaction={onToggleReaction}
-        onReply={onReply}
-        onUnfollowThread={
-          !message.pending && unfollowThreadById
-            ? () => unfollowThreadById(effectiveThreadRootId)
-            : undefined
-        }
-        profiles={profiles}
-        searchQuery={isSearchMatch ? searchQuery : undefined}
-        showDepthGuides={false}
-        videoReviewContext={videoReviewContext}
-      />
-      {footer}
-    </div>
-  );
 }

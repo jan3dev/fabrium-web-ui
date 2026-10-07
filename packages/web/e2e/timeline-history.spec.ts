@@ -102,7 +102,7 @@ test("thread replies behind the sync window are loaded when the thread opens", a
 
   await loginAndOpenRoom(page, human, roomId);
 
-  await page.getByRole("button", { name: /view thread \(\d+ events\)/i }).click();
+  await page.getByRole("button", { name: /view thread \(\d+ repl/i }).click();
 
   // Every reply the server knows about, not just the one that happened to be
   // inside the sync window.

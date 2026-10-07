@@ -34,6 +34,21 @@ Derived files:
 - `src/hooks/use-aux-panel-width.ts` ← `desktop/src/shared/hooks/useThreadPanelWidth.ts`
 - `src/hooks/use-mobile.ts` ← `desktop/src/shared/hooks/use-mobile.tsx`
 - `src/lib/keyboard-shortcuts.ts` ← `desktop/src/shared/lib/keyboard-shortcuts.ts`
+- `src/components/timeline/timeline-list.tsx` ← `desktop/src/features/messages/ui/TimelineMessageList.tsx`
+- `src/components/timeline/timeline-row.tsx` ← `desktop/src/features/messages/ui/TimelineMessageRow.tsx`
+- `src/components/timeline/day-divider.tsx` ← `desktop/src/features/messages/ui/DayDivider.tsx`
+- `src/components/timeline/unread-divider.tsx` ← `desktop/src/features/messages/ui/UnreadDivider.tsx`
+- `src/components/timeline/timeline-skeleton.tsx` ← `desktop/src/features/messages/ui/TimelineSkeleton.tsx`
+- `src/components/timeline/room-intro.tsx` ← `desktop/src/features/messages/ui/ChannelIntroBlock.tsx`
+- `src/components/timeline/message-row.tsx` ← `desktop/src/features/messages/ui/MessageRow.tsx`
+- `src/components/timeline/message-header.tsx` ← `desktop/src/features/messages/ui/MessageHeader.tsx`, `MessageAuthorWithIndicators.tsx`
+- `src/components/timeline/message-timestamp.tsx` ← `desktop/src/features/messages/ui/MessageTimestamp.tsx`
+- `src/components/timeline/message-action-bar.tsx` ← `desktop/src/features/messages/ui/MessageActionBar.tsx`
+- `src/components/timeline/reactions-row.tsx` ← `desktop/src/features/messages/ui/MessageReactions.tsx`
+- `src/components/timeline/reaction-picker-emoji.tsx` ← `desktop/src/features/custom-emoji/ui/EmojiPicker.tsx`
+- `src/components/timeline/delete-confirm-dialog.tsx` ← `desktop/src/features/messages/ui/DeleteMessageConfirmDialog.tsx`
+- `src/lib/timeline/timeline-items.ts` ← `desktop/src/features/messages/lib/timelineItems.ts`, `messageGrouping.ts`, `virtualizedTimelineItems.ts`
+- `src/hooks/timeline/use-bottom-settle.ts` ← `desktop/src/features/messages/ui/useVirtualizedBottomSettle.ts`
 
 ## Apache License 2.0
 

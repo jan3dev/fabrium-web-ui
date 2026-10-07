@@ -43,7 +43,7 @@ export function QuoteCardView(p: QuoteCardViewProps) {
           {p.senderName}
         </span>
         {p.roomLabel && <span className="truncate">in {p.roomLabel}</span>}
-        <MessageTimestamp ts={p.ts} />
+        <MessageTimestamp createdAt={p.ts} />
       </div>
       <div className="mt-1 text-sm">
         {p.deleted ? (

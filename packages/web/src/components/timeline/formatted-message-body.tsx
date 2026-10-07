@@ -5,6 +5,7 @@ import parse, {
   type HTMLReactParserOptions,
 } from "html-react-parser";
 import { Fragment, type ReactNode } from "react";
+import { splitUrls } from "@/lib/autolink";
 import { senderColor, splitMentions } from "@/lib/sender";
 import { useUserName } from "@/hooks/use-user-name";
 import { MessageLink } from "./message-link";
@@ -41,6 +42,31 @@ function renderTextWithMentions(text: string, roomId: string): ReactNode[] {
     ) : (
       <Fragment key={i}>{seg.text}</Fragment>
     ),
+  );
+}
+
+/** A plain-text body with mentions and bare URLs turned into pills and links. */
+export function PlainMessageBody({ text, roomId }: { text: string; roomId: string }) {
+  return (
+    <p className="min-w-0 whitespace-pre-wrap break-words text-body2 text-text-primary">
+      {splitMentions(text).map((seg, i) =>
+        seg.userId ? (
+          <MentionPill key={i} userId={seg.userId} roomId={roomId} />
+        ) : (
+          <Fragment key={i}>
+            {splitUrls(seg.text).map((part, j) =>
+              part.url ? (
+                <MessageLink key={j} href={part.url}>
+                  {part.url}
+                </MessageLink>
+              ) : (
+                <Fragment key={j}>{part.text}</Fragment>
+              ),
+            )}
+          </Fragment>
+        ),
+      )}
+    </p>
   );
 }
 

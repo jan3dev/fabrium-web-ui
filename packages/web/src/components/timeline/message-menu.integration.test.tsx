@@ -6,7 +6,9 @@ import { MatrixClientPeg } from "@/client/peg";
 import { QUOTE_FIELD, type QuoteRef } from "@/lib/matrix/quote";
 import { getQuoteDraft, resetQuoteDrafts } from "@/lib/quote-draft-store";
 import { makeFakeClient, makeMatrixEvent, makeRoom, pushTimelineEvent } from "../../../test/factories";
-import { TextMessage } from "./text-message";
+import { MemoryRouter } from "react-router-dom";
+import { ThreadView } from "../structures/thread-view";
+import { TimelinePanel } from "../structures/timeline-panel";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -42,6 +44,22 @@ function setup(content: Record<string, unknown>, opts: { sender?: string; eventI
   return { client: cast, room, event };
 }
 
+function renderRoom() {
+  return render(
+    <MemoryRouter>
+      <TimelinePanel roomId={roomId} onOpenThread={() => {}} />
+    </MemoryRouter>,
+  );
+}
+
+function renderThread(rootId: string) {
+  return render(
+    <MemoryRouter>
+      <ThreadView roomId={roomId} rootEventId={rootId} onBack={() => {}} />
+    </MemoryRouter>,
+  );
+}
+
 async function openMenu() {
   const user = userEvent.setup();
   // userEvent.setup() installs its own clipboard stub; put ours back on top.
@@ -51,45 +69,44 @@ async function openMenu() {
 }
 
 describe("message hover bar", () => {
-  it("shows React, Reply, Share and More; Edit/Delete are no longer bar buttons", () => {
-    const { event } = setup({ msgtype: "m.text", body: "hi" }, { sender: me });
-    render(<TextMessage event={event} />);
-    expect(screen.getByRole("button", { name: /^reply$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /share message/i })).toBeInTheDocument();
+  it("shows React, Reply in thread, Copy link and More; Edit/Delete live in the menu", () => {
+    setup({ msgtype: "m.text", body: "hi" }, { sender: me });
+    renderRoom();
+    expect(screen.getByRole("button", { name: /^add reaction$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^reply in thread$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^copy link$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /more actions/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /edit message/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /delete message/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^edit$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^delete$/i })).toBeNull();
   });
 
-  it("labels Share as Share thread on a root with replies", () => {
-    const { event } = setup({ msgtype: "m.text", body: "root" });
-    (event as unknown as { getUnsigned: () => unknown }).getUnsigned = () => ({
-      "m.relations": { "m.thread": { count: 3 } },
-    });
-    render(<TextMessage event={event} />);
-    expect(screen.getByRole("button", { name: /share thread/i })).toBeInTheDocument();
+  it("hides Reply in thread inside a thread", () => {
+    setup({ msgtype: "m.text", body: "re", "m.relates_to": { rel_type: "m.thread", event_id: "$m1" } }, { eventId: "$reply" });
+    renderThread("$m1");
+    expect(screen.queryByRole("button", { name: /^reply in thread$/i })).toBeNull();
   });
 });
 
 describe("⋯ menu", () => {
-  it("lists Copy link, Copy text, Quote, and Edit/Delete only when allowed", async () => {
-    const { event } = setup({ msgtype: "m.text", body: "hi" }, { sender: "@alice:h.example" });
-    render(<TextMessage event={event} />);
+  it("lists Copy text, Quote, Share, and Edit/Delete only when allowed", async () => {
+    setup({ msgtype: "m.text", body: "hi" }, { sender: "@alice:h.example" });
+    renderRoom();
     await openMenu();
-    expect(await screen.findByRole("menuitem", { name: /copy link/i })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /copy text/i })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: /copy text/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^share$/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /^quote$/i })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /^edit$/i })).toBeNull();
   });
 
   it("Copy link copies the thread URL and toasts", async () => {
-    const { event } = setup(
+    setup(
       { msgtype: "m.text", body: "re", "m.relates_to": { rel_type: "m.thread", event_id: "$root" } },
       { eventId: "$reply" },
     );
-    render(<TextMessage event={event} disableThreadAffordances />);
-    const user = await openMenu();
-    await user.click(await screen.findByRole("menuitem", { name: /copy link/i }));
+    renderThread("$root");
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    await user.click(screen.getAllByRole("button", { name: /^copy link$/i }).at(-1)!);
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(
         `${window.location.origin}/room/!r%3Ah.example?thread=%24root&event=%24reply`,
@@ -99,16 +116,16 @@ describe("⋯ menu", () => {
   });
 
   it("Copy text copies the plain body", async () => {
-    const { event } = setup({ msgtype: "m.text", body: "copy me" });
-    render(<TextMessage event={event} />);
+    setup({ msgtype: "m.text", body: "copy me" });
+    renderRoom();
     const user = await openMenu();
     await user.click(await screen.findByRole("menuitem", { name: /copy text/i }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("copy me"));
   });
 
   it("toasts an error when the clipboard is denied", async () => {
-    const { event } = setup({ msgtype: "m.text", body: "copy me" });
-    render(<TextMessage event={event} />);
+    setup({ msgtype: "m.text", body: "copy me" });
+    renderRoom();
     const user = await openMenu();
     writeText.mockRejectedValue(new Error("denied"));
     await user.click(await screen.findByRole("menuitem", { name: /copy text/i }));
@@ -117,8 +134,8 @@ describe("⋯ menu", () => {
   });
 
   it("Quote in the room timeline drafts into the room composer", async () => {
-    const { event } = setup({ msgtype: "m.text", body: "quote me" });
-    render(<TextMessage event={event} />);
+    setup({ msgtype: "m.text", body: "quote me" });
+    renderRoom();
     const user = await openMenu();
     await user.click(await screen.findByRole("menuitem", { name: /^quote$/i }));
     const draft = getQuoteDraft(roomId, null);
@@ -127,11 +144,11 @@ describe("⋯ menu", () => {
   });
 
   it("Quote inside a thread drafts into that thread's composer", async () => {
-    const { event } = setup(
+    setup(
       { msgtype: "m.text", body: "re", "m.relates_to": { rel_type: "m.thread", event_id: "$root" } },
       { eventId: "$reply" },
     );
-    render(<TextMessage event={event} disableThreadAffordances />);
+    renderThread("$root");
     const user = await openMenu();
     await user.click(await screen.findByRole("menuitem", { name: /^quote$/i }));
     expect(getQuoteDraft(roomId, "$root")?.quote.event_id).toBe("$reply");
@@ -151,8 +168,8 @@ describe("quote messages", () => {
   const fallback = "> Coding · 2026-09-25 14:42 UTC · link\n> the quoted answer";
 
   it("renders the comment and a card, not the raw fallback", () => {
-    const { event } = setup({ msgtype: "m.text", body: `my take\n\n${fallback}`, [QUOTE_FIELD]: quote });
-    render(<TextMessage event={event} />);
+    setup({ msgtype: "m.text", body: `my take\n\n${fallback}`, [QUOTE_FIELD]: quote });
+    renderRoom();
     expect(screen.getByText("my take")).toBeInTheDocument();
     const card = screen.getByRole("link", { name: /quoted message/i });
     expect(within(card).getByText("the quoted answer")).toBeInTheDocument();
@@ -160,27 +177,27 @@ describe("quote messages", () => {
   });
 
   it("quoting a quote snapshots the comment, not the fallback", async () => {
-    const { event } = setup({ msgtype: "m.text", body: `my take\n\n${fallback}`, [QUOTE_FIELD]: quote });
-    render(<TextMessage event={event} />);
+    setup({ msgtype: "m.text", body: `my take\n\n${fallback}`, [QUOTE_FIELD]: quote });
+    renderRoom();
     const user = await openMenu();
     await user.click(await screen.findByRole("menuitem", { name: /^quote$/i }));
     expect(getQuoteDraft(roomId, null)?.quote.snapshot).toEqual({ msgtype: "m.text", body: "my take" });
   });
 
   it("quoting a bare quote snapshots the nested snapshot", async () => {
-    const { event } = setup({ msgtype: "m.text", body: fallback, [QUOTE_FIELD]: quote });
-    render(<TextMessage event={event} />);
+    setup({ msgtype: "m.text", body: fallback, [QUOTE_FIELD]: quote });
+    renderRoom();
     const user = await openMenu();
     await user.click(await screen.findByRole("menuitem", { name: /^quote$/i }));
     expect(getQuoteDraft(roomId, null)?.quote.snapshot).toEqual(quote.snapshot);
   });
 
   it("editing a quote edits the comment and keeps the fallback", async () => {
-    const { client, event } = setup(
+    const { client } = setup(
       { msgtype: "m.text", body: `my take\n\n${fallback}`, [QUOTE_FIELD]: quote },
       { sender: me },
     );
-    render(<TextMessage event={event} />);
+    renderRoom();
     const user = await openMenu();
     await user.click(await screen.findByRole("menuitem", { name: /^edit$/i }));
     const box = screen.getByRole("textbox", { name: /edit message/i });

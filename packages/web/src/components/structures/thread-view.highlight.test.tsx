@@ -33,9 +33,9 @@ describe("<ThreadView highlightEventId />", () => {
     const { container } = render(
       <ThreadView roomId={roomId} rootEventId="$root" onBack={() => {}} highlightEventId="$r1" />,
     );
-    const el = container.querySelector('[data-event-id="$r1"]');
+    const el = container.querySelector('[data-message-id="$r1"]');
     expect(el).toHaveAttribute("data-highlighted");
-    expect(container.querySelector('[data-event-id="$r2"]')).not.toHaveAttribute("data-highlighted");
+    expect(container.querySelector('[data-message-id="$r2"]')).not.toHaveAttribute("data-highlighted");
     expect(spy).toHaveBeenCalled();
   });
 

@@ -1,25 +1,29 @@
 import { render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
-import { injectStateEvent, makeFakeClient, makeRoom, mkMatrixEvent } from "../../../test/factories";
-import { MatrixClientPeg } from "../../client/peg";
+import { MemoryRouter } from "react-router-dom";
+import { expect, it } from "vitest";
 import { RoomIntro } from "./room-intro";
 
-vi.mock("@dicebear/core", () => ({ createAvatar: vi.fn().mockReturnValue({ toDataUri: () => "data:image/svg+xml,mock" }) }));
-vi.mock("@dicebear/collection", () => ({ shapes: {} }));
+function renderIntro(props: Partial<Parameters<typeof RoomIntro>[0]> = {}) {
+  render(
+    <MemoryRouter>
+      <RoomIntro name="general" glyph={null} {...props} />
+    </MemoryRouter>,
+  );
+}
 
-const me = "@me:h.example";
-const roomId = "!r:h.example";
-afterEach(() => MatrixClientPeg.reset());
+it("renders a channel name as a #-prefixed heading", () => {
+  renderIntro();
+  expect(screen.getByRole("heading", { name: "#general" })).toBeInTheDocument();
+  expect(screen.getByText(/beginning of the channel/i)).toBeInTheDocument();
+});
 
-it("renders the room name and topic at the start of the room", () => {
-  const client = makeFakeClient({ userId: me });
-  const room = makeRoom(roomId, { client, myUserId: me });
-  Object.assign(room as unknown as Record<string, unknown>, { name: "dev", getMxcAvatarUrl: () => null });
-  injectStateEvent(room, mkMatrixEvent({ roomId, sender: "@a:h.example", type: "m.room.topic", stateKey: "", content: { topic: "ship the daemon" } }));
-  Object.assign(client as unknown as Record<string, unknown>, { getRoom: () => room, mxcUrlToHttp: () => "" });
-  MatrixClientPeg.injectClientForTest(client);
-  render(<RoomIntro roomId={roomId} />);
-  expect(screen.getByText(/start of/i)).toBeInTheDocument();
-  expect(screen.getByText("dev")).toBeInTheDocument();
+it("renders the topic", () => {
+  renderIntro({ topic: "ship the daemon" });
   expect(screen.getByText("ship the daemon")).toBeInTheDocument();
+});
+
+it("names a DM without the # prefix", () => {
+  renderIntro({ name: "Ada", isDm: true });
+  expect(screen.getByRole("heading", { name: "Ada" })).toBeInTheDocument();
+  expect(screen.getByText(/your conversation with/i)).toBeInTheDocument();
 });
