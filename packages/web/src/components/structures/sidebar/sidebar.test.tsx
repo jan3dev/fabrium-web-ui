@@ -242,7 +242,7 @@ describe("<Sidebar> action affordances", () => {
       </MemoryRouter>,
     );
     await user.click(screen.getByRole("button", { name: /add room/i }));
-    expect(await screen.findByRole("dialog", { name: /create room/i })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /create a room/i })).toBeInTheDocument();
   });
 });
 

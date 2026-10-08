@@ -18,24 +18,16 @@ function renderTopBar() {
 describe("<TopBar>", () => {
   afterEach(() => setGlobalSearchEnabled(true));
 
-  it("links to the search page, not a text input", () => {
+  it("offers the search field", () => {
     setGlobalSearchEnabled(true);
     renderTopBar();
-    expect(screen.getByRole("link", { name: /search/i })).toHaveAttribute(
-      "href",
-      "/search",
-    );
-    expect(
-      screen.queryByRole("textbox", { name: /search/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Search" })).toBeInTheDocument();
   });
 
   it("hides search entirely when global search is off", () => {
     setGlobalSearchEnabled(false);
     renderTopBar();
-    expect(
-      screen.queryByRole("link", { name: /search/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Search" })).not.toBeInTheDocument();
   });
 
   it("always offers the sidebar toggle", () => {

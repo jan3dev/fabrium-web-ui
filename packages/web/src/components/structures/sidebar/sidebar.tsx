@@ -1,4 +1,4 @@
-import { FlagIcon, PlusIcon } from "@/components/icons";
+import { CompassIcon, FlagIcon, InboxIcon, PlusIcon } from "@/components/icons";
 import { type Room } from "matrix-js-sdk";
 import { useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -11,11 +11,13 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDirectRooms } from "../../../hooks/use-direct-rooms";
 import { useFavoriteRooms } from "../../../hooks/use-favorite-rooms";
+import { useInboxNeedsActionCount } from "../../../hooks/use-inbox";
 import { useMyPowerLevel } from "../../../hooks/use-my-power-level";
 import { useRoomList } from "../../../hooks/use-room-list";
 import { useSectionUnread } from "../../../hooks/use-section-unread";
 import { useSpaceChildren } from "../../../hooks/use-space-children";
 import { useWorkforce } from "../../../hooks/use-workforce";
+import { BrowseRoomsDialog } from "../../dialogs/browse-rooms";
 import { CreateDmDialog } from "../../dialogs/create-dm";
 import { CreateRoomDialog } from "../../dialogs/create-room";
 import { InvitesSection } from "./invites-section";
@@ -57,8 +59,10 @@ export function Sidebar({ scope, workforceSpaceId }: SidebarProps) {
   const myPL = useMyPowerLevel(spaceId);
   const canCreateRoom = scope.kind === "space" && myPL.canSendStateEvent("m.space.child");
   const [createRoomOpen, setCreateRoomOpen] = useState(false);
+  const [browseOpen, setBrowseOpen] = useState(false);
   const [createDmOpen, setCreateDmOpen] = useState(false);
   const { isAgent } = useWorkforce(workforceSpaceId ?? "");
+  const needsAction = useInboxNeedsActionCount(workforceSpaceId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { overflow, scrollTo } = useUnreadOverflow(scrollRef);
 
@@ -101,8 +105,17 @@ export function Sidebar({ scope, workforceSpaceId }: SidebarProps) {
         />
       ) : null}
       <SidebarContent ref={scrollRef} className="gap-0 overscroll-none pt-1">
-        {scope.kind === "space" ? (
-          <SidebarMenu className="px-2 pb-1">
+        <SidebarMenu className="px-2 pb-1">
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild isActive={pathname === "/inbox"}>
+              <Link to="/inbox">
+                <InboxIcon aria-hidden />
+                <span className="flex-1">Inbox</span>
+                <UnreadBadge total={needsAction} highlight={needsAction} />
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          {scope.kind === "space" ? (
             <SidebarMenuItem>
               <SidebarMenuButton asChild isActive={pathname === "/"}>
                 <Link to="/">
@@ -111,8 +124,8 @@ export function Sidebar({ scope, workforceSpaceId }: SidebarProps) {
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
-          </SidebarMenu>
-        ) : null}
+          ) : null}
+        </SidebarMenu>
         <InvitesSection />
         <Section
           title="Favorites"
@@ -125,6 +138,21 @@ export function Sidebar({ scope, workforceSpaceId }: SidebarProps) {
           action={
             <>
               <UnreadBadge total={roomUnread.total} highlight={roomUnread.highlight} />
+              {scope.kind === "space" ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="browse rooms"
+                      onClick={() => setBrowseOpen(true)}
+                      className={SECTION_ICON_BUTTON_CLASS}
+                    >
+                      <CompassIcon />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Browse rooms</TooltipContent>
+                </Tooltip>
+              ) : null}
               {canCreateRoom ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -182,11 +210,14 @@ export function Sidebar({ scope, workforceSpaceId }: SidebarProps) {
         />
       ) : null}
       {scope.kind === "space" ? (
-        <CreateRoomDialog
-          open={createRoomOpen}
-          spaceId={scope.spaceId}
-          onOpenChange={setCreateRoomOpen}
-        />
+        <>
+          <CreateRoomDialog
+            open={createRoomOpen}
+            spaceId={scope.spaceId}
+            onOpenChange={setCreateRoomOpen}
+          />
+          <BrowseRoomsDialog open={browseOpen} spaceId={scope.spaceId} onOpenChange={setBrowseOpen} />
+        </>
       ) : null}
       {workforceSpaceId ? (
         <CreateDmDialog

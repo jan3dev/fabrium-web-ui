@@ -2,6 +2,7 @@
 import * as React from "react";
 
 import { UserAvatar } from "@/components/user-avatar";
+import { UserProfilePopover } from "@/components/user-profile-popover";
 import {
   Tooltip,
   TooltipContent,
@@ -47,9 +48,15 @@ export interface MessageRowActions {
   canDelete: (message: TimelineMessage) => boolean;
 }
 
-function AuthorAvatar({ userId }: { userId: string }) {
-  const { presence } = usePresence(userId);
-  return <UserAvatar userId={userId} size="sm" presence={presence} />;
+function AuthorAvatar({ author, roomId }: { author: TimelineMessage["author"]; roomId: string }) {
+  const { presence } = usePresence(author.id);
+  return (
+    <UserProfilePopover userId={author.id} roomId={roomId}>
+      <button type="button" aria-label={`Profile of ${author.displayName}`} className="rounded-full">
+        <UserAvatar userId={author.id} size="sm" presence={presence} agent={author.kind === "agent"} />
+      </button>
+    </UserProfilePopover>
+  );
 }
 
 function MessageBody({
@@ -152,13 +159,17 @@ export function MessageRow({
         </div>
       ) : (
         <div className="flex w-8 shrink-0 pt-0.5">
-          <AuthorAvatar userId={message.author.id} />
+          <AuthorAvatar author={message.author} roomId={roomId} />
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
         {isContinuation ? null : (
           <MessageHeaderRow>
-            <MessageAuthor author={message.author} />
+            <UserProfilePopover userId={message.author.id} roomId={roomId}>
+              <button type="button" className="min-w-0 text-left hover:underline">
+                <MessageAuthor author={message.author} />
+              </button>
+            </UserProfilePopover>
             <MessageMetaSegments
               segments={[
                 {

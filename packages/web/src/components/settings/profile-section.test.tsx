@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MatrixClientPeg } from "@/client/peg";
 import { makeFakeClient } from "../../../test/factories";
-import { ProfileSettingsDialog } from "./profile-settings-dialog";
+import { ProfileSection } from "./profile-section";
 
 const me = "@me:h.example";
 
@@ -19,10 +19,10 @@ function setup() {
   return { client: cast };
 }
 
-describe("ProfileSettingsDialog", () => {
+describe("ProfileSection", () => {
   it("saves a changed display name", async () => {
     const { client } = setup();
-    render(<ProfileSettingsDialog open onOpenChange={() => {}} />);
+    render(<ProfileSection onSaved={() => {}} />);
 
     const input = screen.getByLabelText(/display name/i);
     fireEvent.change(input, { target: { value: "New Name" } });
@@ -35,7 +35,7 @@ describe("ProfileSettingsDialog", () => {
 
   it("uploads a selected avatar and sets the avatar url", async () => {
     const { client } = setup();
-    render(<ProfileSettingsDialog open onOpenChange={() => {}} />);
+    render(<ProfileSection onSaved={() => {}} />);
 
     const file = new File(["png-bytes"], "me.png", { type: "image/png" });
     const fileInput = screen.getByLabelText(/avatar/i);
@@ -50,7 +50,7 @@ describe("ProfileSettingsDialog", () => {
 
   it("does not call the profile API when nothing changed", async () => {
     const { client } = setup();
-    render(<ProfileSettingsDialog open onOpenChange={() => {}} />);
+    render(<ProfileSection onSaved={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
     await waitFor(() => {
       expect(client.setDisplayName).not.toHaveBeenCalled();

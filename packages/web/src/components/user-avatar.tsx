@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { type RoomMember, RoomStateEvent, UserEvent } from "matrix-js-sdk";
 import { createAvatar } from "@dicebear/core";
 import { glass } from "@dicebear/collection";
-import { Avatar, AvatarBadge } from "@/components/ui/avatar";
+import { PresenceDot, toPresenceStatus } from "@/components/presence-dot";
+import { Avatar } from "@/components/ui/avatar";
 import { MatrixClientPeg } from "@/client/peg";
+import { useKnownAgent } from "@/hooks/use-workforce";
 import { useAuthedMediaUrl } from "@/lib/matrix/authed-media";
 import { cn } from "@/lib/utils";
 
@@ -16,12 +18,6 @@ function avatarSeed(userId: string): string {
   }
   return userId;
 }
-
-const PRESENCE_COLORS: Record<string, string> = {
-  online: "bg-accent-success",
-  unavailable: "bg-accent-warning",
-  offline: "bg-text-tertiary",
-};
 
 /** The user's `mxc://` avatar, or null if they have none we know of yet. */
 function useUserAvatarMxc(userId: string): string | null {
@@ -55,10 +51,14 @@ interface UserAvatarProps {
   userId: string;
   size?: "xs" | "sm" | "default" | "lg";
   presence?: "online" | "offline" | "unavailable";
+  /** Square frame for agents. Defaults to whether any joined workspace's roster lists the user. */
+  agent?: boolean;
   className?: string;
 }
 
-export function UserAvatar({ userId, size = "default", presence, className }: UserAvatarProps) {
+export function UserAvatar({ userId, size = "default", presence, agent, className }: UserAvatarProps) {
+  const knownAgent = useKnownAgent(userId);
+  const square = agent ?? !!knownAgent;
   const mxc = useUserAvatarMxc(userId);
   // Media is authenticated (Matrix 1.11+), so this is an object URL fetched
   // with the access token, not a plain thumbnail link.
@@ -78,7 +78,8 @@ export function UserAvatar({ userId, size = "default", presence, className }: Us
   return (
     <Avatar
       size={avatarSize}
-      className={cn(size === "xs" && "!size-4", className)}
+      data-actor={square ? "agent" : undefined}
+      className={cn(size === "xs" && "!size-4", square && "rounded-utility after:rounded-utility", className)}
     >
       <img
         src={src}
@@ -86,12 +87,12 @@ export function UserAvatar({ userId, size = "default", presence, className }: Us
         onError={() => {
           if (!failed && mxcSrc) setFailed(true);
         }}
-        className="aspect-square size-full rounded-full object-cover"
+        className={cn("aspect-square size-full object-cover", square ? "rounded-utility" : "rounded-full")}
       />
       {presence !== undefined && (
-        <AvatarBadge
-          data-presence={presence}
-          className={cn(PRESENCE_COLORS[presence] ?? PRESENCE_COLORS.offline)}
+        <PresenceDot
+          status={toPresenceStatus(presence)}
+          className="absolute -right-0.5 -bottom-0.5 z-10 size-2.5 ring-2 ring-background group-data-[size=lg]/avatar:size-3"
         />
       )}
     </Avatar>

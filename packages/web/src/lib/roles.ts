@@ -1,57 +1,61 @@
-export const ADMIN_LEVEL = 100;
-export const MODERATOR_LEVEL = 50;
-export const DEFAULT_LEVEL = 0;
+// Fabrium roles on Matrix power levels (plan §6.4). Guest is not a level: it is
+// a room member who is not in the room's project space (see use-member-roles).
+export const OWNER_LEVEL = 100;
+export const ADMIN_LEVEL = 90;
+export const MANAGER_LEVEL = 50;
+export const MEMBER_LEVEL = 0;
 
-export type RoleKind = "admin" | "moderator" | "default" | "custom";
+export type StandardRoleKind = "owner" | "admin" | "manager" | "member";
+export type RoleKind = StandardRoleKind | "custom";
 
 export interface Role {
   kind: RoleKind;
   level: number;
 }
 
+const LEVELS: Record<StandardRoleKind, number> = {
+  owner: OWNER_LEVEL,
+  admin: ADMIN_LEVEL,
+  manager: MANAGER_LEVEL,
+  member: MEMBER_LEVEL,
+};
+
+const LABELS: Record<StandardRoleKind, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  manager: "Manager",
+  member: "Member",
+};
+
+const STANDARD = Object.keys(LEVELS) as StandardRoleKind[];
+
 export function roleForLevel(level: number): Role {
-  if (level === ADMIN_LEVEL) return { kind: "admin", level };
-  if (level === MODERATOR_LEVEL) return { kind: "moderator", level };
-  if (level === DEFAULT_LEVEL) return { kind: "default", level };
-  return { kind: "custom", level };
+  const kind = STANDARD.find((k) => LEVELS[k] === level);
+  return { kind: kind ?? "custom", level };
 }
 
 export function roleLabel(role: Role): string {
-  switch (role.kind) {
-    case "admin":
-      return "Admin";
-    case "moderator":
-      return "Moderator";
-    case "default":
-      return "Default";
-    case "custom":
-      return `Custom (${role.level})`;
-  }
+  return role.kind === "custom" ? `Custom (${role.level})` : LABELS[role.kind];
 }
 
-export function levelForRole(kind: "admin" | "moderator" | "default"): number {
-  switch (kind) {
-    case "admin":
-      return ADMIN_LEVEL;
-    case "moderator":
-      return MODERATOR_LEVEL;
-    case "default":
-      return DEFAULT_LEVEL;
-  }
+export function levelForRole(kind: StandardRoleKind): number {
+  return LEVELS[kind];
 }
 
 export interface RoleOption {
-  kind: "admin" | "moderator" | "default";
+  kind: StandardRoleKind;
   level: number;
   label: string;
   disabled: boolean;
 }
 
-// The three standard roles in descending order. When `viewerLevel` is given,
-// any option above it is disabled (Rule 9: cannot grant above your own level).
+// The standard roles in descending order. When `viewerLevel` is given, any
+// option above it is disabled (Rule 9: cannot grant above your own level).
 export function standardRoleOptions(viewerLevel = Infinity): RoleOption[] {
-  return (["admin", "moderator", "default"] as const).map((kind) => {
-    const level = levelForRole(kind);
-    return { kind, level, label: roleLabel({ kind, level }), disabled: level > viewerLevel };
-  });
+  return STANDARD.map((kind) => ({
+    kind,
+    level: LEVELS[kind],
+    label: LABELS[kind],
+    disabled: LEVELS[kind] > viewerLevel,
+  }));
 }

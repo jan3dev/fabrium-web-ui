@@ -16,6 +16,7 @@ import { Login } from "./components/auth/login";
 import { Register } from "./components/auth/register";
 import { SearchPageRoute } from "./components/structures/search-page";
 import { LobbyRoute } from "./components/structures/lobby";
+import { InboxRoute } from "./components/structures/inbox/inbox-view";
 import { InvitesPage } from "./components/structures/invites-page";
 import { LoggedInView } from "./components/structures/logged-in-view";
 import { RoomView } from "./components/structures/room-view";
@@ -137,6 +138,7 @@ function AppRoutes({ config }: { config: AppConfig }) {
         <Route path="room/:roomId" element={<RoomView />} />
         <Route path="search" element={<SearchPageRoute />} />
         <Route path="invites" element={<InvitesPage />} />
+        <Route path="inbox" element={<InboxRoute />} />
       </Route>
       <Route
         path="/login"

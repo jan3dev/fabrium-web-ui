@@ -16,9 +16,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Alert } from "@/components/ui/alert";
 import { MatrixClientPeg } from "../../client/peg";
 import { useUserSearch } from "../../hooks/use-user-search";
 import { useWorkforce } from "../../hooks/use-workforce";
+import { UserResultRow } from "./user-result-row";
 
 /** Pull a human-readable message out of a matrix-js-sdk error. */
 function inviteErrorMessage(err: unknown): string {
@@ -107,10 +109,10 @@ export function InviteUserDialog({
           </DialogDescription>
         </DialogHeader>
         {!ready && (
-          <p className="rounded-utility border border-accent-warning bg-accent-warning-transparent px-3 py-2 text-caption1 text-text-primary">
+          <Alert tone="warning" role="status" className="p-3 text-caption1">
             Agent list unavailable — search may include agents until the workforce
             roster publishes.
-          </p>
+          </Alert>
         )}
         <Command shouldFilter={false}>
           <CommandInput
@@ -134,22 +136,20 @@ export function InviteUserDialog({
                   }}
                   data-selected={selected === r.userId || undefined}
                 >
-                  <span className="flex-1 truncate">
-                    {r.displayName ?? r.userId}
-                  </span>
-                  <span className="text-xs text-muted-foreground">{r.userId}</span>
+                  <UserResultRow
+                    userId={r.userId}
+                    name={r.displayName ?? r.userId}
+                    selected={selected === r.userId}
+                  />
                 </CommandItem>
               ))}
             </CommandGroup>
           </CommandList>
         </Command>
         {error && (
-          <p
-            role="alert"
-            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-          >
+          <Alert tone="danger" className="p-3 text-caption1">
             {error}
-          </p>
+          </Alert>
         )}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

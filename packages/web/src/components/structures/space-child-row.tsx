@@ -10,6 +10,8 @@ export interface SpaceChildRowProps {
   joined: boolean;
   busy?: boolean;
   onActivate: () => void;
+  /** Badge for a space: a project in the lobby, a workspace in the directory. */
+  spaceLabel?: string;
 }
 
 export function SpaceChildRow({
@@ -20,6 +22,7 @@ export function SpaceChildRow({
   joined,
   busy,
   onActivate,
+  spaceLabel = "Project",
 }: SpaceChildRowProps) {
   // Rooms Join; spaces Enter — joining a space has no timeline to land in.
   const action = kind === "space" ? "Enter" : joined ? "Open" : "Join";
@@ -33,7 +36,7 @@ export function SpaceChildRow({
           {name}
           {kind === "space" && (
             <Badge tone="outline" className="ml-2">
-              Space
+              {spaceLabel}
             </Badge>
           )}
         </p>

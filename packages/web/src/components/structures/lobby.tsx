@@ -1,11 +1,10 @@
-import { useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MatrixClientPeg } from "../../client/peg";
-import { useJoinRoom } from "../../hooks/use-join-room";
 import { useRoomTopic } from "../../hooks/use-room-topic";
-import { useSpaceHierarchy, type SpaceChild } from "../../hooks/use-space-hierarchy";
+import type { SpaceChild } from "../../hooks/use-space-hierarchy";
+import { useRoomBrowser } from "../dialogs/browse-rooms";
 import { useSpaceName } from "../../hooks/use-space-name";
 import { TopicText } from "../timeline/topic-text";
 import { EmptyRoom } from "./empty-room";
@@ -39,22 +38,9 @@ export function Lobby({
   const name = useSpaceName(spaceId) ?? MatrixClientPeg.safeGet()?.getRoom(spaceId)?.name ?? spaceId;
   const topic = useRoomTopic(spaceId);
   const memberCount = MatrixClientPeg.safeGet()?.getRoom(spaceId)?.getJoinedMemberCount() ?? 0;
-  const { children } = useSpaceHierarchy(spaceId, true);
-  const { joinRoom } = useJoinRoom();
-  const [term, setTerm] = useState("");
-  const [joinedOnly, setJoinedOnly] = useState(false);
+  const { term, setTerm, query: q, joinedOnly, setJoinedOnly, rooms, projects: spaces, activate, joiningId } =
+    useRoomBrowser(spaceId, true);
 
-  const q = term.trim().toLowerCase();
-  const matches = (c: SpaceChild) =>
-    !q || (c.name ?? c.roomId).toLowerCase().includes(q) || (c.topic ?? "").toLowerCase().includes(q);
-
-  const rooms = children.filter((c) => c.kind === "room" && matches(c) && (!joinedOnly || c.joined));
-  const spaces = children.filter((c) => c.kind === "space" && matches(c));
-
-  const activateRoom = (child: SpaceChild) => {
-    if (child.joined) navigate(`/room/${child.roomId}`);
-    else void joinRoom(child.roomId);
-  };
   const activateSpace = (child: SpaceChild) => {
     setScope({ kind: "space", spaceId: child.roomId });
     navigate("/");
@@ -63,13 +49,13 @@ export function Lobby({
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto">
       <header className="border-b border-border px-6 py-6">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{name}</h1>
+        <h1 className="font-heading text-h3 font-semibold text-text-primary">{name}</h1>
         {topic && (
-          <div className="mt-2 text-sm leading-6 text-muted-foreground">
+          <div className="mt-2 text-body2 text-text-secondary">
             <TopicText topic={topic} clamp={false} />
           </div>
         )}
-        <p className="mt-2 text-xs text-muted-foreground">
+        <p className="mt-2 text-caption1 text-text-secondary">
           {memberCount} member{memberCount !== 1 ? "s" : ""}
         </p>
       </header>
@@ -103,8 +89,8 @@ export function Lobby({
       </div>
       <div className="flex flex-col gap-6 p-6">
         {rooms.length === 0 && spaces.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            {q ? `No rooms or spaces match “${term.trim()}”.` : "Nothing here yet."}
+          <p className="text-body2 text-text-secondary">
+            {q ? `No rooms or projects match “${term.trim()}”.` : "Nothing here yet."}
           </p>
         )}
         <ul className="flex flex-col gap-2">
@@ -116,13 +102,14 @@ export function Lobby({
               memberCount={r.memberCount}
               kind="room"
               joined={r.joined}
-              onActivate={() => activateRoom(r)}
+              busy={joiningId === r.roomId}
+              onActivate={() => void activate(r)}
             />
           ))}
         </ul>
         {spaces.length > 0 && (
-          <section role="region" aria-label="Spaces" className="flex flex-col gap-2">
-            <h2 className="text-xs font-semibold uppercase text-muted-foreground">Spaces</h2>
+          <section role="region" aria-label="Projects" className="flex flex-col gap-2">
+            <h2 className="text-caption1 font-semibold text-text-secondary">Projects</h2>
             <ul className="flex flex-col gap-2">
               {spaces.map((s) => (
                 <SpaceChildRow

@@ -75,6 +75,23 @@ Derived files:
 - `src/components/agents/turn-liveness.tsx` ← `desktop/src/features/agents/ui/TurnLivenessIndicator.tsx`
 - `src/components/rooms/agent-activity-bar.tsx` ← `desktop/src/features/channels/ui/BotActivityBar.tsx`
 - `src/components/timeline/approval-card-view.tsx` ← `desktop/src/features/workflows/ui/WorkflowApprovalCard.tsx`
+- `src/components/presence-dot.tsx` ← `desktop/src/features/presence/ui/PresenceBadge.tsx`
+- `src/components/structures/member-row.tsx` ← `desktop/src/features/channels/ui/MembersSidebarMemberCard.tsx`
+- `src/components/dialogs/user-result-row.tsx` ← `desktop/src/features/channels/ui/AddMemberSearchResultRow.tsx`
+- `src/components/agents/agent-status-badge.tsx` ← `desktop/src/features/agents/ui/AgentStatusBadge.tsx`
+- `src/components/search/top-search.tsx` ← `desktop/src/features/search/ui/TopbarSearch.tsx`
+- `src/components/search/search-result-item.tsx` ← `desktop/src/features/search/ui/SearchResultItem.tsx`
+- `src/components/search/highlighted-text.tsx` ← `desktop/src/features/search/ui/HighlightedSearchText.tsx`
+- `src/components/search/search-scope-controls.tsx` ← `desktop/src/features/search/ui/SearchScopeControls.tsx`
+- `src/components/search/use-search-keyboard-nav.ts` ← `desktop/src/features/search/ui/useSearchMenuKeyboardNavigation.ts`
+- `src/lib/search/parse-search-operators.ts` (+ test) ← `desktop/src/features/search/lib/parseSearchOperators.ts` (+ `.test.mjs`)
+- `src/lib/search/search-match.ts` (+ test) ← `desktop/src/features/search/lib/searchMatch.ts` (+ `.test.mjs`)
+- `src/components/structures/inbox/inbox-list-pane.tsx` ← `desktop/src/features/home/ui/InboxListPane.tsx`
+- `src/components/structures/inbox/inbox-detail-pane.tsx` ← `desktop/src/features/home/ui/InboxDetailPane.tsx`
+- `src/components/structures/inbox/inbox-skeleton.tsx` ← `desktop/src/features/home/ui/HomeLoadingState.tsx`
+- `src/hooks/use-inbox-list-width.ts` ← `desktop/src/features/home/useResizableInboxListWidth.ts`
+- `src/components/dialogs/browse-rooms.tsx` ← `desktop/src/features/channels/ui/ChannelBrowserDialog.tsx`
+- `src/components/dialogs/create-room.tsx` ← `desktop/src/features/sidebar/ui/CreateChannelDialog.tsx`, `CreateChannelFormFields.tsx`
 
 ## Apache License 2.0
 

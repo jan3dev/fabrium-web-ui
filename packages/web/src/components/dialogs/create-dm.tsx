@@ -17,9 +17,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Alert } from "@/components/ui/alert";
 import { MatrixClientPeg } from "../../client/peg";
+import { createDirectRoom } from "../../lib/matrix/direct-messages";
 import { useSpaceMembers } from "../../hooks/use-space-members";
 import { useWorkforce } from "../../hooks/use-workforce";
+import { UserResultRow } from "./user-result-row";
 
 interface CreateDmDialogProps {
   open: boolean;
@@ -51,34 +54,10 @@ export function CreateDmDialog({ open, spaceId, onOpenChange }: CreateDmDialogPr
     if (!client) return;
     setSubmitting(true);
     try {
-      const created = (await (
-        client as unknown as {
-          createRoom: (opts: Record<string, unknown>) => Promise<{ room_id: string }>;
-        }
-      ).createRoom({
-        is_direct: true,
-        preset: "trusted_private_chat",
-        invite: selected,
-      })) as { room_id: string };
-
-      const existing =
-        ((
-          client as unknown as {
-            getAccountData: (t: string) => { getContent: () => Record<string, string[]> } | null;
-          }
-        ).getAccountData("m.direct")?.getContent() ?? {}) as Record<string, string[]>;
-      const next = { ...existing };
-      const key = selected[0]!;
-      next[key] = [...(existing[key] ?? []), created.room_id];
-      await (
-        client as unknown as {
-          setAccountData: (t: string, c: Record<string, unknown>) => Promise<unknown>;
-        }
-      ).setAccountData("m.direct", next);
-
+      const roomId = await createDirectRoom(client, selected);
       onOpenChange(false);
       setSelected([]);
-      navigate(`/room/${created.room_id}`);
+      navigate(`/room/${roomId}`);
     } finally {
       setSubmitting(false);
     }
@@ -94,10 +73,10 @@ export function CreateDmDialog({ open, spaceId, onOpenChange }: CreateDmDialogPr
           </DialogDescription>
         </DialogHeader>
         {!ready && (
-          <p className="rounded-utility border border-accent-warning bg-accent-warning-transparent px-3 py-2 text-caption1 text-text-primary">
+          <Alert tone="warning" role="status" className="p-3 text-caption1">
             Agent list unavailable — the picker may include agents until the workforce roster
             publishes.
-          </p>
+          </Alert>
         )}
         <Command>
           <CommandInput placeholder="Search humans…" />
@@ -111,8 +90,11 @@ export function CreateDmDialog({ open, spaceId, onOpenChange }: CreateDmDialogPr
                   onSelect={() => toggle(m.userId)}
                   data-selected={selected.includes(m.userId) || undefined}
                 >
-                  <span className="flex-1 truncate">{m.name ?? m.userId}</span>
-                  <span className="text-xs text-muted-foreground">{m.userId}</span>
+                  <UserResultRow
+                    userId={m.userId}
+                    name={m.name ?? m.userId}
+                    selected={selected.includes(m.userId)}
+                  />
                 </CommandItem>
               ))}
             </CommandGroup>

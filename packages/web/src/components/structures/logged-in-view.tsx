@@ -6,6 +6,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { QuickSwitcher } from "@/components/dialogs/quick-switcher";
+import { focusTopSearch } from "@/components/search/top-search";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { useNotifications } from "@/hooks/use-notifications";
 import { usePushSubscription } from "@/hooks/use-push-subscription";
@@ -164,7 +165,7 @@ export function LoggedInView({
 
   useAppShortcuts({
     onQuickSwitch: () => setSwitcherOpen(true),
-    onSearch: searchEnabled ? () => navigate("/search") : undefined,
+    onSearch: searchEnabled ? focusTopSearch : undefined,
     onNavigateRoom: (delta) => {
       const ids = sidebarRoomIds();
       if (ids.length === 0) return;
@@ -187,7 +188,7 @@ export function LoggedInView({
     <SidebarProvider className="h-svh overflow-hidden bg-sidebar">
       {isMobile ? null : rail}
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar />
+        <TopBar workforceSpaceId={spaceId} />
         <div className="relative flex min-h-0 flex-1">
           <Sidebar>
             {isMobile ? rail : null}

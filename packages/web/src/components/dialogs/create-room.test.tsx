@@ -87,7 +87,7 @@ describe("<CreateRoomDialog>", () => {
       </MemoryRouter>,
     );
     await user.type(screen.getByLabelText(/name/i), "secret");
-    await user.click(screen.getByRole("radio", { name: /invite only/i }));
+    await user.click(screen.getByRole("button", { name: /invite only/i }));
     await user.click(screen.getByRole("button", { name: /create room/i }));
     await waitFor(() => expect(createRoom).toHaveBeenCalledTimes(1));
     const opts = createRoom.mock.calls[0][0] as { initial_state: Array<{ type: string }> };

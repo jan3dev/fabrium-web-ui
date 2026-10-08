@@ -10,6 +10,7 @@ const ME = "@me:h.example";
 function makeClient(opts: {
   publicRooms?: (q: unknown) => Promise<unknown>;
   hierarchy?: () => Promise<unknown>;
+  search?: () => Promise<unknown>;
 }) {
   const client = makeFakeClient({ userId: ME });
   const cast = client as unknown as Record<string, unknown>;
@@ -17,11 +18,12 @@ function makeClient(opts: {
   cast.publicRooms = opts.publicRooms ?? (async () => ({ chunk: [] }));
   cast.getRoomHierarchy = opts.hierarchy ?? (async () => ({ rooms: [] }));
   cast.joinRoom = async (id: string) => ({ roomId: id });
+  cast.search = opts.search ?? (async () => ({ search_categories: { room_events: { results: [] } } }));
   MatrixClientPeg.injectClientForTest(client);
 }
 
-const withRouter: Decorator = (Story) => (
-  <MemoryRouter initialEntries={["/search"]}>
+const withRouter: Decorator = (Story, { parameters }) => (
+  <MemoryRouter initialEntries={[parameters.route ?? "/search"]}>
     <Routes>
       <Route path="/search" element={<Story />} />
       <Route path="/room/:roomId" element={<span data-testid="navigated" />} />
@@ -81,6 +83,64 @@ export const Loading = {
     makeClient({
       publicRooms: () => new Promise(() => {}), // never resolves
     });
+    return <SearchPage spaceId={null} />;
+  },
+};
+
+const general = {
+  roomId: "!g:h",
+  name: "general",
+  myUserId: ME,
+  getMyMembership: () => "join",
+  isSpaceRoom: () => false,
+  hasEncryptionStateEvent: () => false,
+  getCanonicalAlias: () => null,
+  getJoinedMembers: () => [],
+  getMember: () => null,
+};
+
+export const Messages = {
+  parameters: { route: "/search?q=deploy" },
+  render() {
+    setGlobalSearchEnabled(true);
+    makeClient({
+      search: async () => ({
+        search_categories: {
+          room_events: {
+            results: ["Deploy is green, shipping now.", "Who owns the deploy checklist?"].map((body, i) => ({
+              rank: 1,
+              context: {},
+              result: {
+                event_id: `$${i}`,
+                room_id: "!g:h",
+                sender: "@ana:h.example",
+                origin_server_ts: Date.now() - i * 3600_000,
+                type: "m.room.message",
+                content: { msgtype: "m.text", body },
+              },
+            })),
+          },
+        },
+      }),
+    });
+    const cast = MatrixClientPeg.get() as unknown as Record<string, unknown>;
+    cast.getRooms = () => [general];
+    cast.getRoom = (id: string) => (id === "!g:h" ? general : null);
+    return <SearchPage spaceId={null} />;
+  },
+};
+
+export const MessagesUnsupported = {
+  parameters: { route: "/search?q=deploy" },
+  render() {
+    setGlobalSearchEnabled(true);
+    makeClient({
+      search: async () => {
+        throw Object.assign(new Error("Unrecognized"), { errcode: "M_UNRECOGNIZED", httpStatus: 404 });
+      },
+    });
+    const cast = MatrixClientPeg.get() as unknown as Record<string, unknown>;
+    cast.getRooms = () => [general];
     return <SearchPage spaceId={null} />;
   },
 };

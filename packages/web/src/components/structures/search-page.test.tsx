@@ -8,13 +8,14 @@ import { SearchPage } from "./search-page";
 
 const me = "@me:h.example";
 
-function inject(opts: { publicRooms?: ReturnType<typeof vi.fn> }) {
+function inject(opts: { publicRooms?: ReturnType<typeof vi.fn>; search?: ReturnType<typeof vi.fn> }) {
   const client = makeFakeClient({ userId: me });
   const cast = client as unknown as Record<string, unknown>;
   cast.getRoom = () => null;
   cast.publicRooms =
     opts.publicRooms ?? vi.fn(async () => ({ chunk: [], next_batch: undefined }));
   cast.joinRoom = vi.fn(async (id: string) => ({ roomId: id }));
+  cast.search = opts.search ?? vi.fn(async () => ({ search_categories: { room_events: { results: [] } } }));
   MatrixClientPeg.injectClientForTest(client);
   return client;
 }
@@ -22,15 +23,17 @@ function inject(opts: { publicRooms?: ReturnType<typeof vi.fn> }) {
 function Probe() {
   return <span data-testid="path">{useLocation().pathname}</span>;
 }
-function renderPage(spaceId: string | null) {
-  return render(
-    <MemoryRouter initialEntries={["/search"]}>
+function renderPage(spaceId: string | null, at = "/search", tab: "All rooms" | null = "All rooms") {
+  const view = render(
+    <MemoryRouter initialEntries={[at]}>
       <Routes>
         <Route path="/search" element={<SearchPage spaceId={spaceId} />} />
         <Route path="/room/:roomId" element={<Probe />} />
       </Routes>
     </MemoryRouter>,
   );
+  if (tab) fireEvent.click(screen.getByRole("tab", { name: tab }));
+  return view;
 }
 
 beforeEach(() => setGlobalSearchEnabled(true));
@@ -47,7 +50,7 @@ describe("SearchPage", () => {
     expect(screen.queryByRole("tab", { name: /this space/i })).not.toBeInTheDocument();
   });
 
-  it("shows only the All rooms tab", async () => {
+  it("lists public rooms on the All rooms tab", async () => {
     inject({
       publicRooms: vi.fn(async () => ({
         chunk: [
@@ -58,10 +61,9 @@ describe("SearchPage", () => {
     });
     renderPage("!space:h");
 
-    expect(screen.getByRole("tab", { name: "All rooms" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument());
     expect(screen.getByText("Cosmos")).toBeInTheDocument();
-    expect(screen.getByText("Space")).toBeInTheDocument(); // badge
+    expect(screen.getByText("Workspace")).toBeInTheDocument(); // badge
   });
 
   it("joining a public room navigates to it", async () => {
@@ -92,5 +94,39 @@ describe("SearchPage", () => {
 
     expect((client as unknown as { joinRoom: ReturnType<typeof vi.fn> }).joinRoom).toHaveBeenCalledWith("!s:h");
     expect(screen.queryByTestId("path")).toBeNull(); // did NOT navigate to /room/*
+  });
+
+  it("opens on the Messages tab with ?q= and opens a hit at its event", async () => {
+    const search = vi.fn(async () => ({
+      search_categories: {
+        room_events: {
+          results: [
+            {
+              rank: 1,
+              context: {},
+              result: {
+                event_id: "$e",
+                room_id: "!r:h",
+                sender: "@bob:h",
+                origin_server_ts: 1,
+                type: "m.room.message",
+                content: { msgtype: "m.text", body: "pineapple pizza" },
+              },
+            },
+          ],
+        },
+      },
+    }));
+    const client = inject({ search });
+    const room = { roomId: "!r:h", name: "general", getMyMembership: () => "join", isSpaceRoom: () => false, hasEncryptionStateEvent: () => false, getCanonicalAlias: () => null, getJoinedMembers: () => [], getMember: () => null, myUserId: me };
+    const cast = client as unknown as Record<string, unknown>;
+    cast.getRooms = () => [room];
+    renderPage(null, "/search?q=pine", null);
+
+    expect(screen.getByRole("tab", { name: "Messages" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("search")).toHaveValue("pine");
+    const hit = await screen.findByTestId("search-result-message-$e");
+    fireEvent.click(hit);
+    expect(screen.getByTestId("path").textContent).toBe("/room/!r:h");
   });
 });

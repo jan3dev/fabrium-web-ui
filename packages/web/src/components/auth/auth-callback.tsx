@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { Navigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { Alert } from "@/components/ui/alert";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import { exchangeLoginToken } from "../../client/login";
 import { MatrixClientPeg } from "../../client/peg";
+import { AuthCard } from "./auth-card";
 
 interface AuthCallbackProps {
   homeserverUrl: string;
@@ -26,7 +28,15 @@ export function AuthCallback({ homeserverUrl }: AuthCallbackProps) {
   }, [homeserverUrl, loginToken]);
 
   if (!loginToken) return <Navigate to="/login" replace />;
-  if (error) return <div role="alert">{error}</div>;
+  if (error)
+    return (
+      <AuthCard title="Sign-in failed">
+        <Alert tone="danger">{error}</Alert>
+        <Link to="/login" className="text-center text-body2 font-medium text-accent-brand hover:underline">
+          Back to sign in
+        </Link>
+      </AuthCard>
+    );
   if (done) return <Navigate to="/" replace />;
   return (
     <Empty className="min-h-screen" role="status">

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -13,6 +13,7 @@ import {
 } from "../../client/login";
 import { MatrixClientPeg } from "../../client/peg";
 import { registrationSupported } from "../../client/register";
+import { AuthCard } from "./auth-card";
 
 function homeserverHost(url: string): string {
   try {
@@ -109,64 +110,48 @@ export function Login({ homeserverUrl, defaultIdpLabel }: LoginProps) {
   const ssoIdps = ssoFlow?.identity_providers ?? (ssoFlow ? [{ id: "", name: defaultIdpLabel ?? "SSO" }] : []);
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-6">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Sign in to {homeserverHost(homeserverUrl)}</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {error && (
-            <div role="alert" className="text-destructive text-sm">
-              {error}
-            </div>
-          )}
-          {passwordFlow && (
-            <form onSubmit={onPasswordSubmit} className="flex flex-col gap-3">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="login-username">Username</Label>
-                <Input
-                  id="login-username"
-                  name="username"
-                  autoComplete="username"
-                  required
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="login-password">Password</Label>
-                <Input
-                  id="login-password"
-                  name="password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                />
-              </div>
-              <Button type="submit" disabled={submitting}>
-                Sign in
-              </Button>
-            </form>
-          )}
-          {passwordFlow && ssoFlow && <Separator />}
-          {ssoIdps.map((idp) => (
-            <Button
-              key={idp.id || "default-sso"}
-              type="button"
-              variant="outline"
-              onClick={() => onSso(idp.id || undefined)}
-            >
-              Sign in with {idp.name}
-            </Button>
-          ))}
-          {canRegister && (
-            <p className="text-muted-foreground text-sm">
-              No account?{" "}
-              <Link to="/signup" className="underline">
-                Create account
-              </Link>
-            </p>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+    <AuthCard title="Sign in" description={homeserverHost(homeserverUrl)}>
+      {error && <Alert tone="danger">{error}</Alert>}
+      {passwordFlow && (
+        <form onSubmit={onPasswordSubmit} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="login-username">Username</Label>
+            <Input id="login-username" name="username" autoComplete="username" required />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="login-password">Password</Label>
+            <Input
+              id="login-password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          <Button type="submit" variant="primary" className="mt-1" disabled={submitting}>
+            Sign in
+          </Button>
+        </form>
+      )}
+      {passwordFlow && ssoFlow && <Separator />}
+      {ssoIdps.map((idp) => (
+        <Button
+          key={idp.id || "default-sso"}
+          type="button"
+          variant="secondary"
+          onClick={() => onSso(idp.id || undefined)}
+        >
+          Sign in with {idp.name}
+        </Button>
+      ))}
+      {canRegister && (
+        <p className="text-center text-body2 text-text-secondary">
+          No account?{" "}
+          <Link to="/signup" className="font-medium text-accent-brand hover:underline">
+            Create account
+          </Link>
+        </p>
+      )}
+    </AuthCard>
   );
 }

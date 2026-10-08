@@ -44,19 +44,19 @@ export function RoomPicker({ rooms, value, onChange }: RoomPickerProps) {
         <PopoverAnchor asChild>
           <div
             ref={anchorRef}
-            className="flex min-h-9 items-center gap-2 rounded-lg border border-input bg-transparent px-2.5 text-sm transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30"
+            className="flex min-h-[34px] items-center gap-2 rounded-utility border border-surface-border-secondary bg-surface-secondary px-3 text-body2 transition-colors focus-within:border-ring"
           >
-            <span className="shrink-0 text-muted-foreground">To:</span>
+            <span className="shrink-0 text-text-secondary">To:</span>
             {picked ? (
-              <span className="flex min-w-0 items-center gap-1 rounded-md bg-accent py-0.5 pl-2 pr-1 text-accent-foreground">
+              <span className="flex min-w-0 items-center gap-1 rounded-pill bg-surface-selected py-0.5 pl-2.5 pr-1 text-text-primary">
                 <span className="truncate">{picked.name}</span>
                 <button
                   type="button"
                   aria-label={`Clear ${picked.name}`}
                   onClick={clear}
-                  className="shrink-0 rounded-sm p-0.5 hover:bg-background/60"
+                  className="shrink-0 rounded-pill p-0.5 hover:bg-surface-tertiary"
                 >
-                  <CloseIcon className="h-3 w-3" />
+                  <CloseIcon className="size-3" />
                 </button>
               </span>
             ) : (
@@ -72,7 +72,7 @@ export function RoomPicker({ rooms, value, onChange }: RoomPickerProps) {
                   setOpen(true);
                 }}
                 onFocus={() => setOpen(true)}
-                className="h-9 min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
+                className="h-[32px] min-w-0 flex-1 bg-transparent outline-none placeholder:text-text-tertiary"
               />
             )}
           </div>
@@ -88,7 +88,7 @@ export function RoomPicker({ rooms, value, onChange }: RoomPickerProps) {
           }}
         >
           <CommandList>
-            {matches.length === 0 && <p className="px-2 py-1.5 text-sm text-muted-foreground">No rooms match</p>}
+            {matches.length === 0 && <p className="px-2.5 py-1.5 text-body2 text-text-secondary">No rooms match</p>}
             {matches.map((r) => (
               <CommandItem key={r.roomId} value={r.roomId} onSelect={() => pick(r.roomId)}>
                 <span className="truncate">{r.name}</span>

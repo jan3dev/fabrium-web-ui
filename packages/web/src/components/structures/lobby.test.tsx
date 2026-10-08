@@ -133,7 +133,7 @@ it("hides unjoined rooms behind the Joined filter", async () => {
   expect(screen.queryByRole("listitem", { name: /design/i })).not.toBeInTheDocument();
 });
 
-it("omits the Spaces section when the space has no subspaces", async () => {
+it("omits the Projects section when the workspace has no projects", async () => {
   const client = MatrixClientPeg.safeGet();
   setup();
   (MatrixClientPeg.safeGet() as unknown as Record<string, unknown>).getRoomHierarchy = async () => ({
@@ -145,5 +145,5 @@ it("omits the Spaces section when the space has no subspaces", async () => {
   void client;
   renderLobby();
   await screen.findByRole("listitem", { name: /general/i });
-  expect(screen.queryByRole("region", { name: /spaces/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: /projects/i })).not.toBeInTheDocument();
 });

@@ -99,8 +99,8 @@ describe("<MemberPanel> role grouping", () => {
   it("renders a heading per occupied role group", () => {
     setup({ [me]: 100, "@bob:h.example": 0 });
     render(<MemberPanel roomId={roomId} spaceId="!space:h.example" />);
-    expect(screen.getByText(/Admins/)).toBeInTheDocument();
+    expect(screen.getByText(/Owners/)).toBeInTheDocument();
     expect(screen.getByText(/Members/)).toBeInTheDocument();
-    expect(screen.queryByText(/Moderators/)).toBeNull();
+    expect(screen.queryByText(/Managers/)).toBeNull();
   });
 });

@@ -13,7 +13,7 @@ export function Tabs({
 }) {
   return (
     <div className="flex flex-col">
-      <div role="tablist" className="mb-2 flex gap-1 border-b border-border">
+      <div role="tablist" className="mb-4 flex gap-1 border-b border-border">
         {tabs.map((t) => (
           <button
             key={t.value}
@@ -21,10 +21,10 @@ export function Tabs({
             role="tab"
             aria-selected={value === t.value}
             onClick={() => onValueChange(t.value)}
-            className={`px-2 py-1 text-xs font-medium ${
+            className={`-mb-px cursor-pointer px-2.5 py-1.5 text-caption1 font-medium transition-colors ${
               value === t.value
-                ? "border-b-2 border-foreground text-foreground"
-                : "text-muted-foreground"
+                ? "border-b-2 border-accent-brand text-text-primary"
+                : "text-text-secondary hover:text-text-primary"
             }`}
           >
             {t.label}

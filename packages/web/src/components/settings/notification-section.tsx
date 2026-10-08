@@ -74,22 +74,22 @@ export function NotificationSectionView({
   onSetSoundEnabled,
 }: NotificationSectionViewProps) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div className="space-y-2">
-        <p className="text-sm font-medium">This browser</p>
+        <p className="text-body2 font-semibold text-text-primary">This browser</p>
         {permission === "default" && (
           <Button size="sm" variant="outline" onClick={onEnable}>
             Enable notifications
           </Button>
         )}
         {permission === "denied" && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-caption1 text-text-secondary">
             Blocked — re-enable in browser site settings.
           </p>
         )}
         {permission === "granted" && !pushSupported && (
-          <p className="text-xs text-muted-foreground">
-            Push notifications aren&apos;t configured on this server — you&apos;ll still see
+          <p className="text-caption1 text-text-secondary">
+            Push notifications aren&apos;t configured for this workspace — you&apos;ll still see
             notifications while a tab is open.
           </p>
         )}
@@ -103,7 +103,7 @@ export function NotificationSectionView({
             Enable notifications
           </Button>
         )}
-        {subscribeError && <p className="text-xs text-destructive">{subscribeError}</p>}
+        {subscribeError && <p className="text-caption1 text-accent-danger">{subscribeError}</p>}
         <Button
           size="sm"
           variant="ghost"
@@ -116,7 +116,7 @@ export function NotificationSectionView({
 
       {subscribed && (
         <div className="space-y-2">
-          <p className="text-sm font-medium">Agent notifications</p>
+          <p className="text-body2 font-semibold text-text-primary">Agent notifications</p>
           {AGENT_RULE_IDS.map((id) => {
             const enabled = agentRulesEnabled[id] ?? false;
             return (
@@ -129,7 +129,7 @@ export function NotificationSectionView({
                 className="flex w-full justify-between"
               >
                 {AGENT_RULE_LABELS[id] ?? id}
-                <span className="text-xs text-muted-foreground">{enabled ? "On" : "Off"}</span>
+                <span className="text-caption1 text-text-secondary">{enabled ? "On" : "Off"}</span>
               </Button>
             );
           })}
@@ -141,13 +141,13 @@ export function NotificationSectionView({
             className="flex w-full justify-between"
           >
             Sound when an agent finishes (this browser only)
-            <span className="text-xs text-muted-foreground">{soundEnabled ? "On" : "Off"}</span>
+            <span className="text-caption1 text-text-secondary">{soundEnabled ? "On" : "Off"}</span>
           </Button>
         </div>
       )}
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">Notify me about</p>
+        <p className="text-body2 font-semibold text-text-primary">Notify me about</p>
         <div className="flex gap-2">
           <Button
             size="sm"
@@ -179,7 +179,7 @@ export function NotificationSectionView({
               if (e.key === "Enter") onAddKeyword();
             }}
             placeholder="e.g. deploy"
-            className="h-7 text-sm"
+            className="h-[34px]"
           />
           <Button size="sm" onClick={onAddKeyword}>
             Add
@@ -214,8 +214,8 @@ export function NotificationSectionView({
             onKeyDown={(e) => {
               if (e.key === "Enter") onMuteUser();
             }}
-            placeholder="@user:server"
-            className="h-7 text-sm"
+            placeholder="@user:example.org"
+            className="h-[34px]"
           />
           <Button size="sm" onClick={onMuteUser}>
             Mute
@@ -224,12 +224,12 @@ export function NotificationSectionView({
         {mutedUsers.length > 0 && (
           <div className="space-y-1">
             {mutedUsers.map((u) => (
-              <div key={u} className="flex items-center justify-between text-sm">
-                <span className="truncate text-muted-foreground">{u}</span>
+              <div key={u} className="flex items-center justify-between text-body2">
+                <span className="truncate text-text-secondary">{u}</span>
                 <Button
-                  size="sm"
+                  size="xs"
                   variant="ghost"
-                  className="h-6 shrink-0 px-2 text-xs"
+                  className="shrink-0"
                   onClick={() => onUnmuteUser(u)}
                 >
                   Unmute

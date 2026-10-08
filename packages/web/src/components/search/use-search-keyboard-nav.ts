@@ -1,91 +1,60 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/search/ui/useSearchMenuKeyboardNavigation.ts. Modified.
 import * as React from "react";
 
-import type { SearchResult } from "@/features/search/ui/SearchResultItem";
-
-export function useSearchMenuKeyboardNavigation({
-  activeResults,
-  hasLeadingAction,
-  onActivateLeadingAction,
-  onOpenResult,
+/**
+ * Arrow keys move through `count` options, Enter opens the selected one,
+ * Backspace on an empty query drops the room scope. Options carry
+ * `data-search-result-index` so the selected one scrolls into view.
+ */
+export function useSearchKeyboardNav({
+  count,
+  onOpen,
   onRemoveScope,
   query,
   scopeActive,
-  selectedMenuIndex,
-  setSelectedMenuIndex,
+  selectedIndex,
+  setSelectedIndex,
 }: {
-  activeResults: SearchResult[];
-  hasLeadingAction: boolean;
-  onActivateLeadingAction: () => void;
-  onOpenResult: (result: SearchResult) => void;
+  count: number;
+  onOpen: (index: number) => void;
   onRemoveScope: () => void;
   query: string;
   scopeActive: boolean;
-  selectedMenuIndex: number;
-  setSelectedMenuIndex: React.Dispatch<React.SetStateAction<number>>;
+  selectedIndex: number;
+  setSelectedIndex: React.Dispatch<React.SetStateAction<number>>;
 }) {
-  const selectableCount = activeResults.length + (hasLeadingAction ? 1 : 0);
+  React.useEffect(() => {
+    setSelectedIndex((current) => (count === 0 ? 0 : Math.min(current, count - 1)));
+  }, [count, setSelectedIndex]);
 
   React.useEffect(() => {
-    setSelectedMenuIndex((current) => {
-      if (selectableCount === 0) return 0;
-      return Math.min(current, selectableCount - 1);
-    });
-  }, [selectableCount, setSelectedMenuIndex]);
+    document
+      .querySelector<HTMLElement>(`[data-search-result-index="${selectedIndex}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
 
-  React.useEffect(() => {
-    const selectedResult = document.querySelector<HTMLElement>(
-      `[data-search-result-index="${selectedMenuIndex}"]`,
-    );
-    selectedResult?.scrollIntoView({ block: "nearest" });
-  }, [selectedMenuIndex]);
-
-  const handleDialogInputKeyDown = React.useCallback(
+  return React.useCallback(
     (event: React.KeyboardEvent<HTMLInputElement>) => {
       if (event.key === "Backspace" && query.length === 0 && scopeActive) {
         event.preventDefault();
         onRemoveScope();
         return;
       }
-
-      if (event.key === "ArrowDown" && selectableCount > 0) {
+      if (event.key === "ArrowDown" && count > 0) {
         event.preventDefault();
-        setSelectedMenuIndex((current) =>
-          Math.min(current + 1, selectableCount - 1),
-        );
+        setSelectedIndex((current) => Math.min(current + 1, count - 1));
         return;
       }
-
-      if (event.key === "ArrowUp" && selectableCount > 0) {
+      if (event.key === "ArrowUp" && count > 0) {
         event.preventDefault();
-        setSelectedMenuIndex((current) => Math.max(current - 1, 0));
+        setSelectedIndex((current) => Math.max(current - 1, 0));
         return;
       }
-
-      if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+      if (event.key === "Enter" && !event.nativeEvent.isComposing && count > 0) {
         event.preventDefault();
-        if (hasLeadingAction && selectedMenuIndex === 0) {
-          onActivateLeadingAction();
-          return;
-        }
-        const result =
-          activeResults[selectedMenuIndex - (hasLeadingAction ? 1 : 0)];
-        if (result) onOpenResult(result);
+        onOpen(selectedIndex);
       }
     },
-    [
-      activeResults,
-      hasLeadingAction,
-      onActivateLeadingAction,
-      onOpenResult,
-      onRemoveScope,
-      query.length,
-      scopeActive,
-      selectableCount,
-      selectedMenuIndex,
-      setSelectedMenuIndex,
-    ],
+    [count, onOpen, onRemoveScope, query.length, scopeActive, selectedIndex, setSelectedIndex],
   );
-
-  return handleDialogInputKeyDown;
 }

@@ -16,10 +16,10 @@ type TextLexeme = {
   start: number;
 };
 
-// PostgreSQL's `simple` text-search configuration breaks ordinary punctuation
-// into lexemes (for example, `foo-bar` contributes `foo` and `bar`). Keep the
-// desktop highlighter on those lexical boundaries rather than treating raw
-// whitespace tokens as unrestricted substrings.
+// Full-text search breaks ordinary punctuation into lexemes (for example,
+// `foo-bar` contributes `foo` and `bar`). Keep the highlighter on those
+// lexical boundaries rather than treating raw whitespace tokens as
+// unrestricted substrings.
 const LEXEME_PATTERN = /[\p{L}\p{N}]+/gu;
 
 function extractLexemes(value: string): string[] {
@@ -40,7 +40,7 @@ function getSearchHighlightMatchers(query: string): SearchHighlightTerm[] {
   });
 
   // Deduplicate repeated constraints without collapsing exact and prefix modes:
-  // `foo foo` asks Postgres for both an exact `foo` and a `foo:*` lexeme.
+  // `foo foo` asks for both an exact `foo` and a `foo*` prefix.
   const deduped = new Map<string, SearchHighlightTerm>();
   for (const matcher of matchers) {
     deduped.set(
@@ -54,7 +54,7 @@ function getSearchHighlightMatchers(query: string): SearchHighlightTerm[] {
 }
 
 /**
- * Lexemes used by desktop prefix search after punctuation normalization.
+ * Lexemes used by prefix search after punctuation normalization.
  * Completed whitespace-delimited tokens match exactly; only lexemes from the
  * trailing token match prefixes.
  */

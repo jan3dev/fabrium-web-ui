@@ -542,7 +542,7 @@ Per-WP rules:
 | --- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | O2  | Logo | Placeholder text wordmark `Fabrium` in `font-heading` semibold, only in `components/brand/logo.tsx`; swapped later |
 | O3  | Fabrium semantic tokens (§3.3) and any color Haven lacks | Map to Haven primitives only; no invented hex; a new color needs design sign-off |
-| O5  | Matrix message search / notifications API on Tuwunel      | _verify_ in W6; show "not supported" state if absent                                                     |
+| O5  | Matrix message search / notifications API on Tuwunel      | Settled in W6: Tuwunel serves `/search` (whole-word match; `filter.senders: []` matches nobody) and `/notifications?only=highlight`. UI keeps a "not supported" state for other servers |
 | O6  | Where `persona`/`project` come from in `zooid.yaml`       | New optional agent keys `persona`, `project`; fallback agent `name` + workforce space name               |
 | O7  | Fabrium design §5–§7 (own event log, WebSocket, per-workspace `seq`) vs Matrix (D17) | Matrix. Needs a decision record in the fabrium repo (`docs/decisions/NNNN-matrix-transport.md`) that replaces §5–§7, reviewed by the design owner |
 | O8  | Workspace-wide hash-chained audit log (`FB` §15.2) | Fabrium service joins every room as appservice, chains events per workspace, serves export via API |

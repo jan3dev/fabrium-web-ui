@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MatrixClientPeg } from "../../client/peg";
 import { registerWithPassword, registrationSupported } from "../../client/register";
+import { AuthCard } from "./auth-card";
 
 export function Register({ homeserverUrl }: { homeserverUrl: string }) {
   const navigate = useNavigate();
@@ -43,56 +44,45 @@ export function Register({ homeserverUrl }: { homeserverUrl: string }) {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-6">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Create account</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {error && (
-            <div role="alert" className="text-destructive text-sm">
-              {error}
-            </div>
-          )}
-          <form onSubmit={onSubmit} className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="reg-username">Username</Label>
-              <Input id="reg-username" name="username" autoComplete="username" required />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="reg-password">Password</Label>
-              <Input
-                id="reg-password"
-                name="password"
-                type="password"
-                autoComplete="new-password"
-                required
-              />
-            </div>
-            {requiresToken && (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="reg-token">Registration token</Label>
-                <Input
-                  id="reg-token"
-                  name="token"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  required
-                />
-              </div>
-            )}
-            <Button type="submit" disabled={submitting}>
-              Create account
-            </Button>
-          </form>
-          <p className="text-muted-foreground text-sm">
-            Already have an account?{" "}
-            <Link to="/login" className="underline">
-              Sign in
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+    <AuthCard title="Create account">
+      {error && <Alert tone="danger">{error}</Alert>}
+      <form onSubmit={onSubmit} className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="reg-username">Username</Label>
+          <Input id="reg-username" name="username" autoComplete="username" required />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="reg-password">Password</Label>
+          <Input
+            id="reg-password"
+            name="password"
+            type="password"
+            autoComplete="new-password"
+            required
+          />
+        </div>
+        {requiresToken && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="reg-token">Registration token</Label>
+            <Input
+              id="reg-token"
+              name="token"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              required
+            />
+          </div>
+        )}
+        <Button type="submit" variant="primary" className="mt-1" disabled={submitting}>
+          Create account
+        </Button>
+      </form>
+      <p className="text-center text-body2 text-text-secondary">
+        Already have an account?{" "}
+        <Link to="/login" className="font-medium text-accent-brand hover:underline">
+          Sign in
+        </Link>
+      </p>
+    </AuthCard>
   );
 }

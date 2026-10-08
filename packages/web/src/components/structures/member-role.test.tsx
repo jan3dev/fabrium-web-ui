@@ -48,7 +48,7 @@ describe("MemberRow roles", () => {
   it("shows each member's role label", () => {
     setup({ [me]: 100, "@bob:h.example": 0 });
     render(<MemberRow roomId={roomId} userId="@bob:h.example" member={memberAt("@bob:h.example", 0)} />);
-    expect(screen.getByText("Default")).toBeInTheDocument();
+    expect(screen.getByText("Member")).toBeInTheDocument();
   });
 
   it("renders an editable selector when the viewer outranks the target", () => {
@@ -60,29 +60,30 @@ describe("MemberRow roles", () => {
   it("renders a static, non-interactive role for a peer at or above the viewer", () => {
     setup({ [me]: 50, "@peer:h.example": 50 });
     render(<MemberRow roomId={roomId} userId="@peer:h.example" member={memberAt("@peer:h.example", 50)} />);
-    expect(screen.queryByRole("button", { name: /moderator/i })).toBeNull();
-    expect(screen.getByText("Moderator")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /manager/i })).toBeNull();
+    expect(screen.getByText("Manager")).toBeInTheDocument();
   });
 
   it("disables the selector entirely when the viewer cannot send power_levels", () => {
     // viewer at 0, state_default 50 → no edit anywhere
     setup({ [me]: 0, "@bob:h.example": 0 });
     render(<MemberRow roomId={roomId} userId="@bob:h.example" member={memberAt("@bob:h.example", 0)} />);
-    expect(screen.queryByRole("button", { name: /default/i })).toBeNull();
-    expect(screen.getByText("Default")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /member actions/i })).toBeNull();
+    expect(screen.getByText("Member")).toBeInTheDocument();
   });
 
   it("writes the chosen role's level on selection", async () => {
     const { sendStateEvent } = setup({ [me]: 100, "@bob:h.example": 0 });
     render(<MemberRow roomId={roomId} userId="@bob:h.example" member={memberAt("@bob:h.example", 0)} />);
     await userEvent.click(screen.getByRole("button", { name: /member actions/i }));
-    await userEvent.click(await screen.findByRole("menuitemradio", { name: /moderator/i }));
+    await userEvent.click(await screen.findByRole("menuitemradio", { name: /manager/i }));
     expect(sendStateEvent).toHaveBeenCalledTimes(1);
     const content = sendStateEvent.mock.calls[0][2] as { users: Record<string, number> };
     expect(content.users["@bob:h.example"]).toBe(50);
   });
 
   it("disables role options above the viewer's own level", async () => {
+    // A manager may not make anyone an admin.
     setup({ [me]: 50, "@bob:h.example": 0 });
     render(<MemberRow roomId={roomId} userId="@bob:h.example" member={memberAt("@bob:h.example", 0)} />);
     await userEvent.click(screen.getByRole("button", { name: /member actions/i }));
