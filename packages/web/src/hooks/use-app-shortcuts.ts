@@ -21,7 +21,7 @@ function isEditable(target: EventTarget | null): boolean {
 }
 
 /**
- * Shell shortcuts: ⌘K switcher, ⌘/ search, Alt+↑/↓ room, Esc close pane,
+ * Shell shortcuts: ⌘K switcher, ⌘G search, Alt+↑/↓ room, Esc close pane,
  * ⇧Esc mark all read. Bubble phase, and skipped when something more specific
  * (a dialog, a menu, the composer) already handled the key.
  */
@@ -46,7 +46,7 @@ export function useAppShortcuts(options: AppShortcutsOptions) {
         if (key === "k") {
           event.preventDefault();
           onQuickSwitch();
-        } else if (key === "/" && onSearch) {
+        } else if (key === "g" && onSearch) {
           event.preventDefault();
           onSearch();
         }

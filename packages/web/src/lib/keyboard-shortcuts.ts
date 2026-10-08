@@ -19,8 +19,9 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
   {
     id: "search",
     label: "Search messages",
-    keys: ["⌘", "/"],
-    keysWindows: ["Ctrl", "/"],
+    // Not ⌘/: "/" needs Shift on German and other layouts, where it never fires.
+    keys: ["⌘", "G"],
+    keysWindows: ["Ctrl", "G"],
   },
   {
     id: "previous-room",
