@@ -5,6 +5,7 @@ import {
   toOpenTurns,
   toTimelineEntries,
   toTimelineMessages,
+  threadReplyCount,
 } from "../model/from-matrix";
 import type { TimelineEntry, TimelineMessage } from "../model/types";
 import { allRoomEvents, makeSubscribe, useThread, useTimeline } from "./use-timeline";
@@ -71,6 +72,9 @@ export interface ThreadEntriesState {
   root: TimelineMessage | null;
   rootPending: boolean;
   replies: TimelineMessage[];
+  /** Replies to show: messages only, same rule as the summary row. */
+  replyCount: number;
+  /** Thread events of every type, as the server counts them; drives pagination. */
   totalCount: number;
 }
 
@@ -89,6 +93,7 @@ export function useThreadEntries(
       root: root ? (toTimelineMessages([root], room, roster)[0] ?? null) : null,
       rootPending,
       replies: toTimelineMessages(events, room, roster),
+      replyCount: root ? threadReplyCount(root, events) : 0,
       totalCount,
     };
   }, [roomId, root, rootPending, events, totalCount, roster, version]);

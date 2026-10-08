@@ -1,6 +1,7 @@
 import { type MatrixEvent, RoomStateEvent } from "matrix-js-sdk";
 import { useSyncExternalStore } from "react";
 import { MatrixClientPeg } from "../client/peg";
+import { subscribeRoomState } from "./matrix-subscriptions";
 
 const cache = new Map<string, { event: MatrixEvent | null; result: string | null }>();
 
@@ -18,13 +19,10 @@ function snapshot(roomId: string): string | null {
 export function useRoomTopic(roomId: string): string | null {
   return useSyncExternalStore(
     (cb) => {
-      const room = MatrixClientPeg.safeGet()?.getRoom(roomId);
-      if (!room) return MatrixClientPeg.subscribe(cb);
-      const onState = () => cb();
-      room.currentState.on(RoomStateEvent.Events, onState);
+      const unsubState = subscribeRoomState(roomId, [RoomStateEvent.Events], cb);
       const unsubPeg = MatrixClientPeg.subscribe(cb);
       return () => {
-        room.currentState.off(RoomStateEvent.Events, onState);
+        unsubState();
         unsubPeg();
       };
     },

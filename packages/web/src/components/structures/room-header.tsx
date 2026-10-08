@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 import { useMatch } from "react-router-dom";
 
 import { BellOffIcon, InfoIcon, StarIcon } from "@/components/icons";
+import { RoomAvatar, useRoomAvatarMxc } from "@/components/room-avatar";
 import { RoomGlyph } from "@/components/room-glyph";
 import { Badge } from "@/components/ui/badge";
 import { IconButton } from "@/components/ui/icon-button";
@@ -47,6 +48,7 @@ export function RoomHeader({
   const { state: notifState } = useRoomNotifState(roomId);
   const { isAgent } = useWorkforce(workforceSpaceId ?? "");
   const isDm = useDirectRooms().some((r) => r.roomId === roomId);
+  const avatarMxc = useRoomAvatarMxc(roomId);
 
   const room = client?.getRoom(roomId);
   if (!roomId || !client) return null;
@@ -63,13 +65,18 @@ export function RoomHeader({
       data-testid="room-header"
     >
       <div className="flex min-w-0 flex-1 items-center gap-1">
-        <RoomGlyph
-          kind={isDm ? "dm" : "stream"}
-          isPrivate={rule === "invite"}
-          dmUserId={dmUserId}
-          isAgent={isAgentDm}
-          className="text-text-tertiary"
-        />
+        {/* A room image, once set, stands in for the # or lock glyph. */}
+        {!isDm && avatarMxc ? (
+          <RoomAvatar roomId={roomId} name={roomName} size="sm" className="size-5" />
+        ) : (
+          <RoomGlyph
+            kind={isDm ? "dm" : "stream"}
+            isPrivate={rule === "invite"}
+            dmUserId={dmUserId}
+            isAgent={isAgentDm}
+            className="text-text-tertiary"
+          />
+        )}
         <h1 className="min-w-0">
           <button
             type="button"

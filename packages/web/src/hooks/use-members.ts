@@ -1,6 +1,7 @@
 import { type Room, type RoomMember, RoomStateEvent } from "matrix-js-sdk";
 import { useSyncExternalStore } from "react";
 import { MatrixClientPeg } from "../client/peg";
+import { subscribeRoomState } from "./matrix-subscriptions";
 
 const EMPTY: RoomMember[] = [];
 const cache = new WeakMap<Room, RoomMember[]>();
@@ -24,14 +25,10 @@ function snapshot(roomId: string): RoomMember[] {
 export function useMembers(roomId: string): RoomMember[] {
   return useSyncExternalStore(
     (cb) => {
-      const client = MatrixClientPeg.safeGet();
-      const room = client?.getRoom(roomId);
-      if (!room) return MatrixClientPeg.subscribe(cb);
-      const onMember = () => cb();
-      room.currentState.on(RoomStateEvent.Members, onMember);
+      const unsubState = subscribeRoomState(roomId, [RoomStateEvent.Members], cb);
       const unsubPeg = MatrixClientPeg.subscribe(cb);
       return () => {
-        room.currentState.off(RoomStateEvent.Members, onMember);
+        unsubState();
         unsubPeg();
       };
     },

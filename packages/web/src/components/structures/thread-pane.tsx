@@ -81,7 +81,7 @@ export function ThreadPane({
   workforceSpaceId?: string | null;
 }) {
   const { widthPx, onResizeStart, onResetWidth, canReset } = useAuxPanelWidth();
-  const { root, rootPending, replies, totalCount } = useThreadEntries(
+  const { root, rootPending, replies, replyCount, totalCount } = useThreadEntries(
     roomId,
     rootEventId,
     workforceSpaceId,
@@ -187,8 +187,8 @@ export function ThreadPane({
   ]);
 
   const replyLabel =
-    totalCount > 0
-      ? `${totalCount} ${totalCount === 1 ? "reply" : "replies"}`
+    replyCount > 0
+      ? `${replyCount} ${replyCount === 1 ? "reply" : "replies"}`
       : null;
 
   return (

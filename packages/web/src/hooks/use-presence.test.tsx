@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { EventEmitter } from "events";
-import { UserEvent } from "matrix-js-sdk";
+import { ClientEvent, SyncState, UserEvent } from "matrix-js-sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import { makeFakeClient } from "../../test/factories";
 import { MatrixClientPeg } from "../client/peg";
@@ -49,5 +49,22 @@ describe("usePresence", () => {
       user.emit(UserEvent.Presence, null, user);
     });
     expect(result.current.presence).toBe("unavailable");
+  });
+
+  it("shows our own user online while the sync runs, before the server echoes it", () => {
+    const client = makeFakeClient({ userId: me });
+    let sync: SyncState | null = SyncState.Syncing;
+    Object.assign(client, {
+      getUser: () => makeFakeUser(me, "offline"),
+      getSyncState: () => sync,
+    });
+    MatrixClientPeg.injectClientForTest(client);
+    const { result } = renderHook(() => usePresence(me));
+    expect(result.current.presence).toBe("online");
+    act(() => {
+      sync = SyncState.Error;
+      client.emit(ClientEvent.Sync, sync, SyncState.Syncing);
+    });
+    expect(result.current.presence).toBe("offline");
   });
 });

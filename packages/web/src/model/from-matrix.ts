@@ -458,6 +458,26 @@ function toMessage(
   return message;
 }
 
+/**
+ * Replies to show for a thread root, given the thread events loaded so far.
+ * The daemon threads agent turn, tool and plan events onto the root too, and
+ * the server's bundled count includes them; only messages count as replies.
+ */
+export function threadReplyCount(root: MatrixEvent, threadEvents: readonly MatrixEvent[]): number {
+  const serverCount =
+    (
+      root.getUnsigned() as {
+        "m.relations"?: { "m.thread"?: { count?: number } };
+      }
+    )["m.relations"]?.["m.thread"]?.count ?? 0;
+  const messages = threadEvents.filter((ev) => ev.getType() === "m.room.message").length;
+  // ponytail: while part of the thread is unloaded, the server count less the
+  // non-message events seen so far is an estimate; it is exact once all load.
+  return threadEvents.length >= serverCount
+    ? messages
+    : serverCount - (threadEvents.length - messages);
+}
+
 function toThread(
   rootId: string,
   root: MatrixEvent,
@@ -465,28 +485,24 @@ function toThread(
   room: Room | null,
   roster: Roster | null,
 ): ThreadSummary | null {
-  const serverCount =
-    (
-      root.getUnsigned() as {
-        "m.relations"?: { "m.thread"?: { count?: number } };
-      }
-    )["m.relations"]?.["m.thread"]?.count ?? 0;
-  const replyCount = Math.max(serverCount, replies?.length ?? 0);
+  const all = replies ?? [];
+  const messages = all.filter((ev) => ev.getType() === "m.room.message");
+  const replyCount = threadReplyCount(root, all);
   if (replyCount === 0) return null;
   const participants: ActorSummary[] = [];
   for (
-    let i = (replies?.length ?? 0) - 1;
+    let i = messages.length - 1;
     i >= 0 && participants.length < MAX_THREAD_PARTICIPANTS;
     i--
   ) {
-    const sender = replies![i].getSender();
+    const sender = messages[i].getSender();
     if (sender && !participants.some((p) => p.id === sender))
       participants.push(toActor(sender, room, roster));
   }
   return {
     rootId,
     replyCount,
-    lastReplyAt: replies?.length ? replies[replies.length - 1].getTs() : null,
+    lastReplyAt: messages.length ? messages[messages.length - 1].getTs() : null,
     participants,
   };
 }

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { RoomEvent, RoomStateEvent } from "matrix-js-sdk";
+import { RoomStateEvent } from "matrix-js-sdk";
 import { createAvatar } from "@dicebear/core";
 import { shapes } from "@dicebear/collection";
 import { Avatar } from "@/components/ui/avatar";
 import { MatrixClientPeg } from "@/client/peg";
+import { subscribeRoomState } from "@/hooks/matrix-subscriptions";
 import { useAuthedMediaUrl } from "@/lib/matrix/authed-media";
 import { cn } from "@/lib/utils";
 
@@ -11,16 +12,12 @@ import { cn } from "@/lib/utils";
 export function useRoomAvatarMxc(roomId: string): string | null {
   return useSyncExternalStore(
     (cb) => {
-      const room = MatrixClientPeg.safeGet()?.getRoom(roomId);
+      // m.room.avatar is a state event. subscribeRoomState also attaches once a
+      // room that has not synced yet arrives.
+      const unsubState = subscribeRoomState(roomId, [RoomStateEvent.Events], cb);
       const unsubPeg = MatrixClientPeg.subscribe(cb);
-      if (!room) return unsubPeg;
-      const onChange = () => cb();
-      room.on(RoomEvent.Name, onChange);
-      // m.room.avatar lands as a state event, not a name change.
-      room.currentState.on(RoomStateEvent.Events, onChange);
       return () => {
-        room.off(RoomEvent.Name, onChange);
-        room.currentState.off(RoomStateEvent.Events, onChange);
+        unsubState();
         unsubPeg();
       };
     },

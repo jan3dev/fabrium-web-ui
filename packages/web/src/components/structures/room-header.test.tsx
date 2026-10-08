@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -226,5 +226,33 @@ describe("<RoomHeader> Slack layout", () => {
       </MemoryRouter>,
     );
     expect(screen.queryByText("ship it")).toBeNull();
+  });
+});
+
+describe("<RoomHeader> room image", () => {
+  it("swaps the # glyph for the room image when one is set", async () => {
+    const room = setup(50);
+    const { container } = render(
+      <MemoryRouter initialEntries={[`/room/${roomId}`]}>
+        <Routes>
+          <Route path="/room/:roomId" element={<RoomHeader />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const roomImage = () => container.querySelector(`header img[alt="${room.name}"]`);
+    expect(roomImage()).toBeNull();
+    act(() =>
+      injectStateEvent(
+        room,
+        mkMatrixEvent({
+          roomId,
+          sender: me,
+          type: "m.room.avatar",
+          stateKey: "",
+          content: { url: "mxc://h.example/new" },
+        }),
+      ),
+    );
+    expect(roomImage()).not.toBeNull();
   });
 });

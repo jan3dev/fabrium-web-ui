@@ -1,4 +1,4 @@
-import { ClientEvent, type MatrixClient, type Room, type RoomStateEvent, type User, UserEvent } from "matrix-js-sdk";
+import { ClientEvent, type MatrixClient, type Room, RoomEvent, type RoomStateEvent, type User, UserEvent } from "matrix-js-sdk";
 import { MatrixClientPeg } from "../client/peg";
 
 /**
@@ -109,9 +109,24 @@ const attachRoomState: Attach = (key, bucket, client) => {
     bucket.detach = () => client.off(ClientEvent.Room, onRoom);
     return;
   }
+  // A limited sync resets the live timeline, and with timelineSupport the SDK
+  // forks it: room.currentState becomes a new RoomState object. Move the
+  // listener across (CurrentStateUpdated fires once the swap is done), or every
+  // later state change goes unheard.
   const handler = () => notify(bucket);
-  room.currentState.on(kind, handler);
-  bucket.detach = () => room.currentState.off(kind, handler);
+  let state = room.currentState;
+  state.on(kind, handler);
+  const onReset = () => {
+    state.off(kind, handler);
+    state = room.currentState;
+    state.on(kind, handler);
+    notify(bucket);
+  };
+  room.on(RoomEvent.CurrentStateUpdated, onReset);
+  bucket.detach = () => {
+    state.off(kind, handler);
+    room.off(RoomEvent.CurrentStateUpdated, onReset);
+  };
 };
 const roomStateMap = makeRegistry(attachRoomState);
 

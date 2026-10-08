@@ -1,6 +1,7 @@
 import { ClientEvent, type Room, RoomStateEvent } from "matrix-js-sdk";
 import { useSyncExternalStore } from "react";
 import { MatrixClientPeg } from "../client/peg";
+import { subscribeRoomState } from "./matrix-subscriptions";
 
 const EMPTY: Room[] = [];
 
@@ -32,30 +33,15 @@ export function useSpaceChildren(spaceId: string): Room[] {
       const client = MatrixClientPeg.safeGet();
       if (!client) return MatrixClientPeg.subscribe(cb);
 
-      // The space room may not be in the client yet — sync delivers the
-      // workforce space *after* the alias join completes, so we must keep
-      // listening for ClientEvent.Room and upgrade to a state subscription
-      // as soon as the space arrives.
-      let stateOff: (() => void) | null = null;
-      const attachToSpace = () => {
-        if (stateOff) return;
-        const space = client.getRoom(spaceId);
-        if (!space) return;
-        const onState = () => cb();
-        space.currentState.on(RoomStateEvent.Events, onState);
-        stateOff = () => space.currentState.off(RoomStateEvent.Events, onState);
-      };
-      attachToSpace();
-
-      const onRoom = () => {
-        attachToSpace();
-        cb();
-      };
-      client.on(ClientEvent.Room, onRoom);
+      // The space may not be in the client yet (sync delivers the workforce
+      // space after the alias join); subscribeRoomState attaches once it
+      // arrives. The Room listener also catches child rooms syncing in.
+      const stateOff = subscribeRoomState(spaceId, [RoomStateEvent.Events], cb);
+      client.on(ClientEvent.Room, cb);
       const unsubPeg = MatrixClientPeg.subscribe(cb);
       return () => {
-        client.off(ClientEvent.Room, onRoom);
-        if (stateOff) stateOff();
+        client.off(ClientEvent.Room, cb);
+        stateOff();
         unsubPeg();
       };
     },
