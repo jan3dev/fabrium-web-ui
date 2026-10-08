@@ -27,7 +27,7 @@ import { QuoteCard } from "./quote-card";
 import { ReactionsRow } from "./reactions-row";
 import { ReadReceiptsRow } from "./read-receipts-row";
 import { SendFailure, SendingIndicator } from "./send-state";
-import { ThreadSummaryButton } from "./thread-summary-button";
+import { ThreadSummaryRow } from "./thread-summary-row";
 import { TruncatedBody } from "./truncated-body";
 
 /** What a row can do to its message. The timeline container binds these to Matrix. */
@@ -208,7 +208,7 @@ export function MessageRow({
             }
           />
           {thread && actions.openThread ? (
-            <ThreadSummaryButton
+            <ThreadSummaryRow
               thread={thread}
               onOpen={() => actions.openThread?.(message)}
             />

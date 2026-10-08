@@ -102,15 +102,16 @@ test("thread replies behind the sync window are loaded when the thread opens", a
 
   await loginAndOpenRoom(page, human, roomId);
 
-  await page.getByRole("button", { name: /view thread \(\d+ repl/i }).click();
+  await page.getByRole("button", { name: /view thread with \d+ repl/i }).click();
+  const pane = page.getByRole("complementary", { name: "Thread" });
 
   // Every reply the server knows about, not just the one that happened to be
   // inside the sync window.
-  await expect(page.getByText("old-reply-1", { exact: true })).toBeVisible({
+  await expect(pane.getByText("old-reply-1", { exact: true })).toBeVisible({
     timeout: 30_000,
   });
-  await expect(page.getByText("old-reply-8", { exact: true })).toBeVisible();
-  await expect(page.getByText("newest-reply", { exact: true })).toBeVisible();
+  await expect(pane.getByText("old-reply-8", { exact: true })).toBeVisible();
+  await expect(pane.getByText("newest-reply", { exact: true })).toBeVisible();
 });
 
 test("a gap in the middle of the conversation is marked and fillable in place", async ({

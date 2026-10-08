@@ -1,17 +1,24 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app";
 import { MatrixClientPeg } from "../../client/peg";
-import { mswServer, relaxUnhandled, stubStartClient, stubSyncWithRooms } from "../../../test/setup";
+import {
+  mswServer,
+  relaxUnhandled,
+  stubStartClient,
+  stubSyncWithRooms,
+} from "../../../test/setup";
 
 const HS = "https://h.example";
 const me = "@alice:h.example";
 
 /** The rail button marked as the current workspace. */
 const activeWorkspace = () => {
-  const el = document.querySelector('nav[aria-label="Workspaces"] [aria-current="true"]');
+  const el = document.querySelector(
+    'nav[aria-label="Workspaces"] [aria-current="true"]',
+  );
   return el?.getAttribute("aria-label") ?? "";
 };
 
@@ -41,7 +48,9 @@ describe("<LoggedInView /> sidebar polish", () => {
     );
     expect(document.querySelector('[data-slot="sidebar"]')).not.toBeNull();
     expect(screen.getByTestId("top-bar")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /user menu/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /user menu/i }),
+    ).toBeInTheDocument();
     // The minimal sync stub doesn't seed the workforce space, so scope falls
     // back to Home.
     expect(activeWorkspace()).toBe("Home");
@@ -53,8 +62,18 @@ describe("<LoggedInView /> sidebar polish", () => {
         roomId: "!ops:h.example",
         myUserId: me,
         state: [
-          { type: "m.room.create", sender: me, stateKey: "", content: { type: "m.space" } },
-          { type: "m.room.name", sender: me, stateKey: "", content: { name: "Ops" } },
+          {
+            type: "m.room.create",
+            sender: me,
+            stateKey: "",
+            content: { type: "m.space" },
+          },
+          {
+            type: "m.room.name",
+            sender: me,
+            stateKey: "",
+            content: { name: "Ops" },
+          },
         ],
       },
     ]);
@@ -68,16 +87,36 @@ describe("<LoggedInView /> sidebar polish", () => {
         roomId: "!ops:h.example",
         myUserId: me,
         state: [
-          { type: "m.room.create", sender: me, stateKey: "", content: { type: "m.space" } },
-          { type: "m.room.name", sender: me, stateKey: "", content: { name: "Ops" } },
+          {
+            type: "m.room.create",
+            sender: me,
+            stateKey: "",
+            content: { type: "m.space" },
+          },
+          {
+            type: "m.room.name",
+            sender: me,
+            stateKey: "",
+            content: { name: "Ops" },
+          },
         ],
       },
       {
         roomId: "!eng:h.example",
         myUserId: me,
         state: [
-          { type: "m.room.create", sender: me, stateKey: "", content: { type: "m.space" } },
-          { type: "m.room.name", sender: me, stateKey: "", content: { name: "Eng" } },
+          {
+            type: "m.room.create",
+            sender: me,
+            stateKey: "",
+            content: { type: "m.space" },
+          },
+          {
+            type: "m.room.name",
+            sender: me,
+            stateKey: "",
+            content: { name: "Eng" },
+          },
         ],
       },
     ]);
@@ -94,15 +133,21 @@ describe("<LoggedInView /> sidebar polish", () => {
     await waitFor(() =>
       expect(screen.getByTestId("logged-in-view")).toBeInTheDocument(),
     );
-    const sidebar = document.querySelector('[data-slot="sidebar"]') as HTMLElement;
+    const sidebar = document.querySelector(
+      '[data-slot="sidebar"]',
+    ) as HTMLElement;
     expect(sidebar).not.toBeNull();
     expect(sidebar.getAttribute("data-state")).toBe("expanded");
 
     await user.keyboard("{Meta>}b{/Meta}");
-    await waitFor(() => expect(sidebar.getAttribute("data-state")).toBe("collapsed"));
+    await waitFor(() =>
+      expect(sidebar.getAttribute("data-state")).toBe("collapsed"),
+    );
 
     await user.keyboard("{Meta>}b{/Meta}");
-    await waitFor(() => expect(sidebar.getAttribute("data-state")).toBe("expanded"));
+    await waitFor(() =>
+      expect(sidebar.getAttribute("data-state")).toBe("expanded"),
+    );
   });
 
   it("keeps a collapsed sidebar collapsed across a reload", async () => {
@@ -111,7 +156,11 @@ describe("<LoggedInView /> sidebar polish", () => {
     await waitFor(() =>
       expect(screen.getByTestId("logged-in-view")).toBeInTheDocument(),
     );
-    expect(document.querySelector('[data-slot="sidebar"]')?.getAttribute("data-state")).toBe("collapsed");
+    expect(
+      document
+        .querySelector('[data-slot="sidebar"]')
+        ?.getAttribute("data-state"),
+    ).toBe("collapsed");
   });
 
   it("opens the room pane from ?pane= and closes it with Escape", async () => {
@@ -119,14 +168,125 @@ describe("<LoggedInView /> sidebar polish", () => {
       {
         roomId: "!r:h.example",
         myUserId: me,
-        state: [{ type: "m.room.name", sender: me, stateKey: "", content: { name: "general" } }],
+        state: [
+          {
+            type: "m.room.name",
+            sender: me,
+            stateKey: "",
+            content: { name: "general" },
+          },
+        ],
       },
     ]);
     const user = userEvent.setup();
-    render(<App config={{ homeserverUrl: HS }} initialRoute="/room/!r:h.example?pane=info" />);
-    expect(await screen.findByRole("complementary", { name: "Room info" })).toBeInTheDocument();
+    render(
+      <App
+        config={{ homeserverUrl: HS }}
+        initialRoute="/room/!r:h.example?pane=info"
+      />,
+    );
+    expect(
+      await screen.findByRole("complementary", { name: "Room info" }),
+    ).toBeInTheDocument();
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Room info" })).toBeNull());
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: "Room info" }),
+      ).toBeNull(),
+    );
+  });
+
+  it("opens a thread in the right pane from its summary row and closes it with Escape", async () => {
+    stubSyncWithRooms(HS, [
+      {
+        roomId: "!r:h.example",
+        myUserId: me,
+        state: [
+          {
+            type: "m.room.name",
+            sender: me,
+            stateKey: "",
+            content: { name: "general" },
+          },
+        ],
+        timeline: [
+          {
+            type: "m.room.message",
+            sender: me,
+            eventId: "$root",
+            content: { msgtype: "m.text", body: "the root" },
+          },
+          {
+            type: "m.room.message",
+            sender: "@bob:h.example",
+            eventId: "$reply",
+            content: {
+              msgtype: "m.text",
+              body: "a reply",
+              "m.relates_to": { rel_type: "m.thread", event_id: "$root" },
+            },
+          },
+        ],
+      },
+    ]);
+    const user = userEvent.setup();
+    render(
+      <App
+        config={{ homeserverUrl: HS }}
+        initialRoute="/room/!r:h.example?pane=info"
+      />,
+    );
+    await user.click(
+      await screen.findByRole("button", { name: /view thread with 1 reply/i }),
+    );
+    const pane = await screen.findByRole("complementary", { name: "Thread" });
+    // The thread takes the pane's place.
+    expect(
+      screen.queryByRole("complementary", { name: "Room info" }),
+    ).toBeNull();
+    expect(await within(pane).findByText("a reply")).toBeInTheDocument();
+    expect(
+      within(pane).getByRole("textbox", { name: /message/i }),
+    ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: "Thread" }),
+      ).toBeNull(),
+    );
+  });
+
+  it("opens the thread from ?thread=", async () => {
+    stubSyncWithRooms(HS, [
+      {
+        roomId: "!r:h.example",
+        myUserId: me,
+        state: [
+          {
+            type: "m.room.name",
+            sender: me,
+            stateKey: "",
+            content: { name: "general" },
+          },
+        ],
+        timeline: [
+          {
+            type: "m.room.message",
+            sender: me,
+            eventId: "$root",
+            content: { msgtype: "m.text", body: "the root" },
+          },
+        ],
+      },
+    ]);
+    render(
+      <App
+        config={{ homeserverUrl: HS }}
+        initialRoute="/room/!r:h.example?thread=$root"
+      />,
+    );
+    const pane = await screen.findByRole("complementary", { name: "Thread" });
+    expect(await within(pane).findByText("the root")).toBeInTheDocument();
   });
 
   it("moves between sidebar rooms with Alt+ArrowDown", async () => {
@@ -134,21 +294,40 @@ describe("<LoggedInView /> sidebar polish", () => {
       {
         roomId: "!a:h.example",
         myUserId: me,
-        state: [{ type: "m.room.name", sender: me, stateKey: "", content: { name: "alpha" } }],
+        state: [
+          {
+            type: "m.room.name",
+            sender: me,
+            stateKey: "",
+            content: { name: "alpha" },
+          },
+        ],
       },
       {
         roomId: "!b:h.example",
         myUserId: me,
-        state: [{ type: "m.room.name", sender: me, stateKey: "", content: { name: "beta" } }],
+        state: [
+          {
+            type: "m.room.name",
+            sender: me,
+            stateKey: "",
+            content: { name: "beta" },
+          },
+        ],
       },
     ]);
     const user = userEvent.setup();
-    render(<App config={{ homeserverUrl: HS }} initialRoute="/room/!a:h.example" />);
+    render(
+      <App config={{ homeserverUrl: HS }} initialRoute="/room/!a:h.example" />,
+    );
     const alpha = await screen.findByRole("link", { name: /alpha/ });
     await waitFor(() => expect(alpha).toHaveAttribute("data-active", "true"));
     await user.keyboard("{Alt>}{ArrowDown}{/Alt}");
     await waitFor(() =>
-      expect(screen.getByRole("link", { name: /beta/ })).toHaveAttribute("data-active", "true"),
+      expect(screen.getByRole("link", { name: /beta/ })).toHaveAttribute(
+        "data-active",
+        "true",
+      ),
     );
   });
 });
@@ -158,7 +337,12 @@ describe("<LoggedInView /> workforce space from runtime config", () => {
     roomId,
     myUserId: me,
     state: [
-      { type: "m.room.create", sender: me, stateKey: "", content: { type: "m.space" } },
+      {
+        type: "m.room.create",
+        sender: me,
+        stateKey: "",
+        content: { type: "m.space" },
+      },
       { type: "m.room.name", sender: me, stateKey: "", content: { name } },
     ],
   });
@@ -172,21 +356,34 @@ describe("<LoggedInView /> workforce space from runtime config", () => {
     relaxUnhandled();
     stubStartClient(HS);
     mswServer.use(
-      http.get(`${HS}/_matrix/client/v3/directory/room/:alias`, ({ params }) => {
-        const roomId = aliases[decodeURIComponent(String(params.alias))];
-        return roomId
-          ? HttpResponse.json({ room_id: roomId, servers: ["h.example"] })
-          : HttpResponse.json({ errcode: "M_NOT_FOUND", error: "no alias" }, { status: 404 });
-      }),
+      http.get(
+        `${HS}/_matrix/client/v3/directory/room/:alias`,
+        ({ params }) => {
+          const roomId = aliases[decodeURIComponent(String(params.alias))];
+          return roomId
+            ? HttpResponse.json({ room_id: roomId, servers: ["h.example"] })
+            : HttpResponse.json(
+                { errcode: "M_NOT_FOUND", error: "no alias" },
+                { status: 404 },
+              );
+        },
+      ),
       // The alias can resolve before sync has delivered the room, so the
       // client joins it; the joined room then arrives via sync.
       http.post(`${HS}/_matrix/client/v3/join/:alias`, ({ params }) =>
-        HttpResponse.json({ room_id: aliases[decodeURIComponent(String(params.alias))] }),
+        HttpResponse.json({
+          room_id: aliases[decodeURIComponent(String(params.alias))],
+        }),
       ),
     );
     localStorage.setItem(
       "zoon:session",
-      JSON.stringify({ homeserverUrl: HS, accessToken: "tok", userId: me, deviceId: "DEV1" }),
+      JSON.stringify({
+        homeserverUrl: HS,
+        accessToken: "tok",
+        userId: me,
+        deviceId: "DEV1",
+      }),
     );
   });
   afterEach(() => {
@@ -194,15 +391,19 @@ describe("<LoggedInView /> workforce space from runtime config", () => {
     localStorage.clear();
   });
 
-
-  async function renderWith(workforceSpace: string | undefined, rooms = [
-    space("!dev:h.example", "Dev"),
-    space("!ops:h.example", "Ops"),
-    space("!eng:h.example", "Eng"),
-  ]) {
+  async function renderWith(
+    workforceSpace: string | undefined,
+    rooms = [
+      space("!dev:h.example", "Dev"),
+      space("!ops:h.example", "Ops"),
+      space("!eng:h.example", "Eng"),
+    ],
+  ) {
     stubSyncWithRooms(HS, rooms);
     render(<App config={{ homeserverUrl: HS, workforceSpace }} />);
-    await waitFor(() => expect(screen.getByTestId("logged-in-view")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("logged-in-view")).toBeInTheDocument(),
+    );
   }
 
   it("defaults to #dev when workforce_space is omitted", async () => {
@@ -222,7 +423,12 @@ describe("<LoggedInView /> workforce space from runtime config", () => {
     MatrixClientPeg.reset();
     localStorage.setItem(
       "zoon:session",
-      JSON.stringify({ homeserverUrl: HS, accessToken: "tok", userId: me, deviceId: "DEV1" }),
+      JSON.stringify({
+        homeserverUrl: HS,
+        accessToken: "tok",
+        userId: me,
+        deviceId: "DEV1",
+      }),
     );
     await renderWith("eng");
     await waitFor(() => expect(activeWorkspace()).toMatch(/^Eng/));

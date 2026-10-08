@@ -6,17 +6,15 @@ import { MatrixClientPeg } from "@/client/peg";
 import { makeFakeClient, makeRoom } from "../../../test/factories";
 import { RoomView } from "./room-view";
 
-vi.mock("./thread-view", () => ({
-  ThreadView: (p: { rootEventId: string; highlightEventId?: string }) => (
-    <div data-testid="thread">{`${p.rootEventId}|${p.highlightEventId ?? ""}`}</div>
+vi.mock("./timeline-panel", () => ({
+  TimelinePanel: (p: { highlightEventId?: string }) => (
+    <div data-testid="timeline">{p.highlightEventId ?? ""}</div>
   ),
 }));
-vi.mock("./timeline-panel", () => ({ TimelinePanel: () => <div data-testid="timeline" /> }));
 vi.mock("../rooms/composer", () => ({ Composer: () => <div data-testid="composer" /> }));
 vi.mock("../rooms/typing-indicator", () => ({ TypingIndicator: () => null }));
 vi.mock("../../hooks/use-mark-read", () => ({ useMarkRead: () => {} }));
 vi.mock("../../hooks/use-typing", () => ({ useTyping: () => [] }));
-vi.mock("../../hooks/use-plan", () => ({ usePlan: () => null }));
 
 const me = "@me:h.example";
 const roomId = "!r:h.example";
@@ -39,12 +37,20 @@ function renderAt(url: string) {
 afterEach(() => MatrixClientPeg.reset());
 
 describe("RoomView link handling", () => {
-  it("passes ?event= to ThreadView as the highlight", () => {
+  it("highlights ?event= in the timeline when no thread is open", () => {
+    const client = makeFakeClient({ userId: me });
+    (client as unknown as { addRoom(r: unknown): void }).addRoom(makeRoom(roomId, { client, myUserId: me }));
+    MatrixClientPeg.injectClientForTest(client);
+    renderAt("/room/!r%3Ah.example?event=%24msg");
+    expect(screen.getByTestId("timeline")).toHaveTextContent("$msg");
+  });
+
+  it("leaves ?event= to the thread pane when a thread is open", () => {
     const client = makeFakeClient({ userId: me });
     (client as unknown as { addRoom(r: unknown): void }).addRoom(makeRoom(roomId, { client, myUserId: me }));
     MatrixClientPeg.injectClientForTest(client);
     renderAt("/room/!r%3Ah.example?thread=%24root&event=%24reply");
-    expect(screen.getByTestId("thread")).toHaveTextContent("$root|$reply");
+    expect(screen.getByTestId("timeline")).toHaveTextContent("");
   });
 
   it("shows the not-joined panel for an unknown room and joins, keeping the thread", async () => {
@@ -61,7 +67,7 @@ describe("RoomView link handling", () => {
     expect(screen.queryByTestId("composer")).toBeNull();
     await userEvent.setup().click(screen.getByRole("button", { name: /join room/i }));
     expect(joinRoom).toHaveBeenCalledWith(roomId);
-    expect(await screen.findByTestId("thread")).toHaveTextContent("$root|");
+    expect(await screen.findByTestId("timeline")).toBeInTheDocument();
     expect(screen.getByTestId("loc")).toHaveTextContent("thread=%24root");
   });
 
@@ -81,6 +87,6 @@ describe("RoomView link handling", () => {
     act(() =>
       (client as unknown as { addRoom(r: unknown): void }).addRoom(makeRoom(roomId, { client, myUserId: me })),
     );
-    expect(screen.getByTestId("thread")).toBeInTheDocument();
+    expect(screen.getByTestId("timeline")).toBeInTheDocument();
   });
 });

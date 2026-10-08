@@ -47,12 +47,12 @@ describe("<TypingIndicator />", () => {
 describe("TypingIndicator — awaiting input", () => {
   it("shows an agent awaiting input instead of typing", () => {
     render(<TypingIndicator typingUserIds={["@architect.acme:h.example"]} awaitingUserIds={["@architect.acme:h.example"]} />);
-    expect(screen.getByText(/is awaiting your input/i)).toBeInTheDocument();
+    expect(screen.getByText(/is waiting for your input/i)).toBeInTheDocument();
     expect(screen.queryByText(/is typing/i)).not.toBeInTheDocument();
   });
   it("shows both typing and awaiting users", () => {
     render(<TypingIndicator typingUserIds={["@bob:h.example"]} awaitingUserIds={["@architect.acme:h.example"]} />);
     expect(screen.getByText(/is typing/i)).toBeInTheDocument();
-    expect(screen.getByText(/is awaiting your input/i)).toBeInTheDocument();
+    expect(screen.getByText(/is waiting for your input/i)).toBeInTheDocument();
   });
 });

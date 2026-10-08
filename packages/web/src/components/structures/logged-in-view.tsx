@@ -32,6 +32,7 @@ import { RightPane, type PaneView, parsePaneView } from "./right-pane";
 import { RoomHeader } from "./room-header";
 import { SidebarProfileCard } from "./sidebar/profile-card";
 import type { Scope } from "./sidebar/scope";
+import { ThreadPane } from "./thread-pane";
 import { TopBar } from "./top-bar";
 import { WorkspaceRail } from "./workspace-rail";
 
@@ -97,7 +98,9 @@ export function LoggedInView({
   const roomId = roomMatch?.params.roomId ?? null;
   useClearRoomNotifications(roomId);
   const [searchParams, setSearchParams] = useSearchParams();
-  const pane = roomId ? parsePaneView(searchParams.get("pane")) : null;
+  // One right pane at a time: an open thread wins over `?pane=`.
+  const threadId = roomId ? searchParams.get("thread") : null;
+  const pane = roomId && !threadId ? parsePaneView(searchParams.get("pane")) : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -153,6 +156,8 @@ export function LoggedInView({
       const next = new URLSearchParams(prev);
       if (view) next.set("pane", view);
       else next.delete("pane");
+      next.delete("thread");
+      next.delete("event");
       return next;
     });
   const togglePane = (view: PaneView) => setPane(pane === view ? null : view);
@@ -172,7 +177,7 @@ export function LoggedInView({
           : Math.min(Math.max(at + delta, 0), ids.length - 1);
       if (nextIndex !== at) navigate(`/room/${ids[nextIndex]}`);
     },
-    onClosePane: pane ? () => setPane(null) : undefined,
+    onClosePane: pane || threadId ? () => setPane(null) : undefined,
     onMarkAllRead: () => markAllRead(),
   });
 
@@ -222,7 +227,16 @@ export function LoggedInView({
                   }
                 />
               </div>
-              {roomId && pane ? (
+              {roomId && threadId ? (
+                <ThreadPane
+                  key={`${roomId}:${threadId}`}
+                  roomId={roomId}
+                  rootEventId={threadId}
+                  highlightEventId={searchParams.get("event") ?? undefined}
+                  workforceSpaceId={spaceId}
+                  onClose={() => setPane(null)}
+                />
+              ) : roomId && pane ? (
                 <RightPane
                   roomId={roomId}
                   spaceId={spaceId}

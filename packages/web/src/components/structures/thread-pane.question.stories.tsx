@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { makeFakeClient, makeRoom, mkMatrixEvent, pushTimelineEvent } from "../../../test/factories";
 import { MatrixClientPeg } from "../../client/peg";
-import { ThreadView } from "./thread-view";
+import { ThreadPane } from "./thread-pane";
 import { askSchema } from "../timeline/question-card-view.stories";
 
 const me = "@me:h.example";
@@ -27,8 +27,8 @@ function seed(answered: boolean) {
   }
   MatrixClientPeg.injectClientForTest(client);
 }
-const meta = { title: "Structures/ThreadViewQuestion", component: ThreadView, parameters: { layout: "fullscreen" }, args: { roomId, rootEventId: root, onBack: () => {} } } satisfies Meta<typeof ThreadView>;
+const meta = { title: "Structures/ThreadPaneQuestion", component: ThreadPane, parameters: { layout: "fullscreen" }, args: { roomId, rootEventId: root, onClose: () => {} } } satisfies Meta<typeof ThreadPane>;
 export default meta;
 type Story = StoryObj<typeof meta>;
-export const OpenQuestion: Story = { render: (args) => { seed(false); return <ThreadView {...args} />; } };
-export const AnsweredThenContinued: Story = { render: (args) => { seed(true); return <ThreadView {...args} />; } };
+export const OpenQuestion: Story = { render: (args) => { seed(false); return <ThreadPane {...args} />; } };
+export const AnsweredThenContinued: Story = { render: (args) => { seed(true); return <ThreadPane {...args} />; } };

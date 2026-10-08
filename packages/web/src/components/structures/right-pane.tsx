@@ -25,7 +25,7 @@ const RULE_LABEL = {
   public: { Icon: GlobeIcon, text: "Anyone can join" },
 } as const;
 
-/** Right-pane views, kept in the URL as `?pane=`. Threads move here in W4. */
+/** Right-pane views, kept in the URL as `?pane=`. A thread (`?thread=`) takes the pane instead. */
 export const PANE_VIEWS = ["info", "members", "notifications"] as const;
 export type PaneView = (typeof PANE_VIEWS)[number];
 

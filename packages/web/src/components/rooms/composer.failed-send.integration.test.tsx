@@ -84,7 +84,7 @@ describe("a send the server rejects", () => {
     expect(screen.getByText(/hello/)).toBeInTheDocument();
     expect(document.querySelector("time")).toBeNull();
     // the composer cleared and carries no raw error line
-    expect(screen.getByRole("textbox", { name: /message/i })).toHaveValue("");
+    expect(screen.getByRole("textbox", { name: /message/i })).toHaveTextContent("");
     expect(screen.queryByText(/MatrixError|M_FORBIDDEN|Auth check failed/)).toBeNull();
   });
 

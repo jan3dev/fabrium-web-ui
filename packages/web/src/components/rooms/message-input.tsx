@@ -1,52 +1,103 @@
 import {
   forwardRef,
-  type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
   type ReactNode,
+  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { ImageIcon, PaperclipIcon, SendIcon } from "@/components/icons";
+import { EditorContent } from "@tiptap/react";
 import { cn } from "@/lib/utils";
-import { displayNameOf, expandMentions, nameOfMember, senderColor } from "@/lib/sender";
+import { type ComposedLink, composeText } from "@/lib/matrix/compose";
+import { nameOfMember } from "@/lib/sender";
 import { listSlashCommands, type SlashCommandMeta } from "@/lib/slash-commands";
 import { useAvailableCommands } from "../../hooks/use-available-commands";
 import { useMembers } from "../../hooks/use-members";
-import { SlashCommandList } from "./slash-command-list";
+import { useRoomList } from "../../hooks/use-room-list";
+import { useWorkforce } from "../../hooks/use-workforce";
 import {
-  MAX_ATTACHMENTS,
+  ComposerAttachments,
+  DropZoneOverlay,
   nameClipboardFile,
   stageFiles,
-  StagedAttachments,
   type StagedAttachment,
-} from "./staged-attachments";
+} from "./composer-attachments";
+import { ComposerToolbar } from "./editor/composer-toolbar";
+import { useRichTextEditor } from "./editor/use-rich-text-editor";
+import {
+  EmojiAutocomplete,
+  type EmojiSuggestion,
+  loadEmojiData,
+  searchEmoji,
+} from "./emoji-autocomplete";
+import {
+  MentionAutocomplete,
+  type MentionSuggestion,
+} from "./mention-autocomplete";
+import { RoomAutocomplete, type RoomSuggestion } from "./room-autocomplete";
+import { SlashCommandList } from "./slash-command-list";
 
-const TEXTAREA_CLS =
-  "field-sizing-content min-h-9 flex-1 bg-transparent px-2.5 py-2 text-base outline-none placeholder:text-muted-foreground resize-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm";
+const MAX_SUGGESTIONS = 8;
 
-const INPUT_WRAPPER_CLS =
-  "flex items-center rounded-lg border border-input bg-transparent transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30 pr-1.5";
-
-interface Member {
-  userId: string;
-  name: string;
-}
-
-type AcMode = "mention" | "slash";
+type AcMode = "mention" | "room" | "emoji" | "slash";
 
 interface AutocompleteState {
   mode: AcMode;
+  /** Plain-text offset of the trigger character. */
   start: number;
   query: string;
 }
 
+const TRIGGERS: Record<string, AcMode> = {
+  "@": "mention",
+  "#": "room",
+  ":": "emoji",
+};
+
+/** The autocomplete the caret is in, if any. Exported for tests. */
+export function detectAutocomplete(
+  text: string,
+  cursor: number,
+  slashEnabled: boolean,
+): AutocompleteState | null {
+  // A slash command: the whole draft so far is one `/word` (blank lines
+  // before it are trimmed on send anyway).
+  const draft = text.trimStart();
+  const lead = text.length - draft.length;
+  if (
+    slashEnabled &&
+    draft.startsWith("/") &&
+    cursor > lead &&
+    !/\s/.test(draft)
+  ) {
+    return { mode: "slash", start: lead, query: text.slice(lead + 1, cursor) };
+  }
+  // Walk back from the caret to an unclosed trigger at a word start.
+  for (let i = cursor - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (/\s/.test(ch)) return null;
+    const mode = TRIGGERS[ch];
+    if (!mode) continue;
+    if (i > 0 && !/[\s(]/.test(text[i - 1])) return null;
+    const query = text.slice(i + 1, cursor);
+    // Typing a full user ID (`@bob:server`) needs no suggestion.
+    if (mode === "mention" && query.includes(":")) return null;
+    // `:` also ends sentences ("re: …"); wait for two shortcode characters.
+    if (mode === "emoji" && !/^[a-z0-9_+-]{2,}$/i.test(query)) return null;
+    return { mode, start: i, query };
+  }
+  return null;
+}
+
 export interface MessageInputSubmit {
-  /** The text with `@localpart` mentions expanded to full user ids. */
+  /** Plain-text body: picked mentions as user IDs, Markdown as typed. */
   body: string;
-  /** The text as typed (trimmed), for callers that parse it, like slash commands. */
+  /** HTML for `formatted_body`, when the Markdown has formatting or pills. */
+  formattedBody?: string;
+  /** The Markdown as typed (trimmed), for callers that parse it, like slash commands. */
   rawBody: string;
   mentionUserIds: string[];
   attachments: StagedAttachment[];
@@ -57,6 +108,8 @@ export interface MessageInputSubmit {
 export interface MessageInputProps {
   /** Mentions and agent slash commands resolve against this room's members. */
   roomId: string;
+  /** Agents in this workforce are listed first in `@` suggestions. */
+  workforceSpaceId?: string | null;
   /**
    * Called on Enter or the send button. The caller does the sending. The input
    * clears once it resolves; if it throws, the text stays and `onError` gets the message.
@@ -74,11 +127,13 @@ export interface MessageInputProps {
   disabled?: boolean;
   placeholder?: string;
   ariaLabel?: string;
-  /** Show the send button inside the field. */
+  /** Show the send button in the toolbar. */
   sendButton?: boolean;
+  /** Extra controls beside the send button, like Stop. */
+  extraActions?: ReactNode;
   error?: string | null;
   onError?: (message: string | null) => void;
-  /** Rendered between the error and the field, e.g. a thread banner. */
+  /** Rendered between the error and the field, e.g. a quote chip. */
   header?: ReactNode;
   className?: string;
   /** Positioning for the suggestion list, which opens above the root. */
@@ -90,403 +145,481 @@ export interface MessageInputHandle {
   submit: () => Promise<void>;
 }
 
-export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function MessageInput({
-  roomId,
-  onSubmit,
-  slashCommands: slashEnabled = true,
-  threadScoped = false,
-  attachments: attachmentsEnabled = true,
-  uploadingId = null,
-  uploadProgress,
-  allowEmpty = false,
-  disabled = false,
-  placeholder = "Send a message…",
-  ariaLabel = "Message",
-  sendButton = true,
-  error = null,
-  onError,
-  header,
-  className,
-  suggestionsClassName = "left-0 right-0",
-}, ref) {
-  const [value, setValue] = useState("");
-  const [ac, setAc] = useState<AutocompleteState | null>(null);
-  const [activeIdx, setActiveIdx] = useState(0);
-  const [attachments, setAttachments] = useState<StagedAttachment[]>([]);
-  const [dragging, setDragging] = useState(false);
-  const dragDepth = useRef(0);
-  const attachInputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+/** The rich-text composer field: TipTap editor, autocompletes, attachments, toolbar. */
+export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
+  function MessageInput(
+    {
+      roomId,
+      workforceSpaceId = null,
+      onSubmit,
+      slashCommands: slashEnabled = true,
+      threadScoped = false,
+      attachments: attachmentsEnabled = true,
+      uploadingId = null,
+      uploadProgress,
+      allowEmpty = false,
+      disabled = false,
+      placeholder = "Send a message…",
+      ariaLabel = "Message",
+      sendButton = true,
+      extraActions,
+      error = null,
+      onError,
+      header,
+      className,
+      suggestionsClassName = "left-0 right-0",
+    },
+    ref,
+  ) {
+    const [text, setText] = useState("");
+    const [ac, setAc] = useState<AutocompleteState | null>(null);
+    const [activeIdx, setActiveIdx] = useState(0);
+    const [attachments, setAttachments] = useState<StagedAttachment[]>([]);
+    const [dragging, setDragging] = useState(false);
+    const [formattingOpen, setFormattingOpen] = useState(false);
+    const [emojiMatches, setEmojiMatches] = useState<EmojiSuggestion[]>([]);
+    const dragDepth = useRef(0);
+    const attachInputRef = useRef<HTMLInputElement>(null);
+    // What each picked `@Label` / `#Label` points at, until the draft is sent.
+    const pickedMentions = useRef<ComposedLink[]>([]);
+    const pickedRooms = useRef<ComposedLink[]>([]);
 
-  const rawMembers = useMembers(roomId);
-  const members = useMemo<Member[]>(
-    () => rawMembers.map((m) => ({ userId: m.userId, name: nameOfMember(m) })),
-    [rawMembers],
-  );
+    const rawMembers = useMembers(roomId);
+    const roster = useWorkforce(workforceSpaceId ?? "");
+    const members = useMemo<MentionSuggestion[]>(() => {
+      const all = rawMembers.map((m) => ({
+        userId: m.userId,
+        // A member without a display name falls back to their user ID; the
+          // `@` is the mention trigger, not part of the name.
+          displayName: nameOfMember(m).replace(/^@/, ""),
+        isAgent: roster.isAgent(m.userId),
+      }));
+      return [
+        ...all.filter((m) => m.isAgent),
+        ...all.filter((m) => !m.isAgent),
+      ];
+    }, [rawMembers, roster]);
 
-  const advertised = useAvailableCommands(roomId);
-  const slashList = useMemo(() => {
-    if (!slashEnabled) return [];
-    const client = listSlashCommands({ threadScoped });
-    const clientNames = new Set(client.map((c) => c.name));
-    const agent = advertised
-      .filter((c) => !clientNames.has(c.name))
-      .map((c) => ({ name: c.name, description: c.description, source: "agent" as const }));
-    return [...client, ...agent];
-  }, [slashEnabled, threadScoped, advertised]);
-
-  const mentionMatches = useMemo(() => {
-    if (!ac || ac.mode !== "mention") return [];
-    const q = ac.query.toLowerCase();
-    return members
-      .filter(
-        (m) =>
-          m.userId.toLowerCase().includes(q) ||
-          m.name.toLowerCase().includes(q),
-      )
-      .slice(0, 8);
-  }, [ac, members]);
-
-  const slashMatches = useMemo<SlashCommandMeta[]>(() => {
-    if (!ac || ac.mode !== "slash") return [];
-    const q = ac.query.toLowerCase();
-    if (!q) return slashList;
-    return slashList.filter(
-      (c) => c.name.startsWith(q) || c.description.toLowerCase().includes(q),
+    const rooms = useRoomList();
+    const roomChoices = useMemo<RoomSuggestion[]>(
+      () =>
+        rooms
+          .filter((r) => !r.isSpaceRoom() && r.getMyMembership() === "join")
+          .map((r) => ({ roomId: r.roomId, name: r.name })),
+      [rooms],
     );
-  }, [ac, slashList]);
 
-  const matches = ac?.mode === "slash" ? slashMatches : mentionMatches;
+    const advertised = useAvailableCommands(roomId);
+    const slashList = useMemo(() => {
+      if (!slashEnabled) return [];
+      const client = listSlashCommands({ threadScoped });
+      const clientNames = new Set(client.map((c) => c.name));
+      const agent = advertised
+        .filter((c) => !clientNames.has(c.name))
+        .map((c) => ({
+          name: c.name,
+          description: c.description,
+          source: "agent" as const,
+        }));
+      return [...client, ...agent];
+    }, [slashEnabled, threadScoped, advertised]);
 
-  function detectAutocomplete(text: string, cursor: number) {
-    // Slash command: only triggered at position 0
-    if (slashEnabled && text.startsWith("/") && cursor > 0 && !text.includes(" ")) {
-      const query = text.slice(1, cursor);
-      setAc((prev) => {
-        if (prev?.mode === "slash" && prev.query === query) return prev;
-        if (prev?.mode !== "slash" || prev.query !== query) setActiveIdx(0);
-        return { mode: "slash", start: 0, query };
-      });
-      return;
-    }
+    const query = ac?.query.toLowerCase() ?? "";
+    const mentionMatches = useMemo(
+      () =>
+        ac?.mode !== "mention"
+          ? []
+          : members
+              .filter(
+                (m) =>
+                  m.userId.toLowerCase().includes(query) ||
+                  m.displayName.toLowerCase().includes(query),
+              )
+              .slice(0, MAX_SUGGESTIONS),
+      [ac?.mode, members, query],
+    );
+    const roomMatches = useMemo(
+      () =>
+        ac?.mode !== "room"
+          ? []
+          : roomChoices
+              .filter((r) => r.name.toLowerCase().includes(query))
+              .slice(0, MAX_SUGGESTIONS),
+      [ac?.mode, roomChoices, query],
+    );
+    const slashMatches = useMemo<SlashCommandMeta[]>(
+      () =>
+        ac?.mode !== "slash"
+          ? []
+          : slashList.filter(
+              (c) =>
+                !query ||
+                c.name.startsWith(query) ||
+                c.description.toLowerCase().includes(query),
+            ),
+      [ac?.mode, slashList, query],
+    );
 
-    // Mention: walk back from cursor for unclosed `@<query>` token
-    let i = cursor - 1;
-    while (i >= 0) {
-      const ch = text[i];
-      if (ch === "@") {
-        if (i === 0 || /\s/.test(text[i - 1])) {
-          const query = text.slice(i + 1, cursor);
-          if (!/\s/.test(query) && !query.includes(":")) {
-            setAc((prev) => {
-              if (prev?.mode === "mention" && prev.start === i && prev.query === query) return prev;
-              setActiveIdx(0);
-              return { mode: "mention", start: i, query };
-            });
-            return;
-          }
-        }
-        break;
+    useEffect(() => {
+      if (ac?.mode !== "emoji") {
+        setEmojiMatches([]);
+        return;
       }
-      if (/\s/.test(ch)) break;
-      i--;
-    }
-    setAc(null);
-  }
-
-  function selectMember(member: Member) {
-    if (!ac) return;
-    const before = value.slice(0, ac.start);
-    const after = value.slice(ac.start + 1 + ac.query.length);
-    // Insert the localpart, not the displayname — the body must stay
-    // mxid-tokenizable so expandMentions() can resolve it. The dropdown
-    // shows the displayname so users see what they're picking.
-    const insert = `@${displayNameOf(member.userId)} `;
-    const next = before + insert + after;
-    setValue(next);
-    setAc(null);
-    requestAnimationFrame(() => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      const pos = before.length + insert.length;
-      ta.focus();
-      ta.setSelectionRange(pos, pos);
-    });
-  }
-
-  function selectSlash(cmd: SlashCommandMeta) {
-    const next = `/${cmd.name} `;
-    setValue(next);
-    setAc(null);
-    requestAnimationFrame(() => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      ta.focus();
-      ta.setSelectionRange(next.length, next.length);
-    });
-  }
-
-  async function submit(): Promise<void> {
-    const body = value.trim();
-    if (disabled) return;
-    if (!body && attachments.length === 0 && !allowEmpty) return;
-    onError?.(null);
-    try {
-      const { body: expandedBody, userIds } = expandMentions(body, members);
-      await onSubmit({
-        body: expandedBody,
-        rawBody: body,
-        mentionUserIds: userIds,
-        attachments,
-        setAttachments,
+      let live = true;
+      void loadEmojiData().then((data) => {
+        if (live) setEmojiMatches(searchEmoji(data, ac.query));
       });
-      setValue("");
-    } catch (err) {
-      onError?.(err instanceof Error ? err.message : String(err));
+      return () => {
+        live = false;
+      };
+    }, [ac?.mode, ac?.query]);
+
+    const matchCount = {
+      mention: mentionMatches.length,
+      room: roomMatches.length,
+      emoji: emojiMatches.length,
+      slash: slashMatches.length,
+    }[ac?.mode ?? "mention"];
+    const acOpen = ac !== null && matchCount > 0;
+
+    function updateAutocomplete(next: AutocompleteState | null) {
+      setAc((prev) => {
+        if (
+          prev?.mode === next?.mode &&
+          prev?.start === next?.start &&
+          prev?.query === next?.query
+        ) {
+          return prev;
+        }
+        if (prev?.mode !== next?.mode || prev?.start !== next?.start)
+          setActiveIdx(0);
+        return next;
+      });
     }
-  }
 
-  useImperativeHandle(ref, () => ({ submit }));
-
-  /** Single entry point for every way a file can reach the tray. */
-  function addFiles(files: File[]) {
-    if (!attachmentsEnabled || files.length === 0) return;
-    setAttachments((current) => {
-      const { staged, error: stageError } = stageFiles(current, files);
-      onError?.(stageError);
-      return staged;
+    const editor = useRichTextEditor({
+      placeholder,
+      ariaLabel,
+      editable: !disabled,
+      highlight: useMemo(
+        () => ({
+          names: members.filter((m) => !m.isAgent).map((m) => m.displayName),
+          agentNames: members
+            .filter((m) => m.isAgent)
+            .map((m) => m.displayName),
+          roomNames: roomChoices.map((r) => r.name),
+        }),
+        [members, roomChoices],
+      ),
+      onUpdate: ({ text: next, cursor }) => {
+        setText(next);
+        updateAutocomplete(detectAutocomplete(next, cursor, slashEnabled));
+      },
+      onSubmit: () => void submit(),
+      onPasteFiles: attachmentsEnabled
+        ? (files) => addFiles(files.map((f) => nameClipboardFile(f)))
+        : undefined,
     });
-  }
 
-  function removeAttachment(id: string) {
-    setAttachments((current) => current.filter((a) => a.id !== id));
-    if (attachInputRef.current) attachInputRef.current.value = "";
-  }
+    // Caret moves (arrows, clicks) open or close suggestions without a doc change.
+    const { editor: tiptap, getPlainTextAndCursor } = editor;
+    useEffect(() => {
+      const ed = tiptap;
+      if (!ed) return;
+      const onSelection = () => {
+        const { text: t, cursor } = getPlainTextAndCursor();
+        updateAutocomplete(detectAutocomplete(t, cursor, slashEnabled));
+      };
+      const onBlur = () => setAc(null);
+      ed.on("selectionUpdate", onSelection);
+      ed.on("blur", onBlur);
+      return () => {
+        ed.off("selectionUpdate", onSelection);
+        ed.off("blur", onBlur);
+      };
+    }, [tiptap, getPlainTextAndCursor, slashEnabled]);
 
-  function handleAttachChange(e: React.ChangeEvent<HTMLInputElement>) {
-    addFiles(Array.from(e.target.files ?? []));
-    e.target.value = "";
-  }
+    /** Replace the trigger and query before the caret with `insert`. */
+    function complete(insert: string) {
+      if (!ac) return;
+      const { cursor } = editor.getPlainTextAndCursor();
+      editor.replacePlainTextRange(ac.start, cursor, insert);
+      setAc(null);
+    }
 
-  function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>) {
-    if (!attachmentsEnabled) return;
-    const files = Array.from(e.clipboardData?.files ?? []);
-    // No files on the clipboard: an ordinary text paste, leave it to the browser.
-    if (files.length === 0) return;
-    e.preventDefault();
-    addFiles(files.map((f) => nameClipboardFile(f)));
-  }
+    function selectMention(m: MentionSuggestion) {
+      pickedMentions.current.push({ label: m.displayName, target: m.userId });
+      complete(`@${m.displayName} `);
+    }
 
-  /**
-   * Dragged text or a link also fires these events; only a drag carrying files
-   * should light up the drop target or be swallowed by preventDefault().
-   */
-  function isFileDrag(e: DragEvent): boolean {
-    return attachmentsEnabled && Array.from(e.dataTransfer?.types ?? []).includes("Files");
-  }
+    function selectRoom(r: RoomSuggestion) {
+      pickedRooms.current.push({ label: r.name, target: r.roomId });
+      complete(`#${r.name} `);
+    }
 
-  function handleDragEnter(e: DragEvent) {
-    if (!isFileDrag(e)) return;
-    e.preventDefault();
-    dragDepth.current += 1;
-    setDragging(true);
-  }
+    function selectEmoji(e: EmojiSuggestion) {
+      complete(`${e.native} `);
+    }
 
-  function handleDragOver(e: DragEvent) {
-    if (!isFileDrag(e)) return;
-    // Without this the browser navigates to the dropped file.
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-  }
+    function selectSlash(cmd: SlashCommandMeta) {
+      const { text: t } = editor.getPlainTextAndCursor();
+      editor.replacePlainTextRange(0, t.length, `/${cmd.name} `);
+      setAc(null);
+    }
 
-  function handleDragLeave(e: DragEvent) {
-    if (!isFileDrag(e)) return;
-    // Moving between child elements fires leave/enter pairs; count depth so the
-    // highlight only clears when the pointer leaves the input itself.
-    dragDepth.current -= 1;
-    if (dragDepth.current <= 0) {
+    function selectActive() {
+      if (!ac) return;
+      if (ac.mode === "mention") selectMention(mentionMatches[activeIdx]);
+      else if (ac.mode === "room") selectRoom(roomMatches[activeIdx]);
+      else if (ac.mode === "emoji") selectEmoji(emojiMatches[activeIdx]);
+      else selectSlash(slashMatches[activeIdx]);
+    }
+
+    async function submit(): Promise<void> {
+      if (disabled) return;
+      const markdown = editor.getMarkdown().trim();
+      if (!markdown && attachments.length === 0 && !allowEmpty) return;
+      onError?.(null);
+      try {
+        const composed = composeText(markdown, {
+          mentions: pickedMentions.current,
+          rooms: pickedRooms.current,
+          members,
+        });
+        await onSubmit({
+          ...composed,
+          rawBody: markdown,
+          attachments,
+          setAttachments,
+        });
+        editor.clearContent();
+        pickedMentions.current = [];
+        pickedRooms.current = [];
+      } catch (err) {
+        onError?.(err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    useImperativeHandle(ref, () => ({ submit }));
+
+    /** Single entry point for every way a file can reach the tray. */
+    function addFiles(files: File[]) {
+      if (!attachmentsEnabled || files.length === 0) return;
+      setAttachments((current) => {
+        const { staged, error: stageError } = stageFiles(current, files);
+        onError?.(stageError);
+        return staged;
+      });
+    }
+
+    function removeAttachment(id: string) {
+      setAttachments((current) => current.filter((a) => a.id !== id));
+      if (attachInputRef.current) attachInputRef.current.value = "";
+    }
+
+    /**
+     * Dragged text or a link also fires these events; only a drag carrying files
+     * should light up the drop target or be swallowed by preventDefault().
+     */
+    function isFileDrag(e: DragEvent): boolean {
+      return (
+        attachmentsEnabled &&
+        Array.from(e.dataTransfer?.types ?? []).includes("Files")
+      );
+    }
+
+    function handleDragEnter(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      dragDepth.current += 1;
+      setDragging(true);
+    }
+
+    function handleDragOver(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      // Without this the browser navigates to the dropped file.
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    }
+
+    function handleDragLeave(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      // Moving between child elements fires leave/enter pairs; count depth so the
+      // highlight only clears when the pointer leaves the input itself.
+      dragDepth.current -= 1;
+      if (dragDepth.current <= 0) {
+        dragDepth.current = 0;
+        setDragging(false);
+      }
+    }
+
+    function handleDrop(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
       dragDepth.current = 0;
       setDragging(false);
+      addFiles(Array.from(e.dataTransfer?.files ?? []));
     }
-  }
 
-  function handleDrop(e: DragEvent) {
-    if (!isFileDrag(e)) return;
-    e.preventDefault();
-    dragDepth.current = 0;
-    setDragging(false);
-    addFiles(Array.from(e.dataTransfer?.files ?? []));
-  }
-
-  const onKeyDown = async (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (ac && matches.length > 0) {
+    /**
+     * Capture phase: with suggestions open, the list owns the arrows, Enter, Tab
+     * and Escape, so they must not reach the editor's own keymap.
+     */
+    function onKeyDownCapture(e: KeyboardEvent) {
+      if (!acOpen || e.nativeEvent.isComposing) return;
+      const handled = () => {
+        e.preventDefault();
+        e.stopPropagation();
+      };
       if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setActiveIdx((i) => (i + 1) % matches.length);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setActiveIdx((i) => (i - 1 + matches.length) % matches.length);
-        return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        if (ac.mode === "slash") {
-          const activeCmd = slashMatches[activeIdx] as SlashCommandMeta | undefined;
-          // If the user typed the full command and pressed Enter, send immediately.
-          if (activeCmd && e.key === "Enter" && value.trim() === `/${activeCmd.name}`) {
-            setAc(null);
-            await submit();
-          } else {
-            selectSlash(activeCmd as SlashCommandMeta);
-          }
-        } else {
-          selectMember(mentionMatches[activeIdx] as Member);
-        }
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
+        handled();
+        setActiveIdx((i) => (i + 1) % matchCount);
+      } else if (e.key === "ArrowUp") {
+        handled();
+        setActiveIdx((i) => (i - 1 + matchCount) % matchCount);
+      } else if (e.key === "Escape") {
+        handled();
         setAc(null);
-        return;
+      } else if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+        handled();
+        const cmd = slashMatches[activeIdx];
+        // The full command typed and Enter pressed: send it as is.
+        if (
+          ac?.mode === "slash" &&
+          e.key === "Enter" &&
+          text.trim() === `/${cmd?.name}`
+        ) {
+          setAc(null);
+          void submit();
+        } else {
+          selectActive();
+        }
       }
     }
-    if (e.key !== "Enter" || e.shiftKey) return;
-    e.preventDefault();
-    await submit();
-  };
 
-  return (
-    <div
-      className={cn("relative", className)}
-      onDragEnter={handleDragEnter}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      {dragging && (
-        <div className="pointer-events-none absolute inset-1 z-10 flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-ring bg-background/90 text-sm text-muted-foreground">
-          <ImageIcon className="h-5 w-5" />
-          <span>Drop to attach — up to {MAX_ATTACHMENTS} files, 0.5 MB each</span>
-        </div>
-      )}
-      {error && (
-        <div role="alert" className="mb-2 text-sm text-destructive">
-          {error}
-        </div>
-      )}
-      {header}
-      {ac && matches.length > 0 && (
-        <div className={cn("absolute bottom-full z-30 mb-1", suggestionsClassName)}>
-          {ac.mode === "slash" ? (
-            <SlashCommandList
-              commands={slashMatches}
-              activeIdx={activeIdx}
-              onSelect={selectSlash}
-              onHover={setActiveIdx}
-            />
-          ) : (
-            <ul
-              role="listbox"
-              aria-label="Mention suggestions"
-              className="max-h-56 overflow-auto rounded-md border border-border bg-popover p-1 shadow-lg"
-            >
-              {mentionMatches.map((m, i) => (
-                <li
-                  key={m.userId}
-                  role="option"
-                  aria-selected={i === activeIdx}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    selectMember(m);
-                  }}
-                  onMouseEnter={() => setActiveIdx(i)}
-                  className={
-                    "flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-sm " +
-                    (i === activeIdx ? "bg-accent text-accent-foreground" : "")
-                  }
-                >
-                  <span className="font-semibold" style={{ color: senderColor(m.userId) }}>
-                    {m.name}
-                  </span>
-                  <span className="text-xs text-muted-foreground">{m.userId}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-      {attachmentsEnabled && (
-        <StagedAttachments
-          attachments={attachments}
-          uploadingId={uploadingId}
-          progress={uploadProgress}
-          onRemove={removeAttachment}
-        />
-      )}
-      <div className={INPUT_WRAPPER_CLS}>
-        {attachmentsEnabled && (
-          <>
-            <input
-              ref={attachInputRef}
-              type="file"
-              multiple
-              aria-label="Attach file"
-              className="sr-only"
-              onChange={handleAttachChange}
-              tabIndex={-1}
-            />
-            <button
-              type="button"
-              aria-label="Attach file"
-              onClick={() => attachInputRef.current?.click()}
-              className="ml-1 shrink-0 self-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <PaperclipIcon className="h-4 w-4" />
-            </button>
-          </>
+    function startMention() {
+      const ed = editor.editor;
+      if (!ed) return;
+      const { text: t, cursor } = editor.getPlainTextAndCursor();
+      const before = t[cursor - 1];
+      ed.chain()
+        .focus()
+        .insertContent(before && !/\s/.test(before) ? " @" : "@")
+        .run();
+    }
+
+    const hover = (i: number) => setActiveIdx(i);
+
+    return (
+      <div
+        className={cn("relative", className)}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        onKeyDownCapture={onKeyDownCapture}
+      >
+        {error && (
+          <div role="alert" className="mb-2 text-body2 text-accent-danger">
+            {error}
+          </div>
         )}
-        <textarea
-          ref={textareaRef}
-          data-slot="textarea"
-          aria-label={ariaLabel}
-          placeholder={placeholder}
-          value={value}
-          disabled={disabled}
-          onChange={(e) => {
-            setValue(e.target.value);
-            detectAutocomplete(e.target.value, e.target.selectionStart);
-          }}
-          onKeyUp={(e) => {
-            if (ac && (e.key === "ArrowDown" || e.key === "ArrowUp")) return;
-            if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End") {
-              const ta = e.currentTarget;
-              detectAutocomplete(ta.value, ta.selectionStart);
-            }
-          }}
-          onClick={(e) => {
-            const ta = e.currentTarget;
-            detectAutocomplete(ta.value, ta.selectionStart);
-          }}
-          onBlur={() => setAc(null)}
-          onKeyDown={onKeyDown}
-          onPaste={handlePaste}
-          rows={1}
-          className={cn(TEXTAREA_CLS, !sendButton && "pr-1.5")}
-        />
-        {sendButton && (
-          <button
-            type="button"
-            onClick={() => void submit()}
-            disabled={disabled || (!value.trim() && attachments.length === 0 && !allowEmpty)}
-            aria-label="Send message"
-            className="shrink-0 self-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+        {header}
+        {acOpen && (
+          <div
+            className={cn(
+              "absolute bottom-full z-30 mb-1",
+              suggestionsClassName,
+            )}
           >
-            <SendIcon className="h-4 w-4" />
-          </button>
+            {ac.mode === "slash" ? (
+              <SlashCommandList
+                commands={slashMatches}
+                activeIdx={activeIdx}
+                onSelect={selectSlash}
+                onHover={hover}
+              />
+            ) : ac.mode === "room" ? (
+              <RoomAutocomplete
+                suggestions={roomMatches}
+                selectedIndex={activeIdx}
+                onSelect={selectRoom}
+                onHover={hover}
+              />
+            ) : ac.mode === "emoji" ? (
+              <EmojiAutocomplete
+                suggestions={emojiMatches}
+                selectedIndex={activeIdx}
+                onSelect={selectEmoji}
+                onHover={hover}
+              />
+            ) : (
+              <MentionAutocomplete
+                suggestions={mentionMatches}
+                selectedIndex={activeIdx}
+                onSelect={selectMention}
+                onHover={hover}
+              />
+            )}
+          </div>
+        )}
+        <div
+          className={cn(
+            "relative rounded-card border border-border bg-surface-primary px-3 pt-2.5 pb-1.5 transition-colors",
+            "focus-within:border-surface-border-selected",
+            disabled && "opacity-60",
+          )}
+        >
+          {dragging && <DropZoneOverlay />}
+          {attachmentsEnabled && (
+            <ComposerAttachments
+              attachments={attachments}
+              uploadingId={uploadingId}
+              progress={uploadProgress}
+              onRemove={removeAttachment}
+            />
+          )}
+          <div className="max-h-48 overflow-y-auto">
+            <EditorContent editor={editor.editor} />
+          </div>
+          <ComposerToolbar
+            editor={editor.editor}
+            disabled={disabled}
+            formattingOpen={formattingOpen}
+            onFormattingToggle={setFormattingOpen}
+            onMention={startMention}
+            onAttach={
+              attachmentsEnabled
+                ? () => attachInputRef.current?.click()
+                : undefined
+            }
+            onEmoji={(emoji) =>
+              editor.editor?.chain().focus().insertContent(emoji).run()
+            }
+            extraActions={extraActions}
+            sendButton={sendButton}
+            sendDisabled={
+              disabled ||
+              (!text.trim() && attachments.length === 0 && !allowEmpty)
+            }
+            onSend={() => void submit()}
+          />
+        </div>
+        {attachmentsEnabled && (
+          <input
+            ref={attachInputRef}
+            type="file"
+            multiple
+            aria-label="Attach file"
+            className="sr-only"
+            tabIndex={-1}
+            onChange={(e) => {
+              addFiles(Array.from(e.target.files ?? []));
+              e.target.value = "";
+            }}
+          />
         )}
       </div>
-    </div>
-  );
-});
+    );
+  },
+);

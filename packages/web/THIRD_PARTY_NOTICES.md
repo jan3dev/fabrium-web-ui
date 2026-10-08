@@ -49,6 +49,21 @@ Derived files:
 - `src/components/timeline/delete-confirm-dialog.tsx` ← `desktop/src/features/messages/ui/DeleteMessageConfirmDialog.tsx`
 - `src/lib/timeline/timeline-items.ts` ← `desktop/src/features/messages/lib/timelineItems.ts`, `messageGrouping.ts`, `virtualizedTimelineItems.ts`
 - `src/hooks/timeline/use-bottom-settle.ts` ← `desktop/src/features/messages/ui/useVirtualizedBottomSettle.ts`
+- `src/components/structures/thread-pane.tsx` ← `desktop/src/features/messages/ui/MessageThreadPanel.tsx`
+- `src/components/structures/thread-pane-skeleton.tsx` ← `desktop/src/features/messages/ui/MessageThreadPanelSkeleton.tsx`
+- `src/components/timeline/thread-summary-row.tsx` ← `desktop/src/features/messages/ui/MessageThreadSummaryRow.tsx`
+- `src/components/rooms/editor/use-rich-text-editor.ts` ← `desktop/src/features/messages/lib/useRichTextEditor.ts`
+- `src/components/rooms/editor/mention-highlight-extension.ts` ← `desktop/src/features/messages/lib/mentionHighlightExtension.ts`
+- `src/components/rooms/editor/code-block-extensions.ts` ← `desktop/src/features/messages/lib/codeBlockExtensions.ts`
+- `src/components/rooms/editor/plain-text-projection.ts` ← `desktop/src/features/messages/lib/plainTextProjection.ts`
+- `src/components/rooms/editor/formatting-toolbar.tsx` ← `desktop/src/features/messages/ui/FormattingToolbar.tsx`
+- `src/components/rooms/editor/selection-formatting-tray.tsx` ← `desktop/src/features/messages/ui/SelectionFormattingTray.tsx`
+- `src/components/rooms/editor/composer-toolbar.tsx` ← `desktop/src/features/messages/ui/MessageComposerToolbar.tsx`
+- `src/components/rooms/mention-autocomplete.tsx` ← `desktop/src/features/messages/ui/MentionAutocomplete.tsx`
+- `src/components/rooms/room-autocomplete.tsx` ← `desktop/src/features/messages/ui/ChannelAutocomplete.tsx`
+- `src/components/rooms/emoji-autocomplete.tsx` ← `desktop/src/features/messages/ui/EmojiAutocomplete.tsx`
+- `src/components/rooms/composer-attachments.tsx` ← `desktop/src/features/messages/ui/ComposerAttachments.tsx`
+- `src/components/rooms/typing-indicator.tsx` ← `desktop/src/features/messages/ui/TypingIndicatorRow.tsx`
 
 ## Apache License 2.0
 

@@ -1,9 +1,6 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/messages/lib/plainTextProjection.ts. Modified.
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 
-import { CUSTOM_EMOJI_NODE_NAME } from "./customEmojiNode";
-import { COMPOSER_MESSAGE_LINK_NODE_NAME } from "./composerMessageLinkNode";
-
 /**
  * Plain-text projection of a ProseMirror document.
  *
@@ -66,19 +63,8 @@ type Segment =
       kind: "emptyBlockContent";
       pmAt: number;
       textAt: number;
-    }
-  // An inline atom leaf (e.g. a custom-emoji node) that is 1 PM position
-  // wide but projects to its `:shortcode:` text. Unlike a `text` segment
-  // the PM and text widths differ: PM spans [pmFrom, pmFrom+1] while text
-  // spans the full shortcode. You can't place a cursor *inside* an atom,
-  // so positions resolve to one edge or the other.
-  | {
-      kind: "atom";
-      pmFrom: number;
-      pmTo: number;
-      textFrom: number;
-      textTo: number;
     };
+
 
 /**
  * Build a `PlainTextProjection` for the given doc.
@@ -172,30 +158,6 @@ export function buildPlainTextProjection(
       return true; // descend into block children
     }
 
-    // ── Leaf inline: custom-emoji atom ─────────────────────────────
-    // 1 PM position wide, projects to its full `:shortcode:` text. Keeps
-    // the two mappings consistent with what `renderText` emits, so cursor
-    // math and autocomplete offsets see the shortcode at its natural width.
-    if (
-      node.type.name === CUSTOM_EMOJI_NODE_NAME ||
-      node.type.name === COMPOSER_MESSAGE_LINK_NODE_NAME
-    ) {
-      const projected =
-        node.type.name === CUSTOM_EMOJI_NODE_NAME
-          ? `:${String(node.attrs.shortcode ?? "")}:`
-          : String(node.attrs.href ?? "");
-      segments.push({
-        kind: "atom",
-        pmFrom: pos,
-        pmTo: pos + 1,
-        textFrom: cursorText,
-        textTo: cursorText + projected.length,
-      });
-      textParts.push(projected);
-      cursorText += projected.length;
-      return false;
-    }
-
     // Other inline leaf nodes (none today) — skip silently.
     return true;
   });
@@ -211,11 +173,6 @@ export function buildPlainTextProjection(
           return seg.textFrom + (pm - seg.pmFrom);
         }
       } else if (seg.kind === "hardBreak") {
-        if (pm <= seg.pmFrom) return seg.textFrom;
-        if (pm <= seg.pmTo) return seg.textTo;
-      } else if (seg.kind === "atom") {
-        // 1 PM wide; either before (pmFrom → textFrom) or after
-        // (pmTo → textTo). No interior position exists.
         if (pm <= seg.pmFrom) return seg.textFrom;
         if (pm <= seg.pmTo) return seg.textTo;
       } else if (seg.kind === "blockBoundary") {
@@ -236,7 +193,6 @@ export function buildPlainTextProjection(
         (s) =>
           s.kind === "text" ||
           s.kind === "hardBreak" ||
-          s.kind === "atom" ||
           s.kind === "emptyBlockContent",
       );
       if (first) {
@@ -260,13 +216,6 @@ export function buildPlainTextProjection(
           return seg.pmFrom;
         }
         // offset === seg.textTo → fall through to the next segment.
-      } else if (seg.kind === "atom") {
-        // An offset inside the projected `:shortcode:` can't land within
-        // the atom — snap to just before it. At the right edge fall
-        // through so the position lands after the atom (pmTo, claimed by
-        // the following segment or the end-of-doc tail).
-        if (offset < seg.textTo) return seg.pmFrom;
-        // offset === seg.textTo → fall through.
       } else if (seg.kind === "blockBoundary") {
         // Zero PM-width.
         // offset <  textTo → "end of previous block" → pmAt
@@ -282,7 +231,6 @@ export function buildPlainTextProjection(
     const last = segments[segments.length - 1];
     if (!last) return doc.content.size > 0 ? 1 : 0;
     if (last.kind === "text" || last.kind === "hardBreak") return last.pmTo;
-    if (last.kind === "atom") return last.pmTo;
     if (last.kind === "emptyBlockContent") return last.pmAt;
     return last.pmAt;
   }

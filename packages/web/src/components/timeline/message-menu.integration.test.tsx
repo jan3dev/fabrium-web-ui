@@ -7,7 +7,7 @@ import { QUOTE_FIELD, type QuoteRef } from "@/lib/matrix/quote";
 import { getQuoteDraft, resetQuoteDrafts } from "@/lib/quote-draft-store";
 import { makeFakeClient, makeMatrixEvent, makeRoom, pushTimelineEvent } from "../../../test/factories";
 import { MemoryRouter } from "react-router-dom";
-import { ThreadView } from "../structures/thread-view";
+import { ThreadPane } from "../structures/thread-pane";
 import { TimelinePanel } from "../structures/timeline-panel";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -55,7 +55,7 @@ function renderRoom() {
 function renderThread(rootId: string) {
   return render(
     <MemoryRouter>
-      <ThreadView roomId={roomId} rootEventId={rootId} onBack={() => {}} />
+      <ThreadPane roomId={roomId} rootEventId={rootId} onClose={() => {}} />
     </MemoryRouter>,
   );
 }

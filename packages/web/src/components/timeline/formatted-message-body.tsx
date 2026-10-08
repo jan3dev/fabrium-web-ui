@@ -6,7 +6,7 @@ import parse, {
 } from "html-react-parser";
 import { Fragment, type ReactNode } from "react";
 import { splitUrls } from "@/lib/autolink";
-import { senderColor, splitMentions } from "@/lib/sender";
+import { splitMentions } from "@/lib/sender";
 import { useUserName } from "@/hooks/use-user-name";
 import { MessageLink } from "./message-link";
 
@@ -26,11 +26,10 @@ function MentionPill({ userId, roomId }: { userId: string; roomId: string }) {
   const name = useUserName(userId, roomId);
   return (
     <span
-      className="rounded-sm bg-primary/15 px-1 font-medium"
-      style={{ color: senderColor(userId) }}
+      className="rounded-utility bg-chip-brand-background px-1 font-medium text-chip-brand-foreground"
       title={userId}
     >
-      @{name}
+      @{name.replace(/^@/, "")}
     </span>
   );
 }
@@ -88,6 +87,8 @@ export function FormattedMessageBody({ html, roomId }: Props) {
       if (node.type === "tag" && node.name === "a") {
         const href = (node as { attribs?: Record<string, string> }).attribs?.href ?? "";
         const children = (node as { children?: DOMNode[] }).children ?? [];
+        const user = /^https:\/\/matrix\.to\/#\/(@[^/?]+)$/.exec(href)?.[1];
+        if (user) return <MentionPill userId={decodeURIComponent(user)} roomId={roomId} />;
         return (
           <MessageLink href={href}>{domToReact(children, options)}</MessageLink>
         );

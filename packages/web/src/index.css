@@ -264,6 +264,19 @@
 		overflow-wrap: anywhere;
 	}
 
+	/* The composer's TipTap document: chat-tight paragraphs and a placeholder. */
+	.composer-editor > :first-child,
+	.composer-editor p {
+		margin-top: 0;
+	}
+	.composer-editor p.is-editor-empty:first-child::before {
+		content: attr(data-placeholder);
+		float: left;
+		height: 0;
+		color: var(--text-tertiary);
+		pointer-events: none;
+	}
+
 	.markdown > div:first-child > :first-child {
 		margin-top: 0;
 	}

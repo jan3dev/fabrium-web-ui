@@ -38,7 +38,7 @@ describe("<Composer />", () => {
         { msgtype: "m.text", body: "hello world" },
       ),
     );
-    expect(input).toHaveValue("");
+    expect(input).toHaveTextContent("");
   });
 
   it("Shift+Enter inserts a newline instead of sending", async () => {
@@ -48,7 +48,8 @@ describe("<Composer />", () => {
     const input = screen.getByRole("textbox", { name: /message/i });
     await user.type(input, "line1{Shift>}{Enter}{/Shift}line2");
     expect(send).not.toHaveBeenCalled();
-    expect((input as HTMLTextAreaElement).value).toBe("line1\nline2");
+    expect(input).toHaveTextContent("line1line2");
+    expect(input.querySelector("br:not(.ProseMirror-trailingBreak)")).not.toBeNull();
   });
 
   it("ignores Enter when the input is empty", async () => {
@@ -67,8 +68,8 @@ describe("<Composer />", () => {
     const input = screen.getByRole("textbox", { name: /message/i });
     await user.type(input, "hi{Enter}");
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/network/i));
-    expect(input).not.toBeDisabled();
-    expect(input).toHaveValue("hi");
+    expect(input).toHaveAttribute("contenteditable", "true");
+    expect(input).toHaveTextContent("hi");
   });
 
   // --- Mention autocomplete: activeIdx persistence ---
@@ -103,13 +104,37 @@ describe("<Composer />", () => {
       // Move to index 1 and confirm Tab inserts the second member, not the first
       await user.keyboard("{ArrowDown}"); // index 0 → 1
       await user.keyboard("{Tab}");
-      // Insertion uses the localpart (@bob), not the full mxid — per the
-      // displayname-rendering decision so expandMentions stays tokenizable.
-      expect((input as HTMLTextAreaElement).value).toMatch(/@bob\b/);
+      // Insertion uses the display name; the send maps it back to the user ID.
+      expect(input).toHaveTextContent(/@bob\b/);
     });
   });
 
   // --- Slash command autocomplete ---
+  it("a picked mention sends the user ID, a matrix.to pill and m.mentions", async () => {
+    const { send } = setup();
+    const room = MatrixClientPeg.safeGet()!.getRoom(roomId)!;
+    const alice = new RoomMember(roomId, "@alice:h.example");
+    alice.name = "Alice Liddell";
+    (room as unknown as { getJoinedMembers: () => RoomMember[] }).getJoinedMembers = () => [alice];
+    render(<Composer roomId={roomId} />);
+    const user = userEvent.setup();
+    const input = screen.getByRole("textbox", { name: /message/i });
+    await user.type(input, "@lid");
+    await user.keyboard("{Enter}");
+    expect(input).toHaveTextContent("@Alice Liddell");
+    await user.type(input, "hi{Enter}");
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(roomId, null, "m.room.message", {
+        msgtype: "m.text",
+        body: "@alice:h.example hi",
+        format: "org.matrix.custom.html",
+        // Exact HTML is covered in compose.test.ts; happy-dom's DOMPurify drops the <p>.
+        formatted_body: expect.stringContaining('<a href="https://matrix.to/#/@alice:h.example">Alice Liddell</a> hi'),
+        "m.mentions": { user_ids: ["@alice:h.example"] },
+      }),
+    );
+  });
+
   describe("slash command autocomplete", () => {
     it("does not show /clear in room mode when / is typed", async () => {
       setup();
@@ -140,25 +165,9 @@ describe("<Composer /> thread mode", () => {
     );
   });
 
-  it("renders a 'replying to' chrome with an exit affordance", async () => {
-    setup();
-    render(<Composer roomId={roomId} threadRootEventId="$root" onExitThread={vi.fn()} />);
-    expect(screen.getByText(/replying (to|in current thread)/i)).toBeDefined();
-    expect(screen.getByRole("button", { name: /exit thread|cancel|close/i })).toBeDefined();
-  });
-
-  it("calls onExitThread when the exit affordance is clicked", async () => {
-    const onExitThread = vi.fn();
-    setup();
-    render(<Composer roomId={roomId} threadRootEventId="$root" onExitThread={onExitThread} />);
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /exit thread|cancel|close/i }));
-    expect(onExitThread).toHaveBeenCalled();
-  });
-
   it("hides the Stop button when nobody is typing", () => {
     setup();
-    render(<Composer roomId={roomId} threadRootEventId="$root" onExitThread={vi.fn()} />);
+    render(<Composer roomId={roomId} threadRootEventId="$root" />);
     expect(screen.queryByRole("button", { name: /stop agent/i })).toBeNull();
   });
 
@@ -171,7 +180,7 @@ describe("<Composer /> thread mode", () => {
     agent.typing = true;
     room.currentState.getMembers = () => [agent];
 
-    render(<Composer roomId={roomId} threadRootEventId="$root" onExitThread={vi.fn()} />);
+    render(<Composer roomId={roomId} threadRootEventId="$root" />);
     const stopButton = screen.getByRole("button", { name: /stop agent/i });
     const user = userEvent.setup();
     await user.click(stopButton);
@@ -274,7 +283,7 @@ describe("<Composer /> attachments", () => {
     render(<Composer roomId={roomId} />);
     const user = userEvent.setup();
     await user.upload(screen.getByLabelText(/attach file/i, { selector: "input" }), pngFile(1024, "dog.png"));
-    expect(screen.getByText("dog.png")).toBeDefined(); // staged chip
+    expect(screen.getByTitle(/^dog\.png/)).toBeDefined(); // staged chip
 
     await user.type(screen.getByRole("textbox", { name: /message/i }), "look{Enter}");
 
@@ -388,7 +397,7 @@ describe("<Composer /> paste, drag-and-drop and the attachment tray", () => {
     fireEvent.paste(input, { clipboardData: { files: [png(1024, "image.png")], types: ["Files"] } });
 
     const tray = await screen.findByRole("list", { name: /staged attachments/i });
-    expect(within(tray).getByText(/^pasted-\d{8}-\d{6}\.png$/)).toBeDefined();
+    expect(within(tray).getByTitle(/^pasted-\d{8}-\d{6}\.png /)).toBeDefined();
   });
 
   it("leaves a plain text paste to the browser", async () => {
@@ -411,7 +420,7 @@ describe("<Composer /> paste, drag-and-drop and the attachment tray", () => {
       clipboardData: { files: [png(1024, "diagram.png")], types: ["Files"] },
     });
 
-    expect(await screen.findByText("diagram.png")).toBeDefined();
+    expect(await screen.findByTitle(/^diagram\.png/)).toBeDefined();
   });
 
   it("stages files dropped onto the composer and shows a drop target while dragging", async () => {
@@ -426,8 +435,8 @@ describe("<Composer /> paste, drag-and-drop and the attachment tray", () => {
 
     expect(screen.queryByText(/drop to attach/i)).toBeNull();
     const tray = await screen.findByRole("list", { name: /staged attachments/i });
-    expect(within(tray).getByText("a.png")).toBeDefined();
-    expect(within(tray).getByText("b.png")).toBeDefined();
+    expect(within(tray).getByTitle(/^a\.png/)).toBeDefined();
+    expect(within(tray).getByTitle(/^b\.png/)).toBeDefined();
   });
 
   it("ignores a drag that carries no files", () => {
@@ -473,7 +482,7 @@ describe("<Composer /> paste, drag-and-drop and the attachment tray", () => {
     await user.click(within(tray).getByRole("button", { name: /remove a\.png/i }));
 
     expect(screen.queryByText("a.png")).toBeNull();
-    expect(screen.getByText("b.png")).toBeDefined();
+    expect(screen.getByTitle(/^b\.png/)).toBeDefined();
   });
 
   it("accepts the files that fit and reports the ones that do not", async () => {
@@ -485,7 +494,7 @@ describe("<Composer /> paste, drag-and-drop and the attachment tray", () => {
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/0\.5\s?MB/i));
     const tray = screen.getByRole("list", { name: /staged attachments/i });
-    expect(within(tray).getByText("ok.png")).toBeDefined();
+    expect(within(tray).getByTitle(/^ok\.png/)).toBeDefined();
     expect(within(tray).queryByText("huge.png")).toBeNull();
   });
 

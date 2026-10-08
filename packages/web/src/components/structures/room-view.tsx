@@ -1,51 +1,39 @@
 import { useAwaitingInput } from "../../hooks/use-timeline";
-import { useEffect, useState } from "react";
 import { useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import type { LoggedInOutletContext } from "./logged-in-view";
 import { Composer } from "../rooms/composer";
 import { TypingIndicator } from "../rooms/typing-indicator";
-import { PlanBoard } from "../timeline/plan-board";
 import { NotJoinedRoom } from "./not-joined-room";
-import { ThreadView } from "./thread-view";
 import { TimelinePanel } from "./timeline-panel";
 import { useMarkRead } from "../../hooks/use-mark-read";
 import { useTyping } from "../../hooks/use-typing";
-import { usePlan } from "../../hooks/use-plan";
 import { useRoomKnown } from "../../hooks/use-room-known";
 
+/** The room's main column: timeline and room composer. Threads open in the right pane. */
 export function RoomView() {
   const { roomId } = useParams<{ roomId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const threadRootEventId = searchParams.get("thread");
-  const highlightEventId = searchParams.get("event") ?? undefined;
+  // With a thread open, `?event=` points into the thread pane, not the timeline.
+  const highlightEventId = searchParams.get("thread")
+    ? undefined
+    : (searchParams.get("event") ?? undefined);
   // Undefined outside the logged-in shell (tests, stories).
-  const workforceSpaceId = useOutletContext<LoggedInOutletContext | undefined>()?.spaceId ?? null;
+  const workforceSpaceId =
+    useOutletContext<LoggedInOutletContext | undefined>()?.spaceId ?? null;
   const known = useRoomKnown(roomId ?? "");
   const awaitingUserIds = useAwaitingInput(roomId ?? "");
   const typingUserIds = useTyping(roomId ?? "");
   useMarkRead(roomId ?? "");
 
-  const [planCollapsed, setPlanCollapsed] = useState(false);
-  // Track which sessionId the user dismissed so a new plan in the same thread
-  // re-shows the board automatically.
-  const [dismissedSessionId, setDismissedSessionId] = useState<string | null>(null);
-
-  // Reset collapse/dismiss state whenever the thread changes.
-  useEffect(() => {
-    setPlanCollapsed(false);
-    setDismissedSessionId(null);
-  }, [threadRootEventId]);
-
-  const plan = usePlan(roomId ?? "", threadRootEventId ?? "");
-  const showPlan =
-    !!threadRootEventId && !!plan && plan.sessionId !== dismissedSessionId;
-
-  function enterThread(id: string) {
-    // Use replace=false so back button returns to the room timeline.
-    setSearchParams({ thread: id });
-  }
-  function exitThread() {
-    setSearchParams({});
+  function openThread(id: string) {
+    // A new history entry, so Back closes the thread again.
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("thread", id);
+      next.delete("event");
+      next.delete("pane");
+      return next;
+    });
   }
 
   if (!roomId) return <div>No room selected</div>;
@@ -56,41 +44,20 @@ export function RoomView() {
   return (
     <article className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1">
-        {threadRootEventId ? (
-          <ThreadView
-            roomId={roomId}
-            rootEventId={threadRootEventId}
-            onBack={exitThread}
-            highlightEventId={highlightEventId}
-            workforceSpaceId={workforceSpaceId}
-          />
-        ) : (
-          <TimelinePanel
-            key={roomId}
-            roomId={roomId}
-            workforceSpaceId={workforceSpaceId}
-            highlightEventId={highlightEventId}
-            onOpenThread={enterThread}
-          />
-        )}
+        <TimelinePanel
+          key={roomId}
+          roomId={roomId}
+          workforceSpaceId={workforceSpaceId}
+          highlightEventId={highlightEventId}
+          onOpenThread={openThread}
+        />
       </div>
-      <TypingIndicator awaitingUserIds={awaitingUserIds} typingUserIds={typingUserIds} roomId={roomId} />
-      {showPlan && (
-        <div className="px-3 pt-1">
-          <PlanBoard
-            plan={plan}
-            collapsed={planCollapsed}
-            onCollapse={() => setPlanCollapsed(true)}
-            onExpand={() => setPlanCollapsed(false)}
-            onDismiss={() => setDismissedSessionId(plan?.sessionId ?? null)}
-          />
-        </div>
-      )}
-      <Composer
+      <TypingIndicator
+        awaitingUserIds={awaitingUserIds}
+        typingUserIds={typingUserIds}
         roomId={roomId}
-        threadRootEventId={threadRootEventId}
-        onExitThread={exitThread}
       />
+      <Composer roomId={roomId} workforceSpaceId={workforceSpaceId} />
     </article>
   );
 }

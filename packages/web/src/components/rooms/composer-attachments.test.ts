@@ -5,7 +5,7 @@ import {
   nameClipboardFile,
   stageFiles,
   type StagedAttachment,
-} from "./staged-attachments";
+} from "./composer-attachments";
 
 function png(bytes: number, name = "shot.png"): File {
   return new File([new Uint8Array(bytes)], name, { type: "image/png" });

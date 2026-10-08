@@ -4,7 +4,7 @@ import { RoomMember } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MatrixClientPeg } from "@/client/peg";
 import { makeFakeClient, makeRoom } from "../../../test/factories";
-import { MessageInput, type MessageInputProps } from "./message-input";
+import { detectAutocomplete, MessageInput, type MessageInputProps } from "./message-input";
 
 const me = "@me:h.example";
 const roomId = "!r:h.example";
@@ -43,7 +43,7 @@ describe("<MessageInput />", () => {
       mentionUserIds: ["@alice:h.example"],
       attachments: [],
     });
-    expect(input).toHaveValue("");
+    expect(input).toHaveTextContent("");
   });
 
   it("keeps the text and reports the error when onSubmit throws", async () => {
@@ -51,7 +51,7 @@ describe("<MessageInput />", () => {
     const { user, input } = renderInput({ onSubmit: () => Promise.reject(new Error("nope")), onError });
     await user.type(input, "hi{Enter}");
     await waitFor(() => expect(onError).toHaveBeenLastCalledWith("nope"));
-    expect(input).toHaveValue("hi");
+    expect(input).toHaveTextContent("hi");
   });
 
   it("ignores an empty submit unless allowEmpty", async () => {
@@ -84,7 +84,25 @@ describe("<MessageInput />", () => {
 
   it("does not submit while disabled", () => {
     renderInput({ disabled: true, placeholder: "Pick a room first" });
-    expect(screen.getByRole("textbox", { name: /message/i })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: /message/i })).toHaveAttribute("contenteditable", "false");
     expect(screen.getByRole("button", { name: /send message/i })).toBeDisabled();
+  });
+});
+
+describe("detectAutocomplete", () => {
+  it("finds the trigger the caret is in", () => {
+    expect(detectAutocomplete("hi @al", 6, true)).toEqual({ mode: "mention", start: 3, query: "al" });
+    expect(detectAutocomplete("see #gen", 8, true)).toEqual({ mode: "room", start: 4, query: "gen" });
+    expect(detectAutocomplete("ok :thu", 7, true)).toEqual({ mode: "emoji", start: 3, query: "thu" });
+    expect(detectAutocomplete("/cl", 3, true)).toEqual({ mode: "slash", start: 0, query: "cl" });
+  });
+
+  it("stays closed outside a trigger", () => {
+    expect(detectAutocomplete("a@b", 3, true)).toBeNull(); // not at a word start
+    expect(detectAutocomplete("@al ", 4, true)).toBeNull(); // past the token
+    expect(detectAutocomplete("@bob:h", 6, true)).toBeNull(); // a full user ID
+    expect(detectAutocomplete("re: x", 3, true)).toBeNull(); // a colon, not a shortcode
+    expect(detectAutocomplete("/cl", 3, false)).toBeNull();
+    expect(detectAutocomplete("/clear now", 10, true)).toBeNull();
   });
 });

@@ -109,8 +109,8 @@ describe("<ShareMessageDialog />", () => {
     renderDialog();
     expect(screen.getByText("the answer")).toBeInTheDocument();
     const comment = screen.getByRole("textbox", { name: /comment/i });
-    expect(comment).toBeDisabled();
-    expect(comment).toHaveAttribute("placeholder", "Pick a room first");
+    expect(comment).toHaveAttribute("contenteditable", "false");
+    expect(comment.querySelector("[data-placeholder]")).toHaveAttribute("data-placeholder", "Pick a room first");
     expect(screen.getByRole("button", { name: /^send$/i })).toBeDisabled();
   });
 
@@ -183,7 +183,8 @@ describe("<ShareMessageDialog />", () => {
     const comment = screen.getByRole("textbox", { name: /comment/i });
     await user.type(comment, "one{Shift>}{Enter}{/Shift}two");
     expect(send).not.toHaveBeenCalled();
-    expect(comment).toHaveValue("one\ntwo");
+    expect(comment).toHaveTextContent("onetwo");
+    expect(comment.querySelector("br:not(.ProseMirror-trailingBreak)")).not.toBeNull();
   });
 
   it("sends once on a double Enter and keeps the comment until the send resolves", async () => {
@@ -197,7 +198,7 @@ describe("<ShareMessageDialog />", () => {
     await user.type(comment, "fyi");
     await user.keyboard("{Enter}{Enter}");
     expect(send).toHaveBeenCalledTimes(1);
-    expect(comment).toHaveValue("fyi");
+    expect(comment).toHaveTextContent("fyi");
     resolve({ event_id: "$s" });
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
     expect(send).toHaveBeenCalledTimes(1);
@@ -213,7 +214,7 @@ describe("<ShareMessageDialog />", () => {
     await user.type(screen.getByRole("textbox", { name: /comment/i }), "fyi");
     await user.click(screen.getByRole("button", { name: /^send$/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent("forbidden");
-    expect(screen.getByRole("textbox", { name: /comment/i })).toHaveValue("fyi");
+    expect(screen.getByRole("textbox", { name: /comment/i })).toHaveTextContent("fyi");
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
   });
 });

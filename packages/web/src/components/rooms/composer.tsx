@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { EventStatus, type MatrixEvent, type Room } from "matrix-js-sdk";
 import { parseSlashCommand } from "@/lib/slash-commands";
 import { buildQuoteContent } from "@/lib/matrix/quote";
@@ -6,19 +6,17 @@ import { setQuoteDraft, useQuoteDraft } from "@/lib/quote-draft-store";
 import { QuoteChip } from "./quote-chip";
 import { MessageInput, type MessageInputSubmit } from "./message-input";
 import { useMatrixClient } from "../../hooks/use-matrix-client";
-import { allRoomEvents, useThreadPreview } from "../../hooks/use-timeline";
+import { StopIcon } from "@/components/icons";
+import { Button } from "@/components/ui/button";
+import { allRoomEvents } from "../../hooks/use-timeline";
 import { useTyping } from "../../hooks/use-typing";
 import { useMediaUpload } from "../../hooks/use-media-upload";
-
-function truncate(s: string, max: number): string {
-  const trimmed = s.replace(/\s+/g, " ").trim();
-  return trimmed.length > max ? trimmed.slice(0, max - 1) + "…" : trimmed;
-}
 
 export interface ComposerProps {
   roomId: string;
   threadRootEventId?: string | null;
-  onExitThread?: () => void;
+  /** Agents in this workforce come first in `@` suggestions. */
+  workforceSpaceId?: string | null;
 }
 
 type SendEvent = (
@@ -31,7 +29,7 @@ type SendEvent = (
 const notSentEchoes = (room: Room | null): MatrixEvent[] =>
   room ? allRoomEvents(room).filter((ev) => ev.status === EventStatus.NOT_SENT) : [];
 
-export function Composer({ roomId, threadRootEventId, onExitThread }: ComposerProps) {
+export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }: ComposerProps) {
   const client = useMatrixClient();
   const [error, setError] = useState<string | null>(null);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
@@ -41,21 +39,6 @@ export function Composer({ roomId, threadRootEventId, onExitThread }: ComposerPr
   const threadId = threadRootEventId ?? null;
   const quoteDraft = useQuoteDraft(roomId, threadId);
   const typingUserIds = useTyping(roomId);
-
-  // Get the last message in the thread for the "Replying to" banner.
-  // Always call the hook (avoids conditional hook rules); returns empty when rootEventId is ''.
-  const threadPreview = useThreadPreview(roomId, threadRootEventId ?? "");
-  const lastThreadEvent = threadPreview.events.at(-1);
-  const replyingToBody = useMemo(() => {
-    // Prefer the most-recent reply; fall back to the root event itself.
-    if (lastThreadEvent) {
-      return (lastThreadEvent.getContent() as { body?: string }).body ?? "";
-    }
-    if (!threadRootEventId) return "";
-    const room = client?.getRoom(roomId);
-    const rootEvt = room?.getLiveTimeline().getEvents().find((ev) => ev.getId() === threadRootEventId);
-    return (rootEvt?.getContent() as { body?: string } | undefined)?.body ?? "";
-  }, [lastThreadEvent, threadRootEventId, client, roomId]);
 
   /**
    * Send one event. When the server rejects it, the SDK keeps a NOT_SENT local
@@ -81,7 +64,14 @@ export function Composer({ roomId, threadRootEventId, onExitThread }: ComposerPr
     }
   }
 
-  async function send({ body, rawBody, mentionUserIds, attachments, setAttachments }: MessageInputSubmit): Promise<void> {
+  async function send({
+    body,
+    formattedBody,
+    rawBody,
+    mentionUserIds,
+    attachments,
+    setAttachments,
+  }: MessageInputSubmit): Promise<void> {
     // Slash commands only apply when there's no attachment and the body starts with /
     if (rawBody && attachments.length === 0 && !quoteDraft) {
       const slash = parseSlashCommand(rawBody, { threadScoped });
@@ -135,7 +125,9 @@ export function Composer({ roomId, threadRootEventId, onExitThread }: ComposerPr
             senderName: quoteDraft.senderName,
             origin: window.location.origin,
           })
-        : { msgtype: "m.text", body };
+        : formattedBody
+          ? { msgtype: "m.text", body, format: "org.matrix.custom.html", formatted_body: formattedBody }
+          : { msgtype: "m.text", body };
       if (mentionUserIds.length > 0) {
         content["m.mentions"] = { user_ids: mentionUserIds };
       }
@@ -160,42 +152,17 @@ export function Composer({ roomId, threadRootEventId, onExitThread }: ComposerPr
     }
   }
 
+  // A running agent types in the room; in a thread that means Stop applies.
+  const stopButton =
+    threadId && typingUserIds.length > 0 ? (
+      <Button type="button" size="xs" variant="outline" aria-label="Stop agent" onClick={() => void stop()}>
+        <StopIcon />
+        Stop
+      </Button>
+    ) : null;
+
   const header = (
     <>
-      {threadRootEventId && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2 min-w-0">
-          {replyingToBody ? (
-            <>
-              <span className="shrink-0">Replying to</span>
-              <span className="truncate italic text-foreground/70">
-                "{truncate(replyingToBody, 60)}"
-              </span>
-            </>
-          ) : (
-            <span className="shrink-0">Replying in current thread</span>
-          )}
-          <div className="ml-auto flex shrink-0 items-center gap-1">
-            {typingUserIds.length > 0 && (
-              <button
-                type="button"
-                aria-label="Stop agent"
-                onClick={() => void stop()}
-                className="rounded px-2 py-1 hover:bg-muted"
-              >
-                Stop
-              </button>
-            )}
-            <button
-              type="button"
-              aria-label="Exit thread"
-              onClick={() => onExitThread?.()}
-              className="rounded px-2 py-1 hover:bg-muted"
-            >
-              Exit thread
-            </button>
-          </div>
-        </div>
-      )}
       {quoteDraft && (
         <QuoteChip draft={quoteDraft} onRemove={() => setQuoteDraft(roomId, threadId, null)} />
       )}
@@ -205,7 +172,8 @@ export function Composer({ roomId, threadRootEventId, onExitThread }: ComposerPr
   return (
     <MessageInput
       roomId={roomId}
-      className="shrink-0 p-3"
+      workforceSpaceId={workforceSpaceId}
+      className="shrink-0 px-3 pb-3"
       suggestionsClassName="left-3 right-3"
       threadScoped={threadScoped}
       allowEmpty={Boolean(quoteDraft)}
@@ -214,6 +182,8 @@ export function Composer({ roomId, threadRootEventId, onExitThread }: ComposerPr
       error={error}
       onError={setError}
       header={header}
+      extraActions={stopButton}
+      placeholder={threadScoped ? "Reply in thread…" : undefined}
       onSubmit={send}
     />
   );

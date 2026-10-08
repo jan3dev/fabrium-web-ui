@@ -2,7 +2,7 @@ import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MatrixClientPeg } from "@/client/peg";
 import { makeFakeClient, makeMatrixEvent, makeRoom, pushTimelineEvent } from "../../../test/factories";
-import { ThreadView } from "./thread-view";
+import { ThreadPane } from "./thread-pane";
 
 const me = "@me:h.example";
 const roomId = "!r:h.example";
@@ -26,12 +26,12 @@ function seed() {
   }
 }
 
-describe("<ThreadView highlightEventId />", () => {
+describe("<ThreadPane highlightEventId />", () => {
   it("scrolls to and highlights the linked reply", () => {
     seed();
     const spy = vi.spyOn(Element.prototype, "scrollIntoView");
     const { container } = render(
-      <ThreadView roomId={roomId} rootEventId="$root" onBack={() => {}} highlightEventId="$r1" />,
+      <ThreadPane roomId={roomId} rootEventId="$root" onClose={() => {}} highlightEventId="$r1" />,
     );
     const el = container.querySelector('[data-message-id="$r1"]');
     expect(el).toHaveAttribute("data-highlighted");
@@ -39,10 +39,10 @@ describe("<ThreadView highlightEventId />", () => {
     expect(spy).toHaveBeenCalled();
   });
 
-  it("opens at the top quietly when the reply isn't loaded", () => {
+  it("opens quietly when the reply isn't loaded", () => {
     seed();
     const { container } = render(
-      <ThreadView roomId={roomId} rootEventId="$root" onBack={() => {}} highlightEventId="$missing" />,
+      <ThreadPane roomId={roomId} rootEventId="$root" onClose={() => {}} highlightEventId="$missing" />,
     );
     expect(container.querySelector("[data-highlighted]")).toBeNull();
   });

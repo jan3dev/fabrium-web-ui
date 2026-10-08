@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { StagedAttachments, type StagedAttachment } from "./staged-attachments";
+import { ComposerAttachments, type StagedAttachment } from "./composer-attachments";
 
 const noop = () => {};
 
@@ -31,11 +31,11 @@ function stage(files: File[]): StagedAttachment[] {
 }
 
 const meta = {
-  title: "Rooms/StagedAttachments",
-  component: StagedAttachments,
+  title: "Rooms/ComposerAttachments",
+  component: ComposerAttachments,
   parameters: { layout: "padded" },
   args: { onRemove: noop, uploadingId: null },
-} satisfies Meta<typeof StagedAttachments>;
+} satisfies Meta<typeof ComposerAttachments>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;

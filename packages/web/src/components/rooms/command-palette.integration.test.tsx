@@ -1,6 +1,6 @@
+import userEvent from "@testing-library/user-event";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent } from "@testing-library/react";
 import { makeFakeClient, makeRoom, mkMatrixEvent, pushTimelineEvent } from "../../../test/factories";
 import { MatrixClientPeg } from "../../client/peg";
 import { Composer } from "./composer";
@@ -41,8 +41,7 @@ describe("command palette", () => {
     });
 
     render(<Composer roomId={roomId} threadRootEventId="$root" />);
-    const textarea = screen.getByLabelText("Message");
-    fireEvent.change(textarea, { target: { value: "/" } });
+    await userEvent.setup().type(screen.getByRole("textbox", { name: "Message" }), "/");
 
     // client commands still present
     expect(await screen.findByText("/clear")).toBeInTheDocument();
