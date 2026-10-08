@@ -1,5 +1,8 @@
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { buildRunArgs } from './tuwunel.js'
+import { buildRunArgs, TuwunelService } from './tuwunel.js'
 
 describe('buildRunArgs', () => {
   const base = {
@@ -60,5 +63,29 @@ describe('buildRunArgs', () => {
     })
     expect(args).toContain('my-zooid-tuwunel')
     expect(args).toContain('9000:8448')
+  })
+})
+
+describe('TuwunelService.waitHealthy', () => {
+  it('fails fast with the engine error when `run` exits (e.g. port taken)', async () => {
+    // A stand-in engine: `run` fails like docker on a taken port; `inspect` knows no container.
+    const engine = join(mkdtempSync(join(tmpdir(), 'zooid-engine-')), 'engine')
+    writeFileSync(
+      engine,
+      '#!/bin/sh\necho "Bind for 0.0.0.0:8448 failed: port is already allocated" >&2\nexit 125\n',
+    )
+    chmodSync(engine, 0o755)
+    const svc = new TuwunelService({
+      name: 'zooid-tuwunel-test',
+      hostPort: 8448,
+      paths: {} as never,
+      engine: engine as 'docker',
+    })
+    svc.start()
+    const started = Date.now()
+    await expect(
+      svc.waitHealthy({ url: 'http://127.0.0.1:9', timeoutMs: 30_000 }),
+    ).rejects.toThrow(/exited \(125\).*port is already allocated/)
+    expect(Date.now() - started).toBeLessThan(10_000)
   })
 })
