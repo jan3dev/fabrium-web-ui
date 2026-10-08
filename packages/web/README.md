@@ -36,11 +36,11 @@ zooid dev --watch-web
 
 `ZOOID_DEV_WEB_ROOT_OVERRIDE=<dir>` makes `zooid dev` serve another built bundle instead.
 
-Other scripts: `test`, `typecheck`, `lint` (design-system guard, `scripts/check-design.sh`), `test:e2e` (Playwright, needs a homeserver), `storybook`.
+Other scripts: `test`, `typecheck`, `lint` (design-system guard `scripts/check-design.sh`, orphan guard `scripts/check-orphans.mjs`: every `src/` file must be reachable from `src/main.tsx`), `test:e2e` (Playwright, needs a homeserver; `e2e/axe.spec.ts` sweeps the app with axe in both themes), `storybook`.
 
 ## Design system
 
-Tokens live in `src/styles/`: `tokens.css` (primitives `--fab-*` and semantic tokens per theme) and `fabrium-tokens.css` (actor and trust markers). `index.css` bridges them into Tailwind (`bg-surface-primary`, `text-body2`, `rounded-card`, `shadow-modal`) and aliases the shadcn variable names onto them. Components use semantic classes only; `pnpm lint` rejects raw hex, Tailwind palette colours, `--fab-*` outside `src/styles/`, and direct `lucide-react` imports (use `@/components/icons`). The theme is `data-theme="light|dark"` on `<html>`; `dark:` variants follow it. Storybook's `Foundations/Tokens` story shows every token in both themes.
+Tokens live in `src/styles/`: `tokens.css` (primitives `--fab-*` and semantic tokens per theme) and `fabrium-tokens.css` (actor and trust markers, plus light-theme overrides that lift text tokens to WCAG AA). `index.css` bridges them into Tailwind (`bg-surface-primary`, `text-body2`, `rounded-card`, `shadow-modal`) and aliases the shadcn variable names onto them. Components use semantic classes only; `pnpm lint` rejects raw hex, Tailwind palette colours, `--fab-*` outside `src/styles/`, and direct `lucide-react` imports (use `@/components/icons`). The theme is `data-theme="light|dark"` on `<html>`; `dark:` variants follow it. Storybook's `Foundations/Tokens` story shows every token in both themes.
 
 ## License
 

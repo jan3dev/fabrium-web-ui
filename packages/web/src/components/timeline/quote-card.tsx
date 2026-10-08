@@ -59,7 +59,7 @@ export function QuoteCardView(p: QuoteCardViewProps) {
         )}
       </div>
       {p.replyCount ? (
-        <div className="mt-1 text-xs text-primary">
+        <div className="mt-1 text-xs text-accent-brand">
           {p.replyCount} {p.replyCount === 1 ? "reply" : "replies"} · View thread
         </div>
       ) : null}

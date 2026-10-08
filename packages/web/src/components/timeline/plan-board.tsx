@@ -51,7 +51,7 @@ export function PlanEntryList({ entries, className }: { entries: PlanBoardEntry[
     <ul className={cn("space-y-0.5 text-body2", className)}>
       {entries.map((e, i) => (
         <li key={i} className="flex items-start gap-2">
-          <span className={statusBullet(e.status)} aria-label={e.status} />
+          <span className={statusBullet(e.status)} role="img" aria-label={e.status} />
           <span className={e.status === "completed" ? "text-text-tertiary line-through" : "text-text-primary"}>
             {e.content}
           </span>

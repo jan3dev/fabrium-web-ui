@@ -139,7 +139,6 @@ export function MessageRow({
         "outline-none hover:bg-surface-secondary focus-within:bg-surface-secondary",
         isContinuation ? "items-start py-0.5" : "items-start pt-2 pb-0.5",
         !isFollowedByContinuation && "mb-1.5",
-        message.failed && "opacity-60",
         highlighted &&
           "bg-accent-brand-transparent hover:bg-accent-brand-transparent",
       )}

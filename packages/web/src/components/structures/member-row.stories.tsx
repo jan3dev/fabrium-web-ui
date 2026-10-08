@@ -73,7 +73,11 @@ export function seedPeopleClient() {
   MatrixClientPeg.injectClientForTest(client);
 }
 
-const meta = { title: "People/MemberRow" } satisfies Meta;
+// Fixture exports shared with user-profile-popover.stories.tsx are not stories.
+const meta = {
+  title: "People/MemberRow",
+  excludeStories: ["ME", "ROOM", "SPACE", "CODER", "ALICE", "seedPeopleClient"],
+} satisfies Meta;
 export default meta;
 
 const member = (userId: string) => ({ userId, displayName: userId, powerLevel: LEVELS[userId]!, role: roleForLevel(LEVELS[userId]!) });

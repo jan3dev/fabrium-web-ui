@@ -27,7 +27,7 @@ export function TopicText({ topic, clamp = true }: { topic: string; clamp?: bool
                 href={t.value}
                 target="_blank"
                 rel="noopener noreferrer ugc"
-                className="text-primary underline"
+                className="text-accent-brand underline"
               >
                 {t.value}
               </a>
@@ -39,7 +39,7 @@ export function TopicText({ topic, clamp = true }: { topic: string; clamp?: bool
                 key={i}
                 type="button"
                 onClick={() => void joinRoom(qualifyAlias(t.value))}
-                className="text-primary underline"
+                className="text-accent-brand underline"
               >
                 {t.value}
               </button>

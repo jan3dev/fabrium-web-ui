@@ -12,7 +12,7 @@ const ROWS = [
 /** Placeholder rows while a room's first page of history loads. */
 export function TimelineSkeleton() {
   return (
-    <div aria-busy="true" aria-label="Loading messages" className="flex flex-col justify-end px-2 py-3">
+    <div aria-busy="true" aria-label="Loading messages" role="status" className="flex flex-col justify-end px-2 py-3">
       {ROWS.map((row) => (
         <div className="mx-1 flex items-start gap-2.5 px-2 py-2" key={row.key}>
           <Skeleton className="size-9 shrink-0 rounded-full" />

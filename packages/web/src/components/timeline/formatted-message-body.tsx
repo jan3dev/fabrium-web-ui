@@ -113,7 +113,7 @@ export function FormattedMessageBody({ html, roomId }: Props) {
         "prose-pre:my-2 prose-pre:overflow-x-auto prose-pre:max-w-full prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border",
         "prose-code:bg-muted prose-code:text-foreground prose-code:rounded-sm prose-code:px-1 prose-code:py-px prose-code:font-normal",
         "prose-code:before:content-none prose-code:after:content-none",
-        "prose-a:text-primary prose-a:underline prose-a:underline-offset-2",
+        "prose-a:text-accent-brand prose-a:underline prose-a:underline-offset-2",
         "prose-blockquote:border-muted-foreground/40 prose-blockquote:text-muted-foreground prose-blockquote:not-italic",
         "prose-hr:border-border",
         "prose-strong:text-foreground prose-headings:text-foreground",

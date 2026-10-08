@@ -80,6 +80,7 @@ export const Rows = {
     <div
       className="w-[28rem] rounded-card border border-surface-border-primary bg-surface-primary p-1.5"
       role="listbox"
+      aria-label="Search results"
     >
       <CurrentRoomSearchAction
         roomLabel="#general"

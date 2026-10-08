@@ -29,9 +29,10 @@ export function nameOfMember(member: RoomMember): string {
 }
 
 /**
- * Deterministic HSL color for a Matrix user ID. Same input → same hue every
+ * Deterministic color for a Matrix user ID. Same input → same hue every
  * time, so a given sender keeps the same color across renders and reloads.
- * Saturation/lightness are tuned for the dark theme.
+ * Lightness and chroma come from the theme (`--sender-lc`); OKLCH keeps every
+ * hue at the same perceived lightness, so all of them clear AA contrast.
  */
 export function senderColor(userId: string): string {
   let hash = 0;
@@ -39,7 +40,7 @@ export function senderColor(userId: string): string {
     hash = (hash * 31 + userId.charCodeAt(i)) | 0;
   }
   const hue = ((hash % 360) + 360) % 360;
-  return `hsl(${hue} 70% 72%)`;
+  return `oklch(var(--sender-lc) ${hue})`;
 }
 
 const USER_ID_SPLIT = /(@[A-Za-z0-9._\-=/+]+:[A-Za-z0-9.\-]+)/g;

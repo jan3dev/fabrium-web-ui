@@ -14,7 +14,7 @@ export function MessageLink({ href, children }: { href: string; children: ReactN
       : null;
   if (!path) {
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer ugc" className="text-primary underline">
+      <a href={href} target="_blank" rel="noopener noreferrer ugc" className="text-accent-brand underline">
         {children}
       </a>
     );
@@ -22,7 +22,7 @@ export function MessageLink({ href, children }: { href: string; children: ReactN
   return (
     <a
       href={path}
-      className="text-primary underline"
+      className="text-accent-brand underline"
       onClick={(e) => {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         e.preventDefault();

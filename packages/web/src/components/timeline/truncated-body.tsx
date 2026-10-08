@@ -26,7 +26,7 @@ export function TruncatedBody({ children }: { children: ReactNode }) {
         <button
           type="button"
           onClick={() => setExpanded((e) => !e)}
-          className="mt-1 text-xs text-primary hover:underline"
+          className="mt-1 text-xs text-accent-brand hover:underline"
         >
           {expanded ? "See less" : "See more"}
         </button>

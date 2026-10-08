@@ -7,6 +7,7 @@ export function ThreadMessageSkeleton({ isHead = false }: { isHead?: boolean }) 
     <div
       className="relative mx-1 flex items-start gap-2.5 px-2 pt-2 pb-1.5"
       aria-busy="true"
+      role="status"
       aria-label={isHead ? "Loading thread parent" : "Loading reply"}
     >
       <Skeleton className="size-8 shrink-0 rounded-full" />

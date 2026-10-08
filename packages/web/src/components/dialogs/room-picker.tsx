@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { CloseIcon } from "@/components/icons";
 import type { Room } from "matrix-js-sdk";
 import { Command, CommandItem, CommandList } from "@/components/ui/command";
@@ -22,10 +22,14 @@ export function RoomPicker({ rooms, value, onChange }: RoomPickerProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // cmdk assigns the listbox id itself; read it back for the input's aria-controls.
+  const [listId, setListId] = useState<string>();
+  const listRef = useCallback((el: HTMLDivElement | null) => setListId(el?.id), []);
 
   const picked = rooms.find((r) => r.roomId === value) ?? null;
   const q = query.trim().toLowerCase();
   const matches = q ? rooms.filter((r) => r.name.toLowerCase().includes(q)).slice(0, MAX_RESULTS) : [];
+  const listOpen = open && !picked && matches.length > 0;
 
   function pick(roomId: string) {
     onChange(roomId);
@@ -64,7 +68,8 @@ export function RoomPicker({ rooms, value, onChange }: RoomPickerProps) {
                 ref={inputRef}
                 role="combobox"
                 aria-label="Search rooms and DMs"
-                aria-expanded={open && q !== ""}
+                aria-expanded={listOpen}
+                aria-controls={listOpen ? listId : undefined}
                 placeholder="Search rooms and DMs"
                 value={query}
                 onChange={(e) => {
@@ -87,14 +92,18 @@ export function RoomPicker({ rooms, value, onChange }: RoomPickerProps) {
             if (anchorRef.current?.contains(e.target as Node)) e.preventDefault();
           }}
         >
-          <CommandList>
-            {matches.length === 0 && <p className="px-2.5 py-1.5 text-body2 text-text-secondary">No rooms match</p>}
-            {matches.map((r) => (
-              <CommandItem key={r.roomId} value={r.roomId} onSelect={() => pick(r.roomId)}>
-                <span className="truncate">{r.name}</span>
-              </CommandItem>
-            ))}
-          </CommandList>
+          {/* An empty listbox is invalid ARIA, so the list only renders with matches. */}
+          {matches.length === 0 ? (
+            <p className="px-2.5 py-1.5 text-body2 text-text-secondary">No rooms match</p>
+          ) : (
+            <CommandList ref={listRef}>
+              {matches.map((r) => (
+                <CommandItem key={r.roomId} value={r.roomId} onSelect={() => pick(r.roomId)}>
+                  <span className="truncate">{r.name}</span>
+                </CommandItem>
+              ))}
+            </CommandList>
+          )}
         </PopoverContent>
       </Command>
     </Popover>
