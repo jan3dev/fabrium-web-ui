@@ -1,165 +1,352 @@
-import { type FormEvent, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
+// Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/sidebar/ui/CreateChannelDialog.tsx. Modified.
+// Also derived from desktop/src/features/sidebar/ui/CreateChannelFormFields.tsx (appended below).
+import type { ReactNode } from "react";
+
+import type { ChannelVisibility } from "@/shared/api/types";
+import { ChooserDialogContent } from "@/shared/ui/chooser-dialog-content";
+import { Dialog } from "@/shared/ui/dialog";
+
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { MatrixClientPeg } from "../../client/peg";
+  type CreateChannelInput,
+  useCreateChannelForm,
+} from "@/features/sidebar/lib/useCreateChannelForm";
+import {
+  CREATE_CHANNEL_FORM_ID,
+  CreateChannelFormFields,
+  CreateChannelFormFooter,
+} from "@/features/sidebar/ui/CreateChannelFormFields";
 
-interface CreateRoomDialogProps {
-  open: boolean;
-  spaceId: string;
+type ChannelKind = "stream" | "forum";
+
+type CreateChannelDialogProps = {
+  /** Which kind of channel to create, or null when closed. */
+  channelKind: ChannelKind | null;
+  children?: ReactNode;
+  description?: string;
+  isCreating: boolean;
   onOpenChange: (open: boolean) => void;
-}
+  onCreate: (input: {
+    name: string;
+    description?: string;
+    visibility: ChannelVisibility;
+    ttlSeconds?: number;
+    templateId?: string;
+  }) => Promise<void>;
+  testId?: string;
+  title?: string;
+};
 
-export function CreateRoomDialog({ open, spaceId, onOpenChange }: CreateRoomDialogProps) {
-  const [name, setName] = useState("");
-  const [topic, setTopic] = useState("");
-  const [privacy, setPrivacy] = useState<"space" | "invite">("space");
-  const [submitting, setSubmitting] = useState(false);
-  const navigate = useNavigate();
+export function CreateChannelDialog({
+  channelKind,
+  children,
+  description,
+  isCreating,
+  onOpenChange,
+  onCreate,
+  testId = "create-channel-dialog",
+  title,
+}: CreateChannelDialogProps) {
+  const open = channelKind !== null;
 
-  const reset = () => {
-    setName("");
-    setTopic("");
-    setPrivacy("space");
-    setSubmitting(false);
-  };
+  const form = useCreateChannelForm({
+    channelKind: channelKind ?? "stream",
+    active: open,
+    isCreating,
+    onCreate: onCreate as (input: CreateChannelInput) => Promise<void>,
+    onCreated: () => onOpenChange(false),
+  });
 
-  const onSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    const client = MatrixClientPeg.safeGet();
-    if (!client) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setSubmitting(true);
-    try {
-      const serverName = client.getUserId()?.split(":")[1] ?? "";
-      const initialState: Record<string, unknown>[] = [
-        {
-          type: "m.space.parent",
-          state_key: spaceId,
-          content: { via: [serverName], canonical: true },
-        },
-      ];
-      if (privacy === "space") {
-        // Restricted-to-space: any member of this space can join. Without this,
-        // the room would default to invite-only (private_chat).
-        initialState.push({
-          type: "m.room.join_rules",
-          state_key: "",
-          content: {
-            join_rule: "restricted",
-            allow: [{ type: "m.room_membership", room_id: spaceId }],
-          },
-        });
-      }
-      const created = (await (
-        client as unknown as {
-          createRoom: (opts: Record<string, unknown>) => Promise<{ room_id: string }>;
-        }
-      ).createRoom({
-        name: trimmed,
-        topic: topic.trim() || undefined,
-        preset: "private_chat",
-        initial_state: initialState,
-      })) as { room_id: string };
-      const newRoomId = created.room_id;
-      await (
-        client as unknown as {
-          sendStateEvent: (
-            roomId: string,
-            type: string,
-            content: Record<string, unknown>,
-            stateKey: string,
-          ) => Promise<unknown>;
-        }
-      ).sendStateEvent(spaceId, "m.space.child", { via: [serverName] }, newRoomId);
-      onOpenChange(false);
-      reset();
-      navigate(`/room/${newRoomId}`);
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const kindLabel = channelKind === "forum" ? "forum" : "channel";
 
   return (
     <Dialog
       open={open}
-      onOpenChange={(o) => {
-        onOpenChange(o);
-        if (!o) reset();
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && isCreating) return;
+        onOpenChange(nextOpen);
       }}
     >
-      <DialogContent>
-        <form onSubmit={onSubmit}>
-          <DialogHeader>
-            <DialogTitle>Create room</DialogTitle>
-            <DialogDescription>
-              Rooms are joinable by everyone in this space by default.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-3 py-2">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="room-name">Name</Label>
-              <Input
-                id="room-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                autoFocus
-                placeholder="design"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="room-topic">Topic</Label>
-              <Input
-                id="room-topic"
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                placeholder="What is this channel about?"
-              />
-            </div>
-            <fieldset className="flex flex-col gap-2">
-              <legend className="text-sm font-medium">Who can join</legend>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="privacy"
-                  value="space"
-                  checked={privacy === "space"}
-                  onChange={() => setPrivacy("space")}
-                />
-                Space members — anyone in this space can join
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="privacy"
-                  value="invite"
-                  checked={privacy === "invite"}
-                  onChange={() => setPrivacy("invite")}
-                />
-                Invite only — added manually
-              </label>
-            </fieldset>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!name.trim() || submitting}>
-              Create room
-            </Button>
-          </DialogFooter>
+      <ChooserDialogContent
+        className="max-w-lg"
+        contentClassName="pt-3"
+        data-testid={testId}
+        footerClassName="border-t-0 pt-0"
+        headerClassName="pb-2"
+        title={title ?? `Create a new ${kindLabel}`}
+        description={
+          description ??
+          (channelKind === "forum"
+            ? "Forums organize threaded discussions around a topic."
+            : "Channels are real-time streams for team conversation.")
+        }
+        footer={<CreateChannelFormFooter form={form} />}
+      >
+        <form
+          className="space-y-5"
+          id={CREATE_CHANNEL_FORM_ID}
+          onSubmit={form.handleSubmit}
+        >
+          {children}
+          <CreateChannelFormFields form={form} />
         </form>
-      </DialogContent>
+      </ChooserDialogContent>
     </Dialog>
+  );
+}
+import { ChevronDown, Plus } from "lucide-react";
+import * as React from "react";
+
+import { TemplateFormDialog } from "@/features/settings/ui/ChannelTemplatesSettingsCard";
+import { cn } from "@/shared/lib/cn";
+import { Button } from "@/shared/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/shared/ui/dropdown-menu";
+import { Input } from "@/shared/ui/input";
+import { Textarea } from "@/shared/ui/textarea";
+
+import {
+  CHANNEL_FORM_FIELD_CONTROL_CLASS,
+  CHANNEL_FORM_FIELD_SHELL_CLASS,
+} from "@/features/channels/ui/channelFormStyles";
+import { ChannelPermissionsSettings } from "@/features/channels/ui/ChannelPermissionsSettings";
+import { ChannelTypeSettings } from "@/features/channels/ui/ChannelTypeSettings";
+import type { CreateChannelFormState } from "@/features/sidebar/lib/useCreateChannelForm";
+
+const CREATE_LABEL_OPTIONAL_CLASS =
+  "ml-1 text-xs font-normal text-muted-foreground/50";
+const NO_TEMPLATE_VALUE = "__no-template__";
+
+export const CREATE_CHANNEL_FORM_ID = "create-channel-form";
+
+/**
+ * The body of the create-channel form (name, description, visibility,
+ * optional template). Rendered inside both the standalone dialog and the
+ * "Add channel" browser's create mode. Wrap in a `<form>` with
+ * `id={CREATE_CHANNEL_FORM_ID}` and hook up `form.handleSubmit`.
+ */
+export function CreateChannelFormFields({
+  form,
+}: {
+  form: CreateChannelFormState;
+}) {
+  const { channelKind, kindLabel, isCreating } = form;
+  const [isCreateTemplateOpen, setIsCreateTemplateOpen] = React.useState(false);
+  const selectedTemplate = form.templates.find(
+    (template) => template.id === form.selectedTemplateId,
+  );
+  const selectedTemplatePersonaCount =
+    selectedTemplate?.agents.personas.length ?? 0;
+  const selectedTemplateTeamCount = selectedTemplate?.agents.teams.length ?? 0;
+  const selectedTemplateSummary = selectedTemplate
+    ? [
+        form.visibility === "private" ? "Private" : "Open",
+        selectedTemplate.canvasTemplate ? "Canvas included" : null,
+        selectedTemplatePersonaCount > 0
+          ? `${selectedTemplatePersonaCount} ${selectedTemplatePersonaCount === 1 ? "agent" : "agents"}`
+          : null,
+        selectedTemplateTeamCount > 0
+          ? `${selectedTemplateTeamCount} ${selectedTemplateTeamCount === 1 ? "team" : "teams"}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
+
+  return (
+    <div className="space-y-5">
+      <div className="space-y-1.5">
+        <label
+          className="text-sm font-medium text-foreground"
+          htmlFor="create-channel-name"
+        >
+          Name
+        </label>
+        <div
+          className={cn(
+            "flex min-h-11 items-center px-3",
+            CHANNEL_FORM_FIELD_SHELL_CLASS,
+          )}
+        >
+          <Input
+            autoCapitalize="none"
+            autoComplete="off"
+            autoCorrect="off"
+            className={cn(
+              "h-8 px-0 py-0 leading-6",
+              CHANNEL_FORM_FIELD_CONTROL_CLASS,
+            )}
+            data-testid="create-channel-name"
+            disabled={isCreating}
+            id="create-channel-name"
+            onChange={(event) => form.setName(event.target.value)}
+            placeholder={
+              channelKind === "forum" ? "design-discussions" : "release-notes"
+            }
+            ref={form.nameInputRef}
+            spellCheck={false}
+            value={form.name}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label
+          className="text-sm font-medium text-foreground"
+          htmlFor="create-channel-description"
+        >
+          Description
+          <span className={CREATE_LABEL_OPTIONAL_CLASS}>Optional</span>
+        </label>
+        <div className={CHANNEL_FORM_FIELD_SHELL_CLASS}>
+          <Textarea
+            className={cn(
+              "min-h-20 resize-none px-3 py-3 leading-5",
+              CHANNEL_FORM_FIELD_CONTROL_CLASS,
+            )}
+            data-testid="create-channel-description"
+            disabled={isCreating}
+            id="create-channel-description"
+            onChange={(event) => form.setDescription(event.target.value)}
+            placeholder={`What this ${kindLabel} is for`}
+            rows={2}
+            value={form.description}
+          />
+        </div>
+      </div>
+
+      <ChannelTypeSettings
+        disabled={isCreating}
+        label="Type"
+        onTemporaryChange={form.setEphemeral}
+        onTtlSecondsChange={form.setTtlSeconds}
+        temporary={form.ephemeral}
+        testIdPrefix="create-channel"
+        ttlSeconds={form.ttlSeconds}
+        variant="segmented"
+      />
+
+      <ChannelPermissionsSettings
+        disabled={isCreating}
+        onVisibilityChange={form.setVisibility}
+        testIdPrefix="create-channel"
+        visibility={form.visibility}
+        variant="segmented"
+      />
+
+      <div
+        className="flex min-h-12 items-center justify-between gap-4 rounded-xl border border-input bg-background px-3 py-3"
+        data-testid="create-channel-template-container"
+      >
+        <span
+          className={cn(
+            "text-sm font-medium text-foreground",
+            isCreating && "opacity-50",
+          )}
+        >
+          Template
+          <span className={CREATE_LABEL_OPTIONAL_CLASS}>Optional</span>
+        </span>
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              aria-label={`Template: ${selectedTemplate?.name ?? "None"}`}
+              className="-mr-2.5 ml-auto h-9 min-w-0 max-w-[60%] justify-end px-2.5 text-right text-sm font-medium text-foreground hover:bg-muted/50"
+              data-testid="create-channel-template"
+              disabled={isCreating}
+              id="create-channel-template"
+              type="button"
+              variant="ghost"
+            >
+              <span className="truncate text-right">
+                {selectedTemplate?.name ?? "None"}
+              </span>
+              <ChevronDown className="size-4 shrink-0 text-muted-foreground/70" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            onCloseAutoFocus={(event) => event.preventDefault()}
+            style={{
+              minWidth: "var(--radix-dropdown-menu-trigger-width)",
+            }}
+          >
+            <DropdownMenuRadioGroup
+              onValueChange={(templateId) =>
+                form.handleTemplateChange(
+                  templateId === NO_TEMPLATE_VALUE ? "" : templateId,
+                )
+              }
+              value={form.selectedTemplateId ?? NO_TEMPLATE_VALUE}
+            >
+              <DropdownMenuRadioItem value={NO_TEMPLATE_VALUE}>
+                None
+              </DropdownMenuRadioItem>
+              {form.templates.map((template) => (
+                <DropdownMenuRadioItem key={template.id} value={template.id}>
+                  {template.name}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setIsCreateTemplateOpen(true)}>
+              <Plus className="size-4" />
+              Create new channel template…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <TemplateFormDialog
+          onCreated={form.handleTemplateCreated}
+          onOpenChange={setIsCreateTemplateOpen}
+          open={isCreateTemplateOpen}
+          template={null}
+        />
+      </div>
+      {selectedTemplateSummary ? (
+        <p
+          className="-mt-3 px-3 text-xs text-muted-foreground"
+          data-testid="create-channel-template-summary"
+        >
+          {selectedTemplateSummary}
+        </p>
+      ) : null}
+
+      {form.errorMessage ? (
+        <p className="text-sm text-destructive">{form.errorMessage}</p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Footer for the create-channel form. The submit button is bound to the form
+ * via `form={CREATE_CHANNEL_FORM_ID}`.
+ */
+export function CreateChannelFormFooter({
+  form,
+  submitLabel,
+}: {
+  form: CreateChannelFormState;
+  submitLabel?: string;
+}) {
+  const { isCreating, kindLabel } = form;
+
+  return (
+    <div className="flex w-full items-center justify-end gap-3">
+      <Button
+        data-testid="create-channel-submit"
+        disabled={!form.canSubmit}
+        form={CREATE_CHANNEL_FORM_ID}
+        type="submit"
+      >
+        {isCreating ? "Creating..." : (submitLabel ?? `Create ${kindLabel}`)}
+      </Button>
+    </div>
   );
 }
