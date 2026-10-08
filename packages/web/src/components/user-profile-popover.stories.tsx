@@ -1,7 +1,14 @@
 import type { Meta, StoryContext } from "@storybook/react-vite";
 import { MemoryRouter } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ALICE, CODER, ROOM, seedPeopleClient } from "./structures/member-row.stories";
+import { WorkforceSpaceContext } from "@/hooks/use-workforce";
+import {
+  ALICE,
+  CODER,
+  ROOM,
+  SPACE,
+  seedPeopleClient,
+} from "./structures/member-row.stories";
 import { UserProfilePopover } from "./user-profile-popover";
 
 const meta = { title: "People/UserProfilePopover" } satisfies Meta;
@@ -14,11 +21,13 @@ const open = async ({ canvas, userEvent }: StoryContext) => {
 function Story({ userId }: { userId: string }) {
   seedPeopleClient();
   return (
-    <MemoryRouter>
-      <UserProfilePopover userId={userId} roomId={ROOM}>
-        <Button variant="secondary">Open profile</Button>
-      </UserProfilePopover>
-    </MemoryRouter>
+    <WorkforceSpaceContext.Provider value={SPACE}>
+      <MemoryRouter>
+        <UserProfilePopover userId={userId} roomId={ROOM}>
+          <Button variant="secondary">Open profile</Button>
+        </UserProfilePopover>
+      </MemoryRouter>
+    </WorkforceSpaceContext.Provider>
   );
 }
 

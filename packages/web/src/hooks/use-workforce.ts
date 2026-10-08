@@ -1,5 +1,5 @@
-import { type MatrixClient, type Room, RoomStateEvent } from "matrix-js-sdk";
-import { useSyncExternalStore } from "react";
+import { type Room, RoomStateEvent } from "matrix-js-sdk";
+import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import { MatrixClientPeg } from "../client/peg";
 import { subscribeRoomState } from "./matrix-subscriptions";
 import { makeAgentSet, parseWorkforceRoster, type RosterAgent } from "../lib/matrix/agent-detection";
@@ -76,73 +76,19 @@ export interface KnownAgent {
   spaceName: string | undefined;
 }
 
-// Agents across every joined space's roster, rebuilt when a roster changes.
-// Keyed by client so a new session never reads the last one's agents.
-let knownAgents: { client: MatrixClient; byId: Map<string, KnownAgent> } | null = null;
-
-function knownAgentMap(): Map<string, KnownAgent> | null {
-  const client = MatrixClientPeg.safeGet();
-  if (!client) return null;
-  if (knownAgents?.client === client) return knownAgents.byId;
-  const byId = new Map<string, KnownAgent>();
-  for (const room of client.getRooms?.() ?? []) {
-    if (!room.isSpaceRoom?.()) continue;
-    for (const agent of mergedRoster(room) ?? []) {
-      if (!byId.has(agent.userId)) byId.set(agent.userId, { agent, spaceName: room.name || undefined });
-    }
-  }
-  knownAgents = { client, byId };
-  return byId;
-}
+/**
+ * The configured workforce space, provided by the logged-in view. Only its
+ * roster says who is an agent: any other space's roster is written by whoever
+ * created that space and could dress a human up as an agent.
+ */
+export const WorkforceSpaceContext = createContext<string | null>(null);
 
 /**
- * The roster entry for `userId` from any joined workspace, or undefined for a
- * non-agent. For components with no workforce space at hand (avatars, the
- * profile popover).
+ * The workforce roster entry for `userId`, or undefined for a non-agent. For
+ * components with no workforce space at hand (avatars, the profile popover).
  */
 export function useKnownAgent(userId: string): KnownAgent | undefined {
-  return useSyncExternalStore(subscribeKnownAgents, () => knownAgentMap()?.get(userId), () => undefined);
-}
-
-// One client listener for every avatar, not one each.
-const knownAgentListeners = new Set<() => void>();
-let detachKnownAgents: (() => void) | null = null;
-
-function resetKnownAgents() {
-  knownAgents = null;
-  for (const l of knownAgentListeners) l();
-}
-
-function attachKnownAgents() {
-  let client: MatrixClient | null = null;
-  const onState = (ev: { getType(): string }) => {
-    if (ev.getType() === "dev.zooid.workforce") resetKnownAgents();
-  };
-  const attachClient = () => {
-    client?.off(RoomStateEvent.Events, onState);
-    client = MatrixClientPeg.safeGet();
-    client?.on(RoomStateEvent.Events, onState);
-  };
-  attachClient();
-  // A new session: move the listener to its client.
-  const unsubPeg = MatrixClientPeg.subscribe(() => {
-    attachClient();
-    resetKnownAgents();
-  });
-  detachKnownAgents = () => {
-    client?.off(RoomStateEvent.Events, onState);
-    unsubPeg();
-  };
-}
-
-function subscribeKnownAgents(cb: () => void): () => void {
-  knownAgentListeners.add(cb);
-  if (!detachKnownAgents) attachKnownAgents();
-  return () => {
-    knownAgentListeners.delete(cb);
-    if (knownAgentListeners.size === 0) {
-      detachKnownAgents?.();
-      detachKnownAgents = null;
-    }
-  };
+  const roster = useWorkforce(useContext(WorkforceSpaceContext) ?? "");
+  const agent = roster.agent(userId);
+  return useMemo(() => (agent ? { agent, spaceName: roster.spaceName } : undefined), [agent, roster.spaceName]);
 }

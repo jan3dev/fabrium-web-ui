@@ -27,6 +27,7 @@ import { useAppShortcuts } from "../../hooks/use-app-shortcuts";
 import { useJoinedSpaces } from "../../hooks/use-joined-spaces";
 import { markAllRead } from "../../hooks/use-mark-read";
 import { useMatrixClient } from "../../hooks/use-matrix-client";
+import { WorkforceSpaceContext } from "../../hooks/use-workforce";
 import { useIsMobile } from "../../hooks/use-mobile";
 import { LeftPanel } from "./left-panel";
 import { RightPane, type PaneView, parsePaneView } from "./right-pane";
@@ -101,7 +102,8 @@ export function LoggedInView({
   const [searchParams, setSearchParams] = useSearchParams();
   // One right pane at a time: an open thread wins over `?pane=`.
   const threadId = roomId ? searchParams.get("thread") : null;
-  const pane = roomId && !threadId ? parsePaneView(searchParams.get("pane")) : null;
+  const pane =
+    roomId && !threadId ? parsePaneView(searchParams.get("pane")) : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -143,7 +145,9 @@ export function LoggedInView({
       : { kind: "home" };
   // The remembered choice wins once its space is known; a space since left falls back.
   const activeScope: Scope =
-    scope && (scope.kind === "home" || joinedSpaces.some((s) => s.roomId === scope.spaceId))
+    scope &&
+    (scope.kind === "home" ||
+      joinedSpaces.some((s) => s.roomId === scope.spaceId))
       ? scope
       : defaultScope;
   const workspaceName =
@@ -185,78 +189,80 @@ export function LoggedInView({
   const rail = <WorkspaceRail scope={activeScope} onSelect={setScope} />;
 
   return (
-    <SidebarProvider className="h-svh overflow-hidden bg-sidebar">
-      {isMobile ? null : rail}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar workforceSpaceId={spaceId} />
-        <div className="relative flex min-h-0 flex-1">
-          <Sidebar>
-            {isMobile ? rail : null}
-            <div className="flex min-w-0 flex-1 flex-col">
-              <LeftPanel scope={activeScope} workforceSpaceId={spaceId} />
-              <SidebarFooter>
-                <SidebarProfileCard
-                  workspaceName={workspaceName}
-                  onOpenSettings={() => setSettingsOpen(true)}
-                />
-              </SidebarFooter>
-            </div>
-            {isMobile ? null : <SidebarRail />}
-          </Sidebar>
-          <SidebarInset
-            data-testid="logged-in-view"
-            className="overflow-hidden border-border md:rounded-tl-card md:border-t md:border-l"
-          >
-            {roomId ? (
-              <RoomHeader
-                workforceSpaceId={spaceId}
-                membersOpen={pane === "members"}
-                infoOpen={pane === "info"}
-                onToggleMembers={() => togglePane("members")}
-                onToggleInfo={() => togglePane("info")}
-              />
-            ) : null}
-            <div className="relative flex min-h-0 flex-1">
-              <div className="min-w-0 flex-1 overflow-hidden">
-                <Outlet
-                  context={
-                    {
-                      spaceId,
-                      activeScope,
-                      setScope,
-                    } satisfies LoggedInOutletContext
-                  }
-                />
+    <WorkforceSpaceContext.Provider value={spaceId}>
+      <SidebarProvider className="h-svh overflow-hidden bg-sidebar">
+        {isMobile ? null : rail}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <TopBar workforceSpaceId={spaceId} />
+          <div className="relative flex min-h-0 flex-1">
+            <Sidebar>
+              {isMobile ? rail : null}
+              <div className="flex min-w-0 flex-1 flex-col">
+                <LeftPanel scope={activeScope} workforceSpaceId={spaceId} />
+                <SidebarFooter>
+                  <SidebarProfileCard
+                    workspaceName={workspaceName}
+                    onOpenSettings={() => setSettingsOpen(true)}
+                  />
+                </SidebarFooter>
               </div>
-              {roomId && threadId ? (
-                <ThreadPane
-                  key={`${roomId}:${threadId}`}
-                  roomId={roomId}
-                  rootEventId={threadId}
-                  highlightEventId={searchParams.get("event") ?? undefined}
+              {isMobile ? null : <SidebarRail />}
+            </Sidebar>
+            <SidebarInset
+              data-testid="logged-in-view"
+              className="overflow-hidden border-border md:rounded-tl-card md:border-t md:border-l"
+            >
+              {roomId ? (
+                <RoomHeader
                   workforceSpaceId={spaceId}
-                  onClose={() => setPane(null)}
-                />
-              ) : roomId && pane ? (
-                <RightPane
-                  roomId={roomId}
-                  spaceId={spaceId}
-                  view={pane}
-                  onNavigate={setPane}
-                  onClose={() => setPane(null)}
+                  membersOpen={pane === "members"}
+                  infoOpen={pane === "info"}
+                  onToggleMembers={() => togglePane("members")}
+                  onToggleInfo={() => togglePane("info")}
                 />
               ) : null}
-            </div>
-          </SidebarInset>
+              <div className="relative flex min-h-0 flex-1">
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <Outlet
+                    context={
+                      {
+                        spaceId,
+                        activeScope,
+                        setScope,
+                      } satisfies LoggedInOutletContext
+                    }
+                  />
+                </div>
+                {roomId && threadId ? (
+                  <ThreadPane
+                    key={`${roomId}:${threadId}`}
+                    roomId={roomId}
+                    rootEventId={threadId}
+                    highlightEventId={searchParams.get("event") ?? undefined}
+                    workforceSpaceId={spaceId}
+                    onClose={() => setPane(null)}
+                  />
+                ) : roomId && pane ? (
+                  <RightPane
+                    roomId={roomId}
+                    spaceId={spaceId}
+                    view={pane}
+                    onNavigate={setPane}
+                    onClose={() => setPane(null)}
+                  />
+                ) : null}
+              </div>
+            </SidebarInset>
+          </div>
         </div>
-      </div>
-      <SettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        pushGatewayUrl={pushGatewayUrl}
-        vapidPublicKey={vapidPublicKey}
-      />
-      <QuickSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
-    </SidebarProvider>
+        <SettingsDialog
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          pushGatewayUrl={pushGatewayUrl}
+          vapidPublicKey={vapidPublicKey}
+        />
+        <QuickSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
+      </SidebarProvider>
+    </WorkforceSpaceContext.Provider>
   );
 }
