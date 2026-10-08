@@ -1,4 +1,4 @@
-// Fabrium roles on Matrix power levels (plan §6.4). Guest is not a level: it is
+// Fabrium roles on Matrix power levels. Guest is not a level: it is
 // a room member who is not in the room's project space (see use-member-roles).
 export const OWNER_LEVEL = 100;
 export const ADMIN_LEVEL = 90;

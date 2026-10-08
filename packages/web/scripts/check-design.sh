@@ -1,5 +1,5 @@
 #!/bin/sh
-# Design-system guard (FABRIUM_WEB_UI_PLAN.md §3.6). Run from packages/web.
+# Design-system guard (AGENTS.md, Design). Run from packages/web.
 cd "$(dirname "$0")/.." || exit 2
 status=0
 

@@ -30,7 +30,7 @@ const HUMAN_GROUPS: { kind: Exclude<MemberGroupKind, "agent">; label: string }[]
 
 export interface GroupOptions {
   isAgent?: (userId: string) => boolean;
-  /** An agent's persona; agents sharing one read as one role (plan §6.1). */
+  /** An agent's persona; agents sharing one read as one role (AGENTS.md, Fabrium UI rules). */
   personaOf?: (userId: string) => string;
   /** Room members outside the room's project space. */
   guestIds?: ReadonlySet<string>;
@@ -85,7 +85,7 @@ export function projectSpaceId(room: Room | null): string | null {
 }
 
 /**
- * Room members who are not in the room's project space (plan §6.4 guest).
+ * Room members who are not in the room's project space: the guest role.
  * Falls back to `fallbackSpaceId` when the room names no joined parent.
  * Empty while the space's members are unknown.
  */
