@@ -40,6 +40,7 @@ export class MatrixClient {
   private readonly homeserver: string
   private readonly asToken: string
   private readonly fetch: typeof globalThis.fetch
+  private defaultRoomVersion: Promise<string | null> | undefined
 
   constructor(opts: MatrixClientOptions) {
     this.homeserver = opts.homeserver.replace(/\/$/, '')
@@ -129,6 +130,7 @@ export class MatrixClient {
       if (users[opts.senderUserId] === undefined) users[opts.senderUserId] = 100
       body.power_level_content_override = { users }
     }
+    await this.omitCreatorPowerLevel(body, opts.senderUserId)
     const r = await this.fetch(
       `${this.homeserver}/_matrix/client/v3/createRoom?user_id=${encodeURIComponent(opts.senderUserId)}`,
       {
@@ -149,6 +151,7 @@ export class MatrixClient {
   }
 
   async createRoomRaw(opts: { asUserId: string; body: Record<string, unknown> }): Promise<string> {
+    await this.omitCreatorPowerLevel(opts.body, opts.asUserId)
     const url = `${this.homeserver}/_matrix/client/v3/createRoom?user_id=${encodeURIComponent(opts.asUserId)}`
     const r = await this.fetch(url, {
       method: 'POST',
@@ -158,9 +161,39 @@ export class MatrixClient {
       },
       body: JSON.stringify(opts.body),
     })
-    if (!r.ok) throw new Error(`createRoomRaw failed: ${r.status}`)
+    if (!r.ok) throw new Error(`createRoomRaw failed: ${r.status} ${await r.text()}`)
     const j = (await r.json()) as { room_id: string }
     return j.room_id
+  }
+
+  /**
+   * Room v12 (MSC4289) gives a room's creator unlimited power and rejects a
+   * createRoom whose `power_level_content_override.users` names them — and
+   * Tuwunel has already created the room by then, leaving an empty orphan.
+   * Below v12 the creator must stay in the map, so it is dropped only for a
+   * v12+ room: the explicit `room_version`, else the server's default.
+   */
+  private async omitCreatorPowerLevel(body: Record<string, unknown>, creator: string): Promise<void> {
+    const users = (body.power_level_content_override as { users?: Record<string, number> } | undefined)?.users
+    if (!users || users[creator] === undefined) return
+    const version =
+      typeof body.room_version === 'string' ? body.room_version : await this.serverDefaultRoomVersion()
+    if (version && creatorHasImplicitPower(version)) delete users[creator]
+  }
+
+  /** The homeserver's default room version, fetched once; null if it won't say. */
+  private serverDefaultRoomVersion(): Promise<string | null> {
+    this.defaultRoomVersion ??= this.fetch(`${this.homeserver}/_matrix/client/v3/capabilities`, {
+      headers: { Authorization: `Bearer ${this.asToken}` },
+    })
+      .then(async (r) => {
+        if (!r.ok) return null
+        const j = (await r.json()) as { capabilities?: { 'm.room_versions'?: { default?: unknown } } }
+        const v = j.capabilities?.['m.room_versions']?.default
+        return typeof v === 'string' ? v : null
+      })
+      .catch(() => null)
+    return this.defaultRoomVersion
   }
 
   async sendStateEvent(opts: {
@@ -530,4 +563,9 @@ export class MatrixClient {
     }
     return (await r.json()) as { event_id: string }
   }
+}
+
+/** v12 and later, and the "hydra" pre-release versions they grew from. */
+export function creatorHasImplicitPower(roomVersion: string): boolean {
+  return /hydra/.test(roomVersion) || Number(roomVersion) >= 12
 }

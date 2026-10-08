@@ -17,6 +17,10 @@ function clientWithFetches(...handlers: Array<(url: string, init?: RequestInit) 
   return { client, fetch }
 }
 
+/** The /capabilities answer naming the server's default room version. */
+const roomVersions = (v: string) => () =>
+  new Response(JSON.stringify({ capabilities: { 'm.room_versions': { default: v } } }), { status: 200 })
+
 describe('ensureWorkforceSpace', () => {
   it('returns the room ID when the alias already resolves', async () => {
     const { client, fetch } = clientWithFetches((url) => {
@@ -130,6 +134,7 @@ describe('ensureWorkforceSpace admins', () => {
   it('emits power_level_content_override with bot + admins at 100 on creation', async () => {
     const { client } = clientWithFetches(
       () => new Response(JSON.stringify({ errcode: 'M_NOT_FOUND' }), { status: 404 }),
+      roomVersions('11'),
       (url, init) => {
         expect(url).toContain('/_matrix/client/v3/createRoom')
         const body = JSON.parse(init!.body as string)
@@ -155,9 +160,30 @@ describe('ensureWorkforceSpace admins', () => {
   it('invites the admins so they can actually enter the invite-only space', async () => {
     const { client } = clientWithFetches(
       () => new Response(JSON.stringify({ errcode: 'M_NOT_FOUND' }), { status: 404 }),
+      roomVersions('11'),
       (_url, init) => {
         const body = JSON.parse(init!.body as string)
         expect(body.invite).toEqual(['@admin:hs.zoon.local'])
+        return new Response(JSON.stringify({ room_id: '!space:hs.zoon.local' }), { status: 200 })
+      },
+    )
+    await ensureWorkforceSpace({
+      client,
+      asUserId: '@zooid:hs.zoon.local',
+      serverName: 'hs.zoon.local',
+      spaceLocalpart: 'dev',
+      preset: 'public_chat',
+      admins: ['@admin:hs.zoon.local'],
+    })
+  })
+
+  it('leaves the bot out of the override on a v12 server, where creators have implicit power', async () => {
+    const { client } = clientWithFetches(
+      () => new Response(JSON.stringify({ errcode: 'M_NOT_FOUND' }), { status: 404 }),
+      roomVersions('12'),
+      (_url, init) => {
+        const body = JSON.parse(init!.body as string)
+        expect(body.power_level_content_override).toEqual({ users: { '@admin:hs.zoon.local': 100 } })
         return new Response(JSON.stringify({ room_id: '!space:hs.zoon.local' }), { status: 200 })
       },
     )
@@ -248,6 +274,7 @@ describe('ensureDefaultChannel admins', () => {
   it('seeds operator + bot at PL 100 in the default channel on creation', async () => {
     const { client } = clientWithFetches(
       () => new Response(JSON.stringify({ errcode: 'M_NOT_FOUND' }), { status: 404 }),
+      roomVersions('11'),
       (url, init) => {
         expect(url).toContain('/_matrix/client/v3/createRoom')
         const body = JSON.parse(init!.body as string)
