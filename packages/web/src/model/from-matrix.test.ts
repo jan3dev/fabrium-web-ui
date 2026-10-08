@@ -335,10 +335,21 @@ describe("agent turns", () => {
 
   it("resolves an approval from its response, with who and when", () => {
     const req = zev("dev.zooid.approval_request", { approval_id: "ap1", session_id: "s1", tool_call_id: "a" });
-    const res = zev("dev.zooid.approval_response", { approval_id: "ap1", decision: "allow" }, ana);
+    const res = zev("dev.zooid.approval_response", { approval_id: "ap1", session_id: "s1", decision: "allow" }, ana);
     const view = entries(roomWith(req, res))[0].message.raw as ApprovalView;
     expect(view.resolution).toEqual({ decision: "allow", optionId: undefined, respondedBy: ana, respondedAt: res.getTs() });
     expect(view.expired).toBe(false);
+  });
+
+  it("ignores responses from agents and for another session", () => {
+    const req = zev("dev.zooid.approval_request", { approval_id: "ap1", session_id: "s1", tool_call_id: "a" });
+    const byAgent = zev("dev.zooid.approval_response", { approval_id: "ap1", session_id: "s1", decision: "allow" });
+    const otherSession = zev("dev.zooid.approval_response", { approval_id: "ap1", session_id: "s2", decision: "allow" }, ana);
+    const room = roomWith(req, byAgent, otherSession);
+    expect((entries(room)[0].message.raw as ApprovalView).resolution).toBeNull();
+    const real = zev("dev.zooid.approval_response", { approval_id: "ap1", session_id: "s1", decision: "cancel" }, ana);
+    pushTimelineEvent(room, real);
+    expect((entries(room)[0].message.raw as ApprovalView).resolution).toMatchObject({ decision: "cancel", respondedBy: ana });
   });
 
   it("expires an unanswered approval once the agent's turn ends", () => {

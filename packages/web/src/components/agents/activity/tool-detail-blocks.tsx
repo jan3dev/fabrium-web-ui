@@ -1,7 +1,4 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/agents/ui/AgentSessionToolItem/ToolDetailBlocks.tsx. Modified.
-import DOMPurify from "dompurify";
-import { marked } from "marked";
-
 import { DiffView } from "@/components/timeline/diff-view";
 import { Alert } from "@/components/ui/alert";
 import { WarningIcon } from "@/components/icons";
@@ -40,7 +37,8 @@ export function ToolDetailBlocks({
           ) : hasInput ? (
             <ToolCodeBlock label="Parameters" value={JSON.stringify(item.rawInput, null, 2)} />
           ) : null}
-          {item.content ? <ToolOutput label={failed ? "Error" : "Result"} danger={failed} text={item.content} /> : null}
+          {/* Plain text only: tool output carries web pages and command output, never trusted markup. */}
+          {item.content ? <ToolCodeBlock label={failed ? "Error" : "Result"} danger={failed} value={item.content} /> : null}
         </>
       )}
       {!summary.shellCommand && !hasInput && summary.diffs.length === 0 && !item.content ? (
@@ -62,20 +60,6 @@ function ToolCodeBlock({ label, value, danger }: { label: string; value: string;
       >
         {value}
       </pre>
-    </div>
-  );
-}
-
-/** Tool output; fenced code renders as Markdown. Agent output is sanitized like any message. */
-function ToolOutput({ label, text, danger }: { label: string; text: string; danger: boolean }) {
-  if (danger || !text.includes("```")) return <ToolCodeBlock label={label} value={text} danger={danger} />;
-  return (
-    <div className="space-y-1">
-      <h4 className="text-caption2 font-semibold uppercase tracking-wide text-text-tertiary">{label}</h4>
-      <div
-        className="markdown scrollbar-custom max-h-60 overflow-auto text-caption1"
-        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(text, { async: false })) }}
-      />
     </div>
   );
 }

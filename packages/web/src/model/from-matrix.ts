@@ -89,8 +89,8 @@ interface TurnIndex {
   turnOf: Map<string, TurnBuild>;
   /** turn.end times per `sender|session`, oldest first. */
   ends: Map<string, number[]>;
-  /** Approval responses by approval_id, first one wins. */
-  responses: Map<string, MatrixEvent>;
+  /** Approval responses by approval_id, oldest first; toApprovalView picks the one that counts. */
+  responses: Map<string, MatrixEvent[]>;
   /** Approval tool inputs by tool_call_id. */
   approvalInputs: Map<string, Record<string, unknown>>;
 }
@@ -118,7 +118,7 @@ const TURN_ACTIVITY: ReadonlySet<string> = new Set([
  */
 function indexTurns(events: readonly MatrixEvent[]): TurnIndex {
   const ends = new Map<string, number[]>();
-  const responses = new Map<string, MatrixEvent>();
+  const responses = new Map<string, MatrixEvent[]>();
   const approvalInputs = new Map<string, Record<string, unknown>>();
   for (const ev of events) {
     const type = ev.getType();
@@ -127,7 +127,7 @@ function indexTurns(events: readonly MatrixEvent[]): TurnIndex {
       if (typeof session === "string") push(ends, `${ev.getSender()}|${session}`, ev.getTs());
     } else if (type === ApprovalEventType.Response) {
       const r = decodeApprovalResponse(ev);
-      if (r && !responses.has(r.approvalId)) responses.set(r.approvalId, ev);
+      if (r) push(responses, r.approvalId, ev);
     } else if (type === ApprovalEventType.Request) {
       const r = decodeApprovalRequest(ev);
       const input = r?.toolInput;
@@ -354,7 +354,15 @@ function toApprovalView(
 ): ApprovalView | null {
   const request = decodeApprovalRequest(ev);
   if (!request) return null;
-  const responseEv = turns.responses.get(request.approvalId);
+  // What the daemon would act on: the first response for this session's
+  // approval from a non-agent. Agents never approve; a response naming another
+  // session resolves nothing.
+  const responseEv = (turns.responses.get(request.approvalId) ?? []).find(
+    (r) =>
+      (r.getContent() as { session_id?: unknown }).session_id === request.sessionId &&
+      !roster?.isAgent(r.getSender() ?? "") &&
+      r.getSender() !== ev.getSender(),
+  );
   const response = responseEv ? decodeApprovalResponse(responseEv) : null;
   const ends = turns.ends.get(`${ev.getSender()}|${request.sessionId}`) ?? [];
   return {
