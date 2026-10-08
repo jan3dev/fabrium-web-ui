@@ -15,7 +15,8 @@ import {
   mkMatrixEvent,
   pushTimelineEvent,
 } from "../../test/factories";
-import { toActor, toTimelineEntries, toTimelineMessages } from "./from-matrix";
+import { toActor, toOpenTurns, toTimelineEntries, toTimelineMessages } from "./from-matrix";
+import type { AgentTurn, ApprovalView } from "./agent-activity";
 
 const roomId = "!r:h.example";
 const me = "@me:h.example";
@@ -59,6 +60,22 @@ describe("toActor", () => {
     expect(toActor(agent, room, roster).kind).toBe("agent");
     expect(toActor("@zooid:h.example", room, roster).kind).toBe("system");
     expect(toActor(ana, null, roster)).toMatchObject({ kind: "human", displayName: "ana", avatarUrl: null });
+  });
+
+  it("labels an agent Persona · Project from the roster, project falling back to the space", () => {
+    const room = roomWith();
+    const withRoster = (entry: Record<string, string>) => ({
+      ...roster,
+      agent: (id: string) => (id === agent ? { userId: agent, name: "coder", role: undefined, avatarUrl: undefined, rooms: [], ...entry } : undefined),
+      spaceName: "Acme",
+    });
+    expect(toActor(agent, room, withRoster({ persona: "Coder", project: "Payments" }))).toMatchObject({
+      displayName: "Coder · Payments",
+      persona: "Coder",
+      project: "Payments",
+    });
+    expect(toActor(agent, room, withRoster({})).displayName).toBe("coder · Acme");
+    expect(toActor(ana, room, withRoster({})).displayName).toBe("ana");
   });
 
   it("does not mark a zooid user from another server as system", () => {
@@ -270,5 +287,73 @@ describe("toTimelineEntries", () => {
       failed: true,
       failedReason: "You're not a member of this room yet",
     });
+  });
+});
+
+describe("agent turns", () => {
+  const ROOT = "$root";
+  let ts = 1_000;
+  /** An agent event in the thread, each one later than the last. */
+  function zev(type: string, content: Record<string, unknown>, sender = agent): MatrixEvent {
+    const e = ev(sender, type, { ...content, "m.relates_to": { rel_type: "m.thread", event_id: ROOT } });
+    e.event.origin_server_ts = ts += 1_000;
+    return e;
+  }
+  const call = (id: string, session = "s1") =>
+    zev("dev.zooid.tool_call", { session_id: session, tool_call_id: id, title: id, kind: "execute" });
+  const done = (id: string) =>
+    zev("dev.zooid.tool_call_update", { session_id: "s1", tool_call_id: id, status: "completed" });
+  const end = (session = "s1") => zev("dev.zooid.turn.end", { session_id: session, agent_id: "coder" });
+  const turns = (room: Room) =>
+    entries(room)
+      .filter((e) => e.message.kind === "agent-turn")
+      .map((e) => e.message.raw as AgentTurn);
+
+  it("groups a turn's tool calls into one row at its first event", () => {
+    const room = roomWith(call("a"), done("a"), call("b"), end());
+    const rows = entries(room);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].message).toMatchObject({ kind: "agent-turn", author: expect.objectContaining({ id: agent }) });
+    const turn = rows[0].message.raw as AgentTurn;
+    expect(turn.items.map((i) => i.id)).toEqual(["a", "b"]);
+    expect(turn).toMatchObject({ threadRootId: ROOT, sessionId: "s1", endedAt: expect.any(Number) });
+  });
+
+  it("starts a new turn after turn.end, and keeps sessions apart", () => {
+    const room = roomWith(call("a"), end(), call("b"), call("c", "s2"));
+    expect(turns(room).map((t) => [t.sessionId, t.items.map((i) => i.id), t.endedAt !== null])).toEqual([
+      ["s1", ["a"], true],
+      ["s1", ["b"], false],
+      ["s2", ["c"], false],
+    ]);
+  });
+
+  it("lists the turns still running", () => {
+    const room = roomWith(call("a"), end(), call("b"));
+    expect(toOpenTurns(allRoomEvents(room), room, roster).map((t) => t.items[0]?.id)).toEqual(["b"]);
+  });
+
+  it("resolves an approval from its response, with who and when", () => {
+    const req = zev("dev.zooid.approval_request", { approval_id: "ap1", session_id: "s1", tool_call_id: "a" });
+    const res = zev("dev.zooid.approval_response", { approval_id: "ap1", decision: "allow" }, ana);
+    const view = entries(roomWith(req, res))[0].message.raw as ApprovalView;
+    expect(view.resolution).toEqual({ decision: "allow", optionId: undefined, respondedBy: ana, respondedAt: res.getTs() });
+    expect(view.expired).toBe(false);
+  });
+
+  it("expires an unanswered approval once the agent's turn ends", () => {
+    const earlier = end();
+    const req = zev("dev.zooid.approval_request", { approval_id: "ap1", session_id: "s1", tool_call_id: "a" });
+    const room = roomWith(earlier, req);
+    expect((entries(room)[0].message.raw as ApprovalView).expired).toBe(false);
+    pushTimelineEvent(room, end());
+    expect((entries(room)[0].message.raw as ApprovalView).expired).toBe(true);
+  });
+
+  it("tells the approval card when the viewer is an agent", () => {
+    const req = zev("dev.zooid.approval_request", { approval_id: "ap1", session_id: "s1", tool_call_id: "a" });
+    const room = roomWith(req);
+    const asAgent = toTimelineEntries(allRoomEvents(room), room, { isAgent: () => true });
+    expect((asAgent[0].message.raw as ApprovalView).viewerIsAgent).toBe(true);
   });
 });

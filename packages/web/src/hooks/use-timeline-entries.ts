@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useReducer } from "react";
 import { MatrixClientPeg } from "../client/peg";
+import type { AgentTurn } from "../model/agent-activity";
 import {
+  toOpenTurns,
   toTimelineEntries,
   toTimelineMessages,
 } from "../model/from-matrix";
 import type { TimelineEntry, TimelineMessage } from "../model/types";
-import { makeSubscribe, useThread, useTimeline } from "./use-timeline";
+import { allRoomEvents, makeSubscribe, useThread, useTimeline } from "./use-timeline";
 import { useWorkforce } from "./use-workforce";
 
 /**
@@ -90,4 +92,15 @@ export function useThreadEntries(
       totalCount,
     };
   }, [roomId, root, rootPending, events, totalCount, roster, version]);
+}
+
+/** Agent turns still running in the room. */
+export function useOpenTurns(roomId: string, workforceSpaceId: string | null): AgentTurn[] {
+  const roster = useWorkforce(workforceSpaceId ?? "");
+  const version = useRoomVersion(roomId);
+  return useMemo(() => {
+    void version;
+    const room = MatrixClientPeg.safeGet()?.getRoom(roomId) ?? null;
+    return room ? toOpenTurns(allRoomEvents(room), room, roster) : [];
+  }, [roomId, roster, version]);
 }

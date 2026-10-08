@@ -1,8 +1,11 @@
 import { WarningIcon } from "@/components/icons";
+import { Alert, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import type { DecodedZooidEvent } from "../../events/zooid-events";
 
 type ErrorDecoded = Extract<DecodedZooidEvent, { kind: "error" }>;
 
+/** An agent error. Transient ones (rate limits, restarts) read as a warning. */
 export function ErrorTile({ decoded }: { decoded: ErrorDecoded }) {
   const handleCopy = () => {
     const payload: Record<string, unknown> = {
@@ -15,42 +18,31 @@ export function ErrorTile({ decoded }: { decoded: ErrorDecoded }) {
   };
 
   return (
-    <div className="my-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm">
-      <div className="flex items-start gap-2">
-        <WarningIcon className="mt-0.5 h-4 w-4 text-muted-foreground" />
-        <div className="flex-1">
-          <div className="font-medium">{decoded.message}</div>
-          {decoded.detail && (
-            <details className="mt-1">
-              <summary className="cursor-pointer text-xs text-muted-foreground">
-                details
-              </summary>
-              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap text-xs">
-                {decoded.detail}
-              </pre>
-            </details>
-          )}
-          <div className="mt-2 flex flex-wrap gap-2 text-xs">
-            <button
-              type="button"
-              className="rounded border border-border px-2 py-0.5 hover:bg-accent"
-              onClick={handleCopy}
-            >
-              Copy details
-            </button>
-            {decoded.recovery && (
-              <a
-                href={decoded.recovery}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded border border-border px-2 py-0.5 hover:bg-accent"
-              >
+    <Alert tone={decoded.transient ? "warning" : "danger"} className="my-1 max-w-xl p-3" data-testid="agent-error">
+      <WarningIcon />
+      <div className="min-w-0 flex-1">
+        <AlertTitle className="mb-0 break-words">{decoded.message}</AlertTitle>
+        {decoded.detail && (
+          <details className="mt-1">
+            <summary className="cursor-pointer text-caption1 text-text-secondary">details</summary>
+            <pre className="scrollbar-custom mt-1 max-h-48 overflow-auto whitespace-pre-wrap font-mono text-caption1">
+              {decoded.detail}
+            </pre>
+          </details>
+        )}
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button type="button" size="xs" variant="outline" onClick={handleCopy}>
+            Copy details
+          </Button>
+          {decoded.recovery && (
+            <Button asChild size="xs" variant="outline">
+              <a href={decoded.recovery} target="_blank" rel="noreferrer">
                 Learn more
               </a>
-            )}
-          </div>
+            </Button>
+          )}
         </div>
       </div>
-    </div>
+    </Alert>
   );
 }

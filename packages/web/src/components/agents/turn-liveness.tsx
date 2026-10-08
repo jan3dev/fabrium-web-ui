@@ -1,75 +1,27 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/agents/ui/TurnLivenessIndicator.tsx. Modified.
-import { motion, useReducedMotion } from "motion/react";
+import { cn } from "@/lib/utils";
 
-import { cn } from "@/shared/lib/cn";
-import { FuzzyLogo } from "@/shared/ui/buzz-logo/FuzzyLogo";
-import { useTranscriptAnimationEnabled } from "./transcriptAnimationPreference";
+const MARKS = [0, 250, 500];
 
-const MARKS = ["first", "second", "third"] as const;
-const STAGGER_SECONDS = 0.25;
-const CYCLE_SECONDS = 1.8;
-
-export function TurnLivenessIndicator({
-  className,
-  fuzz = false,
-}: {
-  className?: string;
-  /** Defaults to false — the indicator stays mounted for whole turns. */
-  fuzz?: boolean;
-}) {
-  const animationsEnabled = useTranscriptAnimationEnabled();
-  const shouldReduceMotion = useReducedMotion();
-  const showStaggeredRow = animationsEnabled && !shouldReduceMotion;
-
-  if (!showStaggeredRow) {
-    return (
-      <div
-        aria-label="Agent turn in progress"
-        className={cn("opacity-25", className)}
-        data-testid="turn-liveness-indicator"
-        role="status"
-      >
-        <FuzzyLogo
-          ariaLabel="Agent turn in progress"
-          className="text-foreground"
-          fuzz={fuzz}
-          loop
-          loopRestSeconds={2}
-        />
-      </div>
-    );
-  }
-
+/**
+ * Three marks pulsing in turn while an agent turn runs. CSS only; the global
+ * reduced-motion rule stills them.
+ */
+export function TurnLivenessIndicator({ className }: { className?: string }) {
   return (
-    <div
+    <span
       aria-label="Agent turn in progress"
-      className={cn("flex items-center gap-1.5 opacity-25", className)}
+      className={cn("inline-flex shrink-0 items-center gap-0.5 text-actor-agent", className)}
       data-testid="turn-liveness-indicator"
       role="status"
     >
-      {MARKS.map((mark, index) => (
-        <motion.div
-          animate={{
-            opacity: [0, 1, 1, 0],
-            y: [4, 0, -1, -4],
-          }}
-          key={mark}
-          transition={{
-            delay: index * STAGGER_SECONDS,
-            duration: CYCLE_SECONDS,
-            ease: "easeInOut",
-            repeat: Number.POSITIVE_INFINITY,
-            times: [0, 0.3, 0.7, 1],
-          }}
-        >
-          <FuzzyLogo
-            ariaLabel=""
-            className="w-5! text-foreground"
-            fuzz={fuzz}
-            pulse={false}
-          />
-        </motion.div>
+      {MARKS.map((delay) => (
+        <span
+          className="size-1 animate-pulse rounded-full bg-current"
+          key={delay}
+          style={{ animationDelay: `${delay}ms` }}
+        />
       ))}
-    </div>
+    </span>
   );
 }

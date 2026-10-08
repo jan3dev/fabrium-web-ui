@@ -13,6 +13,7 @@ import { useLoadMoreThread } from "../../hooks/use-load-more-thread";
 import { usePlan } from "../../hooks/use-plan";
 import { useThreadEntries } from "../../hooks/use-timeline-entries";
 import { useTyping } from "../../hooks/use-typing";
+import { AgentActivityBar } from "../rooms/agent-activity-bar";
 import { Composer } from "../rooms/composer";
 import { TypingIndicator } from "../rooms/typing-indicator";
 import { LoadMoreButton } from "../timeline/load-more-button";
@@ -295,6 +296,7 @@ export function ThreadPane({
           roomId={roomId}
           rootEventId={rootEventId}
         />
+        <AgentActivityBar roomId={roomId} threadRootId={rootEventId} workforceSpaceId={workforceSpaceId} />
         <Composer
           roomId={roomId}
           threadRootEventId={rootEventId}

@@ -7,24 +7,32 @@ import {
   makeFakeClient,
   makeRoom,
   mkMatrixEvent,
-  pushTimelineEvent,
 } from "../../../test/factories";
 import { MatrixClientPeg } from "../../client/peg";
-import { ApprovalEventType } from "../../events/approval";
+import { ApprovalEventType, decodeApprovalRequest } from "../../events/approval";
+import type { ApprovalView } from "@/model/agent-activity";
+import type { ActorSummary } from "@/model/types";
 import { ApprovalCard } from "./approval-card";
 
 const me = "@me:h.example";
 const roomId = "!r:h.example";
 
-function makeRequestEvent() {
-  return mkMatrixEvent({
-    roomId,
-    sender: "@architect.acme:h.example",
-    type: ApprovalEventType.Request,
-    content: { approval_id: "a1", session_id: "s1", tool_call_id: "tc1" },
-    eventId: "$req1",
-  });
+const agent: ActorSummary = { id: "@architect.acme:h.example", kind: "agent", displayName: "Coder · Payments", avatarUrl: null };
+
+function approval(over: Partial<ApprovalView> = {}): ApprovalView {
+  const request = decodeApprovalRequest(
+    mkMatrixEvent({
+      roomId,
+      sender: agent.id,
+      type: ApprovalEventType.Request,
+      content: { approval_id: "a1", session_id: "s1", tool_call_id: "tc1" },
+      eventId: "$req1",
+    }),
+  )!;
+  return { request, resolution: null, expired: false, viewerIsAgent: false, ...over };
 }
+
+const card = (over?: Partial<ApprovalView>) => <ApprovalCard roomId={roomId} approval={approval(over)} agent={agent} />;
 
 function setup(opts: { canApprove?: boolean; sendEvent?: ReturnType<typeof vi.fn> } = {}) {
   const client = makeFakeClient({ userId: me });
@@ -63,14 +71,14 @@ afterEach(() => MatrixClientPeg.reset());
 describe("<ApprovalCard />", () => {
   it("renders Allow + Cancel buttons when pending and the user can approve", () => {
     setup();
-    render(<ApprovalCard event={makeRequestEvent()} />);
+    render(card());
     expect(screen.getByRole("button", { name: /allow/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /cancel/i })).toBeEnabled();
   });
 
   it("hides buttons when the user lacks power to send approval_response", () => {
     setup({ canApprove: false });
-    render(<ApprovalCard event={makeRequestEvent()} />);
+    render(card());
     expect(screen.queryByRole("button", { name: /allow/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /cancel/i })).not.toBeInTheDocument();
     expect(screen.getByText(/insufficient permission/i)).toBeInTheDocument();
@@ -85,7 +93,7 @@ describe("<ApprovalCard />", () => {
         }),
     );
     setup({ sendEvent });
-    render(<ApprovalCard event={makeRequestEvent()} />);
+    render(card());
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /allow/i }));
     expect(screen.getByRole("button", { name: /allow/i })).toBeDisabled();
@@ -100,27 +108,32 @@ describe("<ApprovalCard />", () => {
     );
   });
 
-  it("renders 'Approved by @bob' when a matching response event arrives", async () => {
-    const { room } = setup();
-    render(<ApprovalCard event={makeRequestEvent()} />);
-    pushTimelineEvent(
-      room,
-      mkMatrixEvent({
-        roomId,
-        sender: "@bob:h.example",
-        type: ApprovalEventType.Response,
-        content: { approval_id: "a1", decision: "allow" },
-      }),
-    );
-    await waitFor(() => expect(screen.getByText(/approved by/i)).toBeInTheDocument());
-    expect(screen.getByText(/@bob:h.example/i)).toBeInTheDocument();
+  it("shows who answered instead of buttons once resolved", () => {
+    setup();
+    render(card({ resolution: { decision: "allow", respondedBy: "@bob:h.example", respondedAt: Date.now() } }));
+    expect(screen.getByText(/approved by/i)).toHaveTextContent(/bob/);
     expect(screen.queryByRole("button", { name: /allow/i })).not.toBeInTheDocument();
+  });
+
+  it("shows an expired approval as denied, without buttons", () => {
+    setup();
+    render(card({ expired: true }));
+    expect(screen.getByTestId("approval-card")).toHaveAttribute("data-state", "expired");
+    expect(screen.getByText(/expired/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /allow/i })).not.toBeInTheDocument();
+  });
+
+  it("hides the buttons from an agent viewer", () => {
+    setup();
+    render(card({ viewerIsAgent: true }));
+    expect(screen.queryByRole("button", { name: /allow/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/only humans/i)).toBeInTheDocument();
   });
 
   it("double-click on Allow sends only one event", async () => {
     const sendEvent = vi.fn().mockResolvedValue({ event_id: "$r1" });
     setup({ sendEvent });
-    render(<ApprovalCard event={makeRequestEvent()} />);
+    render(card());
     const user = userEvent.setup();
     const btn = screen.getByRole("button", { name: /allow/i });
     await user.dblClick(btn);

@@ -16,6 +16,19 @@ describe("parseWorkforceRoster", () => {
     ]);
   });
 
+  it("keeps persona and project when they are non-empty strings", () => {
+    const r = parseWorkforceRoster({
+      version: 1,
+      agents: [
+        { user_id: "@coder:h", name: "coder", persona: "Coder", project: "Payments" },
+        { user_id: "@qa:h", name: "qa", persona: "", project: 7 },
+      ],
+    });
+    expect(r?.[0]).toMatchObject({ persona: "Coder", project: "Payments" });
+    expect(r?.[1]).not.toHaveProperty("persona");
+    expect(r?.[1]).not.toHaveProperty("project");
+  });
+
   it("returns null for missing or malformed content", () => {
     expect(parseWorkforceRoster(null)).toBeNull();
     expect(parseWorkforceRoster({})).toBeNull();

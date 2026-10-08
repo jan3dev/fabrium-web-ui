@@ -1,153 +1,67 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/agents/ui/agentSessionTypes.ts. Modified.
-import type { LucideIcon } from "lucide-react";
+// What an agent did in one turn, folded from the daemon's dev.zooid.* events.
+import type { ApprovalDecision, ApprovalRequest } from "@/events/approval";
+import type {
+  DiffBlock,
+  PlanBoardEntry,
+  ToolLocation,
+} from "@/events/zooid-events";
+import type { ActorSummary } from "./types";
 
-export type ObserverEvent = {
-  seq: number;
-  timestamp: string;
-  kind: string;
-  agentIndex: number | null;
-  channelId: string | null;
-  sessionId: string | null;
-  turnId: string | null;
-  startedAt?: string | null;
-  payload: unknown;
-};
+/** ACP tool call status. "stalled" is derived at render from the last activity. */
+export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
 
-export type ConnectionState =
-  | "idle"
-  | "connecting"
-  | "open"
-  | "closed"
-  | "error";
-
-export type ToolStatus = "executing" | "completed" | "failed" | "pending";
-
-export type AgentActivityRenderClass =
-  | "message"
-  | "relay-op"
-  | "file-edit"
-  | "file-read"
-  | "skill-read"
-  | "image"
-  | "shell"
-  | "status"
-  | "thought"
-  | "plan"
-  | "permission"
-  | "error"
-  | "generic"
-  | "raw-rail"
-  | "suppressed";
-
-export type AgentActivityTone = "read" | "write" | "admin" | "neutral";
-
-export type AgentActivityAction = {
-  verb: string;
-  object?: string | null;
-};
-
-export type AgentActivityDescriptor = {
-  renderClass: AgentActivityRenderClass;
-  label: string;
-  preview: string | null;
-  action?: AgentActivityAction;
-  tone?: AgentActivityTone;
-  operation?: string;
-  object?: string | null;
-  source?: "mcp" | "shell" | "acp" | "harness" | "fallback";
-  groupKey?: string;
-  reason?: string;
-};
-
-/** Observer/ACP wire label for dev-only transcript debugging. */
-export type TranscriptAcpSource = string;
-
-/** Shared optional identity fields attached during transcript construction. */
-export type TranscriptItemIdentity = {
-  turnId?: string | null;
-  sessionId?: string | null;
-  channelId?: string | null;
-};
-
-export type TranscriptItem =
-  | ({
-      id: string;
-      type: "message";
-      renderClass: "message";
-      role: "assistant" | "user";
-      title: string;
-      text: string;
-      timestamp: string;
-      messageId?: string | null;
-      acpSource?: TranscriptAcpSource;
-      authorPubkey?: string | null;
-    } & TranscriptItemIdentity)
-  | ({
-      id: string;
-      type: "thought";
-      renderClass: "thought";
-      title: string;
-      text: string;
-      timestamp: string;
-      acpSource?: TranscriptAcpSource;
-    } & TranscriptItemIdentity)
-  | ({
-      id: string;
-      type: "plan";
-      renderClass: "plan";
-      title: string;
-      text: string;
-      timestamp: string;
-      isUpdate?: boolean;
-      targetId?: string;
-      acpSource?: TranscriptAcpSource;
-    } & TranscriptItemIdentity)
-  | ({
-      id: string;
-      type: "lifecycle";
-      renderClass: "status" | "permission" | "error";
-      title: string;
-      text: string;
-      /** Resolved outcome for permission items (e.g. "Approved (allow_once)", "Denied (reject_once)", "Cancelled"). */
-      outcome?: string;
-      timestamp: string;
-      descriptor?: AgentActivityDescriptor;
-      acpSource?: TranscriptAcpSource;
-    } & TranscriptItemIdentity)
-  | ({
-      id: string;
-      type: "metadata";
-      renderClass: "raw-rail";
-      title: string;
-      sections: PromptSection[];
-      timestamp: string;
-      acpSource?: TranscriptAcpSource;
-    } & TranscriptItemIdentity)
-  | ({
-      id: string;
-      type: "tool";
-      renderClass: AgentActivityRenderClass;
-      descriptor: AgentActivityDescriptor;
-      title: string;
-      toolName: string;
-      buzzToolName: string | null;
-      status: ToolStatus;
-      args: Record<string, unknown>;
-      result: string;
-      isError: boolean;
-      timestamp: string;
-      startedAt: string;
-      completedAt: string | null;
-      acpSource?: TranscriptAcpSource;
-    } & TranscriptItemIdentity);
-
-export type PromptSection = {
+export interface ToolTranscriptItem {
+  type: "tool";
+  id: string; // ACP tool_call_id
   title: string;
-  body: string;
-};
+  /** ACP tool kind: read, edit, delete, move, search, execute, think, fetch, other. */
+  toolKind: string;
+  status: ToolStatus;
+  /** Input merged across the tool_call and every update; a later update can omit earlier fields. */
+  rawInput: Record<string, unknown> | null;
+  /** Text output of the latest update. */
+  content: string | null;
+  diffs: DiffBlock[];
+  locations: ToolLocation[];
+  startedAt: number;
+  /** Time of the latest event for this call, for stall detection. */
+  lastActivityAt: number;
+}
 
-export type BuzzToolInfo = {
-  icon: LucideIcon;
-  label: string;
-  tone: "read" | "write" | "admin";
-};
+export interface PlanTranscriptItem {
+  type: "plan";
+  id: string;
+  /** The latest plan of the turn (ACP sends full snapshots). */
+  entries: PlanBoardEntry[];
+  updatedAt: number;
+}
+
+export type TranscriptItem = ToolTranscriptItem | PlanTranscriptItem;
+
+/** One agent turn: everything an agent did between a prompt and its turn.end. */
+export interface AgentTurn {
+  id: string;
+  sessionId: string;
+  agent: ActorSummary;
+  threadRootId: string | null;
+  items: TranscriptItem[];
+  startedAt: number;
+  /** turn.end time; null while the turn runs. */
+  endedAt: number | null;
+}
+
+/** An approval request and what became of it. */
+export interface ApprovalView {
+  request: ApprovalRequest;
+  resolution: {
+    decision: ApprovalDecision;
+    optionId?: string;
+    respondedBy: string;
+    respondedAt: number;
+  } | null;
+  /** The agent's turn ended unanswered (timeout, interrupt, restart): nothing waits on it any more. */
+  expired: boolean;
+  /** The viewer is an agent: agents never answer approvals. */
+  viewerIsAgent: boolean;
+}

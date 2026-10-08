@@ -1,43 +1,21 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/agents/ui/AgentSessionToolItem/ShellCommandBlock.tsx. Modified.
-import { Terminal } from "lucide-react";
+import { TerminalIcon } from "@/components/icons";
 
-import { ScrollFadeMonoPanel } from "../FileContentBlock";
-import { parseShellToolOutput } from "../agentSessionUtils";
-
-export function ShellCommandBlock({
-  command,
-  result,
-}: {
-  command: string;
-  result: string;
-}) {
-  const output = parseShellToolOutput(result);
-  const stdout = output.stdout.trimEnd();
-
+export function ShellCommandBlock({ command, output }: { command: string; output: string | null }) {
+  const stdout = output?.trimEnd();
   return (
     <div
-      className="overflow-hidden rounded-lg bg-muted font-mono text-xs leading-5"
+      className="overflow-hidden rounded-utility bg-surface-secondary px-3 py-2 font-mono text-caption1"
       data-testid="transcript-shell-command"
     >
-      <ScrollFadeMonoPanel
-        fadeFromClassName="from-muted"
-        maxHeightClassName="max-h-36"
-      >
-        <p className="whitespace-pre-wrap wrap-break-word text-muted-foreground/70">
-          <Terminal className="mr-2 inline h-3.5 w-3.5 align-[-0.1875rem] text-primary" />
-          {command}
-        </p>
-      </ScrollFadeMonoPanel>
+      <p className="max-h-36 overflow-auto whitespace-pre-wrap break-words text-text-secondary">
+        <TerminalIcon className="mr-2 inline size-3.5 align-[-0.1875rem] text-accent-brand" />
+        {command}
+      </p>
       {stdout ? (
-        <ScrollFadeMonoPanel
-          className="mt-2"
-          fadeFromClassName="from-muted"
-          maxHeightClassName="max-h-36"
-        >
-          <pre className="whitespace-pre-wrap wrap-break-word text-foreground">
-            {stdout}
-          </pre>
-        </ScrollFadeMonoPanel>
+        <pre className="scrollbar-custom mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-words text-text-primary">
+          {stdout}
+        </pre>
       ) : null}
     </div>
   );

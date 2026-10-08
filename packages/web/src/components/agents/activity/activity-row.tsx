@@ -1,26 +1,19 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/agents/ui/activityRenderClasses/ActivityRow.tsx. Modified.
 import * as React from "react";
-import { ChevronDown } from "lucide-react";
 
-import { cn } from "@/shared/lib/cn";
-import { useAgentSessionTranscriptVariant } from "../agentSessionTranscriptContext";
-
-export type ActivityRowLabelParts = {
-  verb: string;
-  object?: React.ReactNode;
-};
+import { ChevronDownIcon } from "@/components/icons";
+import { cn } from "@/lib/utils";
 
 export type ActivityRowStats = {
   additions: number;
   deletions: number;
 };
 
-export type ActivityRowToneScope = "none" | "tool" | "summary";
-
 type ActivityRowProps = {
   children: React.ReactNode;
   className?: string;
-  openToneScope?: Exclude<ActivityRowToneScope, "none">;
+  /** Open on mount. The row keeps whatever the user toggles after that. */
+  defaultOpen?: boolean;
   testId?: string;
   title?: string;
 };
@@ -36,13 +29,19 @@ type ActivityRowContentComponent = React.FC<ActivityRowContentProps> & {
   marker: typeof ACTIVITY_ROW_CONTENT_MARKER;
 };
 
+/**
+ * A one-line activity summary. With an `ActivityRowContent` child it becomes a
+ * disclosure; the content mounts only while open, so a long turn of closed
+ * rows stays cheap.
+ */
 export function ActivityRow({
   children,
   className,
-  openToneScope = "tool",
+  defaultOpen = false,
   testId,
   title,
 }: ActivityRowProps) {
+  const [open, setOpen] = React.useState(defaultOpen);
   const childArray = React.Children.toArray(children);
   const summaryChildren = childArray.filter(
     (child) => !isActivityRowContent(child),
@@ -52,7 +51,10 @@ export function ActivityRow({
   if (contentChildren.length === 0) {
     return (
       <div
-        className={cn("not-prose flex min-h-6 items-center gap-1.5", className)}
+        className={cn(
+          "flex min-h-6 min-w-0 items-center gap-1.5 text-text-secondary",
+          className,
+        )}
         data-testid={testId}
         title={title}
       >
@@ -63,41 +65,35 @@ export function ActivityRow({
 
   return (
     <details
-      className={cn(
-        openToneScope === "summary" ? "group/summary" : "group",
-        "not-prose w-full",
-        className,
-      )}
+      className={cn("w-full min-w-0", className)}
       data-testid={testId}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+      open={open}
       title={title}
     >
+      {/* Open state comes from React, not group-open: rows nest, and an open
+          outer row would match every inner row's group-open. */}
       <summary
         className={cn(
-          "group/row flex min-h-6 w-full max-w-full cursor-pointer list-none items-center gap-1.5 text-muted-foreground",
-          openToneScope === "summary"
-            ? "group-open/summary:text-foreground"
-            : "group-open:text-foreground",
+          "group/row flex min-h-6 w-full max-w-full cursor-pointer list-none items-center gap-1.5 rounded-utility hover:text-text-primary [&::-webkit-details-marker]:hidden",
+          open ? "text-text-primary" : "text-text-secondary",
         )}
       >
         {summaryChildren}
-        <ChevronDown
+        <ChevronDownIcon
           className={cn(
-            "h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover/row:text-foreground",
-            openToneScope === "summary"
-              ? "group-open/summary:rotate-180 group-open/summary:text-foreground"
-              : "group-open:rotate-180 group-open:text-foreground",
+            "size-3.5 shrink-0 text-text-tertiary transition-transform group-hover/row:text-text-primary",
+            open && "rotate-180",
           )}
         />
       </summary>
-      {contentChildren.map((child, index) => (
-        <div
-          className={child.props.className}
-          // biome-ignore lint/suspicious/noArrayIndexKey: content regions are static children
-          key={index}
-        >
-          {child.props.children}
-        </div>
-      ))}
+      {open
+        ? contentChildren.map((child, index) => (
+            <div className={child.props.className} key={index}>
+              {child.props.children}
+            </div>
+          ))
+        : null}
     </details>
   );
 }
@@ -105,49 +101,27 @@ export function ActivityRow({
 export function ActivityRowLabel({
   className,
   object,
-  openToneScope,
   stats,
   title,
   verb,
-}: ActivityRowLabelParts & {
+}: {
+  verb: string;
+  object?: React.ReactNode;
   className?: string;
-  openToneScope: ActivityRowToneScope;
   stats?: ActivityRowStats | null;
   title?: string;
 }) {
-  const variant = useAgentSessionTranscriptVariant();
-  const isCompactPreview = variant === "compactPreview";
-
   return (
     <span
-      className={cn("inline-flex min-w-0 items-center gap-1.5", className)}
+      className={cn(
+        "inline-flex min-w-0 items-center gap-1.5 text-body2",
+        className,
+      )}
       title={title}
     >
-      <span
-        className={cn(
-          "shrink-0 font-semibold text-muted-foreground/50",
-          isCompactPreview ? "text-xs" : "text-sm",
-          openToneScope === "none"
-            ? null
-            : openToneScope === "summary"
-              ? "transition-colors group-hover/row:text-foreground group-open/summary:text-foreground"
-              : "transition-colors group-hover/row:text-foreground group-open:text-foreground",
-        )}
-      >
-        {verb}
-      </span>
+      <span className="shrink-0 font-semibold">{verb}</span>
       {object ? (
-        <span
-          className={cn(
-            "min-w-0 truncate font-normal text-muted-foreground/60",
-            isCompactPreview ? "text-xs" : "text-sm",
-            openToneScope === "none"
-              ? null
-              : openToneScope === "summary"
-                ? "transition-colors group-hover/row:text-foreground group-open/summary:text-foreground"
-                : "transition-colors group-hover/row:text-foreground group-open:text-foreground",
-          )}
-        >
+        <span className="min-w-0 truncate font-mono text-caption1">
           {object}
         </span>
       ) : null}
@@ -163,9 +137,9 @@ ActivityRowContent.marker = ACTIVITY_ROW_CONTENT_MARKER;
 
 function ActivityRowStatsView({ stats }: { stats: ActivityRowStats }) {
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold leading-5 tabular-nums">
-      <span className="text-status-added">+{stats.additions}</span>
-      <span className="text-status-deleted">-{stats.deletions}</span>
+    <span className="inline-flex shrink-0 items-center gap-1 text-caption1 font-semibold tabular-nums">
+      <span className="text-accent-success">+{stats.additions}</span>
+      <span className="text-accent-danger">-{stats.deletions}</span>
     </span>
   );
 }
@@ -182,34 +156,4 @@ function isActivityRowContent(
     "marker" in child.type &&
     child.type.marker === ACTIVITY_ROW_CONTENT_MARKER
   );
-}
-
-export function splitActivityRowLabel(
-  label: string,
-): ActivityRowLabelParts | null {
-  const match = label.match(
-    /^(Added|Archived|Captured|Checked|Compacted|Created|Deleted|Edited|Ran|Read|Removed|Searched|Sent|Unarchived|Updated|Viewed)\s+(.+)$/,
-  );
-  return match ? { verb: match[1], object: match[2] } : null;
-}
-
-export type ActivityRowCountedObject = {
-  count: number;
-  rest: string;
-};
-
-/**
- * Split a summary label object like "16 tool calls" into its leading count
- * and the trailing text (" tool calls"), so the number can animate through
- * AnimatedCount while streaming bursts grow. Returns null when the object
- * does not lead with a count.
- */
-export function splitActivityRowCountedObject(
-  object: string,
-): ActivityRowCountedObject | null {
-  const match = object.match(/^(\d+)(\s.+)$/);
-  if (!match) return null;
-  const count = Number(match[1]);
-  if (!Number.isFinite(count)) return null;
-  return { count, rest: match[2] };
 }

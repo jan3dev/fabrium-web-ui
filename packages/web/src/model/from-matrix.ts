@@ -5,14 +5,17 @@ import {
   type MatrixEvent,
   type Room,
 } from "matrix-js-sdk";
-import { ApprovalEventType } from "@/events/approval";
+import { ApprovalEventType, decodeApprovalRequest, decodeApprovalResponse } from "@/events/approval";
 import { ElicitationEventType } from "@/events/elicitation";
-import { decodeZooidEvent, isZooidLifecycle } from "@/events/zooid-events";
+import { decodeZooidEvent, isZooidLifecycle, ZooidEventType } from "@/events/zooid-events";
 import { allRoomEvents } from "@/hooks/use-timeline";
 import { describeMembershipTransition } from "@/lib/matrix/membership-transition";
 import { describeSendError } from "@/lib/matrix/send-error";
 import { readQuoteRef, splitQuoteFallback } from "@/lib/matrix/quote";
+import type { RosterAgent } from "@/lib/matrix/agent-detection";
 import { displayNameOf } from "@/lib/sender";
+import type { AgentTurn, ApprovalView } from "./agent-activity";
+import { type TimedZooidEvent, toTranscriptItems } from "./from-zooid";
 import type {
   ActorSummary,
   ThreadSummary,
@@ -24,6 +27,10 @@ import type {
 /** Who counts as an agent. `useWorkforce()` satisfies it. */
 export interface Roster {
   isAgent(userId: string): boolean;
+  /** The agent's roster entry, for its "Persona · Project" label. */
+  agent?(userId: string): RosterAgent | undefined;
+  /** The workforce space's name: an agent's project when it names none. */
+  spaceName?: string;
 }
 
 // ponytail: the daemon's appservice user is "zooid" by default but a workstation
@@ -52,11 +59,18 @@ export function toActor(
     : isSystemUser(userId, room)
       ? "system"
       : "human";
+  const name = member?.name || displayNameOf(userId);
+  const entry = kind === "agent" ? roster?.agent?.(userId) : undefined;
+  if (!entry) return { id: userId, kind, displayName: name, avatarUrl: member?.getMxcAvatarUrl() ?? null };
+  const persona = entry.persona ?? name;
+  const project = entry.project ?? roster?.spaceName;
   return {
     id: userId,
     kind,
-    displayName: member?.name || displayNameOf(userId),
+    displayName: project ? `${persona} · ${project}` : persona,
     avatarUrl: member?.getMxcAvatarUrl() ?? null,
+    persona,
+    project,
   };
 }
 
@@ -67,6 +81,90 @@ interface RelationIndex {
   /** m.replace events per target; validity is checked against the target's sender. */
   edits: Map<string, MatrixEvent[]>;
   threads: Map<string, MatrixEvent[]>;
+  turns: TurnIndex;
+}
+
+interface TurnIndex {
+  /** Turn per tool_call / tool_call_update / plan event id. */
+  turnOf: Map<string, TurnBuild>;
+  /** turn.end times per `sender|session`, oldest first. */
+  ends: Map<string, number[]>;
+  /** Approval responses by approval_id, first one wins. */
+  responses: Map<string, MatrixEvent>;
+  /** Approval tool inputs by tool_call_id. */
+  approvalInputs: Map<string, Record<string, unknown>>;
+}
+
+interface TurnBuild {
+  id: string;
+  /** The turn's first loaded event: its row sits here. */
+  anchorId: string;
+  sender: string;
+  sessionId: string;
+  threadRootId: string | null;
+  events: TimedZooidEvent[];
+  endedAt: number | null;
+}
+
+const TURN_ACTIVITY: ReadonlySet<string> = new Set([
+  ZooidEventType.ToolCall,
+  ZooidEventType.ToolCallUpdate,
+  ZooidEventType.Plan,
+]);
+
+/**
+ * Groups agent activity into turns. The daemon sends no turn.start, so a turn
+ * is an agent's activity in one session up to its next turn.end.
+ */
+function indexTurns(events: readonly MatrixEvent[]): TurnIndex {
+  const ends = new Map<string, number[]>();
+  const responses = new Map<string, MatrixEvent>();
+  const approvalInputs = new Map<string, Record<string, unknown>>();
+  for (const ev of events) {
+    const type = ev.getType();
+    if (type === ZooidEventType.TurnEnd) {
+      const session = (ev.getContent() as { session_id?: unknown }).session_id;
+      if (typeof session === "string") push(ends, `${ev.getSender()}|${session}`, ev.getTs());
+    } else if (type === ApprovalEventType.Response) {
+      const r = decodeApprovalResponse(ev);
+      if (r && !responses.has(r.approvalId)) responses.set(r.approvalId, ev);
+    } else if (type === ApprovalEventType.Request) {
+      const r = decodeApprovalRequest(ev);
+      const input = r?.toolInput;
+      if (r && input && typeof input === "object" && !Array.isArray(input))
+        approvalInputs.set(r.toolCallId, input as Record<string, unknown>);
+    }
+  }
+  for (const list of ends.values()) list.sort((a, b) => a - b);
+
+  const turns = new Map<string, TurnBuild>();
+  const turnOf = new Map<string, TurnBuild>();
+  for (const ev of events) {
+    if (!TURN_ACTIVITY.has(ev.getType())) continue;
+    const decoded = decodeZooidEvent(ev);
+    const id = ev.getId();
+    if (!decoded || !id || decoded.kind === "error" || !decoded.sessionId) continue;
+    const key = `${ev.getSender()}|${decoded.sessionId}`;
+    const turnEnds = ends.get(key) ?? [];
+    const n = turnEnds.filter((t) => t < ev.getTs()).length;
+    let turn = turns.get(`${key}|${n}`);
+    if (!turn) {
+      const rel = ev.getRelation();
+      turn = {
+        id: `${key}|${n}`,
+        anchorId: id,
+        sender: ev.getSender() ?? "",
+        sessionId: decoded.sessionId,
+        threadRootId: rel?.rel_type === "m.thread" ? (rel.event_id ?? null) : null,
+        events: [],
+        endedAt: turnEnds[n] ?? null,
+      };
+      turns.set(turn.id, turn);
+    }
+    turn.events.push({ decoded, ts: ev.getTs() });
+    turnOf.set(id, turn);
+  }
+  return { turnOf, ends, responses, approvalInputs };
 }
 
 /**
@@ -115,7 +213,7 @@ function indexRelations(events: readonly MatrixEvent[], room: Room | null): Rela
       push(threads, rel.event_id, ev);
     }
   }
-  return { redactions, reactions, edits, threads };
+  return { redactions, reactions, edits, threads, turns: indexTurns(events) };
 }
 
 function push<K, V>(map: Map<K, V[]>, key: K, value: V) {
@@ -166,7 +264,8 @@ function editedContent(ev: MatrixEvent, edits: RelationIndex["edits"]): IContent
 function classify(
   ev: MatrixEvent,
   room: Room | null,
-  redactions: RelationIndex["redactions"],
+  roster: Roster | null,
+  { redactions, turns }: RelationIndex,
 ): Pick<TimelineMessage, "kind" | "body" | "raw"> | null {
   const type = ev.getType();
   if (type === "m.room.message") {
@@ -212,26 +311,66 @@ function classify(
   }
   if (type === "dev.zooid.session_reset")
     return { kind: "divider", body: "New session" };
-  if (type === ApprovalEventType.Request)
-    return { kind: "approval", body: "", raw: ev };
+  if (type === ApprovalEventType.Request) {
+    const raw = toApprovalView(ev, turns, room, roster);
+    return raw ? { kind: "approval", body: "", raw } : null;
+  }
   if (type === ElicitationEventType.Request)
     return { kind: "question", body: "", raw: ev };
   if (isZooidLifecycle(ev)) {
     const decoded = decodeZooidEvent(ev);
-    // turn.start renders nothing; tool_call_update folds into its tool_call card.
-    if (
-      !decoded ||
-      decoded.kind === "turn.start" ||
-      decoded.kind === "tool_call_update"
-    )
-      return null;
-    return {
-      kind: decoded.kind === "error" ? "error" : "agent-turn",
-      body: "",
-      raw: decoded,
-    };
+    if (decoded?.kind === "error") return { kind: "error", body: "", raw: decoded };
+    // A turn renders once, at its first event; turn.end and the rest fold into it.
+    const turn = turns.turnOf.get(ev.getId() ?? "");
+    if (!turn || turn.anchorId !== ev.getId()) return null;
+    const raw = toAgentTurn(turn, turns, room, roster);
+    return raw.items.length > 0 ? { kind: "agent-turn", body: "", raw } : null;
   }
   return null;
+}
+
+function toAgentTurn(
+  turn: TurnBuild,
+  turns: TurnIndex,
+  room: Room | null,
+  roster: Roster | null,
+): AgentTurn {
+  return {
+    id: turn.id,
+    sessionId: turn.sessionId,
+    agent: toActor(turn.sender, room, roster),
+    threadRootId: turn.threadRootId,
+    items: toTranscriptItems(turn.events, turns.approvalInputs),
+    startedAt: turn.events[0]!.ts,
+    endedAt: turn.endedAt,
+  };
+}
+
+function toApprovalView(
+  ev: MatrixEvent,
+  turns: TurnIndex,
+  room: Room | null,
+  roster: Roster | null,
+): ApprovalView | null {
+  const request = decodeApprovalRequest(ev);
+  if (!request) return null;
+  const responseEv = turns.responses.get(request.approvalId);
+  const response = responseEv ? decodeApprovalResponse(responseEv) : null;
+  const ends = turns.ends.get(`${ev.getSender()}|${request.sessionId}`) ?? [];
+  return {
+    request,
+    resolution:
+      response && responseEv
+        ? {
+            decision: response.decision,
+            optionId: response.optionId,
+            respondedBy: response.respondedBy,
+            respondedAt: responseEv.getTs(),
+          }
+        : null,
+    expired: !response && ends.some((t) => t > ev.getTs()),
+    viewerIsAgent: !!room && !!roster?.isAgent(room.myUserId),
+  };
 }
 
 function toMessage(
@@ -241,7 +380,7 @@ function toMessage(
   index: RelationIndex,
   me: string | null,
 ): TimelineMessage | null {
-  const base = classify(ev, room, index.redactions);
+  const base = classify(ev, room, roster, index);
   const redacted = isRedacted(ev, index.redactions, room);
   if (!base) return null;
   const id = ev.getId() ?? `${ev.getType()}-${ev.getTs()}`;
@@ -375,4 +514,15 @@ export function toTimelineMessages(
   roster: Roster | null,
 ): TimelineMessage[] {
   return toTimelineEntries(events, room, roster).map((e) => e.message);
+}
+
+/** Agent turns with no turn.end yet, oldest first. */
+export function toOpenTurns(
+  events: readonly MatrixEvent[],
+  room: Room | null,
+  roster: Roster | null,
+): AgentTurn[] {
+  const turns = indexTurns(events);
+  const open = new Set([...turns.turnOf.values()].filter((t) => t.endedAt === null));
+  return [...open].map((t) => toAgentTurn(t, turns, room, roster));
 }

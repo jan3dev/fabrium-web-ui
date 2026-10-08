@@ -1,5 +1,7 @@
+import type { PlanBoardEntry } from "@/events/zooid-events";
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon, ListChecksIcon } from "@/components/icons";
 import type { PlanSnapshot } from "@/hooks/use-plan";
+import { cn } from "@/lib/utils";
 
 interface PlanBoardProps {
   plan: PlanSnapshot | null;
@@ -13,9 +15,9 @@ export function PlanBoard({ plan, collapsed, onCollapse, onExpand, onDismiss }: 
   if (!plan || plan.entries.length === 0) return null;
   const done = plan.entries.filter((e) => e.status === "completed").length;
   return (
-    <div className="rounded-md border border-border bg-muted/30 px-2.5 py-2">
-      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <ListChecksIcon className="h-3.5 w-3.5 shrink-0" />
+    <div className="rounded-card border border-surface-border-primary bg-surface-secondary px-3 py-2">
+      <div className="flex items-center gap-1.5 text-caption1 font-semibold text-text-secondary">
+        <ListChecksIcon className="size-3.5 shrink-0" />
         <span>Plan</span>
         <span className="tabular-nums">
           {done}/{plan.entries.length}
@@ -25,46 +27,42 @@ export function PlanBoard({ plan, collapsed, onCollapse, onExpand, onDismiss }: 
             type="button"
             aria-label={collapsed ? "Expand plan" : "Collapse plan"}
             onClick={collapsed ? onExpand : onCollapse}
-            className="rounded p-0.5 hover:bg-muted"
+            className="rounded-utility p-0.5 hover:bg-surface-tertiary"
           >
-            {collapsed ? (
-              <ChevronDownIcon className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronUpIcon className="h-3.5 w-3.5" />
-            )}
+            {collapsed ? <ChevronDownIcon className="size-3.5" /> : <ChevronUpIcon className="size-3.5" />}
           </button>
           <button
             type="button"
             aria-label="Dismiss plan"
             onClick={onDismiss}
-            className="rounded p-0.5 hover:bg-muted"
+            className="rounded-utility p-0.5 hover:bg-surface-tertiary"
           >
-            <CloseIcon className="h-3.5 w-3.5" />
+            <CloseIcon className="size-3.5" />
           </button>
         </div>
       </div>
-      {!collapsed && (
-        <ul className="mt-1 space-y-0.5 text-sm">
-          {plan.entries.map((e, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <span className={statusBullet(e.status)} aria-label={e.status} />
-              <span
-                className={
-                  e.status === "completed" ? "line-through text-muted-foreground" : "text-foreground"
-                }
-              >
-                {e.content}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {!collapsed && <PlanEntryList entries={plan.entries} className="mt-1" />}
     </div>
   );
 }
 
+export function PlanEntryList({ entries, className }: { entries: PlanBoardEntry[]; className?: string }) {
+  return (
+    <ul className={cn("space-y-0.5 text-body2", className)}>
+      {entries.map((e, i) => (
+        <li key={i} className="flex items-start gap-2">
+          <span className={statusBullet(e.status)} aria-label={e.status} />
+          <span className={e.status === "completed" ? "text-text-tertiary line-through" : "text-text-primary"}>
+            {e.content}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function statusBullet(status: string) {
-  const base = "mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full ";
+  const base = "mt-1.5 inline-block size-2 shrink-0 rounded-full ";
   switch (status) {
     case "completed":
       return base + "bg-accent-success";
@@ -72,8 +70,8 @@ function statusBullet(status: string) {
       return base + "bg-accent-warning animate-pulse";
     case "failed":
     case "cancelled":
-      return base + "bg-destructive";
+      return base + "bg-accent-danger";
     default:
-      return base + "bg-muted-foreground/40";
+      return base + "bg-text-tertiary";
   }
 }

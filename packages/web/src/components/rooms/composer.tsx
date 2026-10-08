@@ -6,10 +6,7 @@ import { setQuoteDraft, useQuoteDraft } from "@/lib/quote-draft-store";
 import { QuoteChip } from "./quote-chip";
 import { MessageInput, type MessageInputSubmit } from "./message-input";
 import { useMatrixClient } from "../../hooks/use-matrix-client";
-import { StopIcon } from "@/components/icons";
-import { Button } from "@/components/ui/button";
 import { allRoomEvents } from "../../hooks/use-timeline";
-import { useTyping } from "../../hooks/use-typing";
 import { useMediaUpload } from "../../hooks/use-media-upload";
 
 export interface ComposerProps {
@@ -38,7 +35,6 @@ export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }:
   const threadScoped = Boolean(threadRootEventId);
   const threadId = threadRootEventId ?? null;
   const quoteDraft = useQuoteDraft(roomId, threadId);
-  const typingUserIds = useTyping(roomId);
 
   /**
    * Send one event. When the server rejects it, the SDK keeps a NOT_SENT local
@@ -136,31 +132,6 @@ export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }:
     }
   }
 
-  async function stop(): Promise<void> {
-    if (!threadId) return;
-    const slash = parseSlashCommand("/stop", { threadScoped: true });
-    if (!slash) return;
-    setError(null);
-    try {
-      await sendEvent(
-        slash.eventType,
-        { ...slash.content, "m.relates_to": { rel_type: "m.thread", event_id: threadId } },
-        { tile: false },
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  // A running agent types in the room; in a thread that means Stop applies.
-  const stopButton =
-    threadId && typingUserIds.length > 0 ? (
-      <Button type="button" size="xs" variant="outline" aria-label="Stop agent" onClick={() => void stop()}>
-        <StopIcon />
-        Stop
-      </Button>
-    ) : null;
-
   const header = (
     <>
       {quoteDraft && (
@@ -182,7 +153,6 @@ export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }:
       error={error}
       onError={setError}
       header={header}
-      extraActions={stopButton}
       placeholder={threadScoped ? "Reply in thread…" : undefined}
       onSubmit={send}
     />

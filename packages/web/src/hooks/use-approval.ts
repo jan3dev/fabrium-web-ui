@@ -1,30 +1,20 @@
-import type { MatrixEvent } from "matrix-js-sdk";
 import { useCallback, useRef, useState } from "react";
 import { MatrixClientPeg } from "../client/peg";
-import {
-  ApprovalEventType,
-  type ApprovalDecision,
-  type ApprovalResponse,
-  decodeApprovalRequest,
-  findResolvingResponse,
-} from "../events/approval";
-import { useTimeline } from "./use-timeline";
+import { ApprovalEventType, type ApprovalDecision, type ApprovalRequest } from "../events/approval";
 
 export type ApprovalState = "pending" | "sending" | "resolved" | "error";
 
 export interface UseApproval {
   state: ApprovalState;
-  resolution: ApprovalResponse | null;
   error: string | null;
   send: (decision: ApprovalDecision, optionId?: string) => Promise<void>;
 }
 
-export function useApproval(requestEvent: MatrixEvent): UseApproval {
-  const decoded = decodeApprovalRequest(requestEvent);
-  const roomId = requestEvent.getRoomId() ?? "";
-  const { events } = useTimeline(roomId);
-  const resolution = decoded ? findResolvingResponse(events, decoded.approvalId) : null;
-
+/**
+ * Sends the response to one approval request. `resolved` comes from the view
+ * model: once anyone has answered, send() does nothing.
+ */
+export function useApproval(roomId: string, request: ApprovalRequest, resolved: boolean): UseApproval {
   const [sendingState, setSendingState] = useState<{ sending: boolean; error: string | null }>({
     sending: false,
     error: null,
@@ -33,45 +23,38 @@ export function useApproval(requestEvent: MatrixEvent): UseApproval {
 
   const send = useCallback(
     async (decision: ApprovalDecision, optionId?: string) => {
-      if (!decoded) return;
-      if (resolution) return;
-      if (inFlight.current) return;
+      if (resolved || inFlight.current) return;
       inFlight.current = true;
       setSendingState({ sending: true, error: null });
       try {
-        const client = MatrixClientPeg.get();
         const content: Record<string, unknown> = {
-          approval_id: decoded.approvalId,
-          session_id: decoded.sessionId,
+          approval_id: request.approvalId,
+          session_id: request.sessionId,
           decision,
         };
         if (optionId) content.option_id = optionId;
         // sendEvent's TimelineEvents type doesn't know about dev.zooid.* types;
         // the SDK accepts arbitrary event types at runtime.
-        await (client.sendEvent as (
+        await (MatrixClientPeg.get().sendEvent as (
           roomId: string,
           type: string,
           content: Record<string, unknown>,
         ) => Promise<{ event_id: string }>)(roomId, ApprovalEventType.Response, content);
-        // Stay back in "pending" awaiting the timeline echo, but keep
-        // inFlight=true so a fast double-click can't fire a second send.
-        // Only an error or the resolution event flips us out of this lock.
+        // Back to "pending" until the response echoes in, keeping inFlight so a
+        // fast double-click can't send twice. Only an error releases the lock.
         setSendingState({ sending: false, error: null });
       } catch (e) {
-        setSendingState({
-          sending: false,
-          error: e instanceof Error ? e.message : String(e),
-        });
+        setSendingState({ sending: false, error: e instanceof Error ? e.message : String(e) });
         inFlight.current = false;
       }
     },
-    [decoded, resolution, roomId],
+    [request.approvalId, request.sessionId, resolved, roomId],
   );
 
   let state: ApprovalState = "pending";
-  if (resolution) state = "resolved";
+  if (resolved) state = "resolved";
   else if (sendingState.error) state = "error";
   else if (sendingState.sending) state = "sending";
 
-  return { state, resolution, error: sendingState.error, send };
+  return { state, error: sendingState.error, send };
 }

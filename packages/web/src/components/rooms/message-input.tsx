@@ -129,8 +129,6 @@ export interface MessageInputProps {
   ariaLabel?: string;
   /** Show the send button in the toolbar. */
   sendButton?: boolean;
-  /** Extra controls beside the send button, like Stop. */
-  extraActions?: ReactNode;
   error?: string | null;
   onError?: (message: string | null) => void;
   /** Rendered between the error and the field, e.g. a quote chip. */
@@ -162,7 +160,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
       placeholder = "Send a message…",
       ariaLabel = "Message",
       sendButton = true,
-      extraActions,
       error = null,
       onError,
       header,
@@ -596,7 +593,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
             onEmoji={(emoji) =>
               editor.editor?.chain().focus().insertContent(emoji).run()
             }
-            extraActions={extraActions}
             sendButton={sendButton}
             sendDisabled={
               disabled ||

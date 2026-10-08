@@ -1,154 +1,79 @@
-// Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/agents/ui/AgentSessionToolItem/ToolItem.tsx. Modified.
+// Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/agents/ui/AgentSessionToolItem/ToolItem.tsx, CompactToolSummaryRow.tsx. Modified.
 import * as React from "react";
 
 import {
-  resolveUserLabel,
-  type UserProfileLookup,
-} from "@/features/profile/lib/identity";
-import { cn } from "@/shared/lib/cn";
-import { normalizePubkey } from "@/shared/lib/pubkey";
-import type { TranscriptItem } from "../agentSessionTypes";
-import { getBuzzToolInfo } from "../agentSessionToolCatalog";
-import { buildCompactToolSummary } from "../agentSessionToolSummary";
-import type { AgentTranscriptIdentityProps } from "../activityRenderClasses/types";
-import {
-  formatTranscriptTimestampTitle,
-  getToolDurationDisplay,
-} from "../agentSessionUtils";
-import { CompactMessageSummary } from "./CompactMessageSummary";
-import {
-  CompactToolSummaryRow,
-  compactSummaryTone,
-} from "./CompactToolSummaryRow";
-import { getSentMessageLink } from "./messageLinks";
-import { isTodoSummary, TodoToolSummary } from "./TodoToolSummary";
-import { ToolDetailBlocks } from "./ToolDetailBlocks";
+  CheckIcon,
+  CloseIcon,
+  FileEditIcon,
+  FileSearchIcon,
+  GlobeIcon,
+  LoaderIcon,
+  SearchIcon,
+  TerminalIcon,
+  WarningIcon,
+} from "@/components/icons";
+import { buildToolSummary, isToolRunning } from "@/lib/agent-activity/tool-summary";
+import { formatDuration } from "@/lib/time";
+import type { ToolTranscriptItem } from "@/model/agent-activity";
+import { ActivityRow, ActivityRowContent, ActivityRowLabel } from "./activity-row";
+import { ToolDetailBlocks } from "./tool-detail-blocks";
 
-export function ToolItem({
-  agentAvatarUrl,
-  agentName,
-  agentPubkey,
-  item,
-  profiles,
-}: AgentTranscriptIdentityProps & {
-  item: Extract<TranscriptItem, { type: "tool" }>;
-  profiles?: UserProfileLookup;
-}) {
-  const [isExpanded, setIsExpanded] = React.useState(false);
-  const hasArgs = Object.keys(item.args).length > 0;
-  const hasResult = item.result.trim().length > 0;
-  const canonicalToolName = item.buzzToolName ?? item.toolName;
-  const buzzTool = getBuzzToolInfo(canonicalToolName);
-  const compactSummary = buildCompactToolSummary(item);
-  const duration = getToolDurationDisplay(item);
-  const messageLink = getSentMessageLink(item);
-  const timestampTitle = formatTranscriptTimestampTitle(item.timestamp);
-  const agentProfile = profiles?.[normalizePubkey(agentPubkey)] ?? null;
-  const agentLabel = resolveUserLabel({
-    pubkey: agentPubkey,
-    fallbackName: agentName,
-    profiles,
-    preferResolvedSelfLabel: true,
-  });
-  const agentResolvedAvatarUrl = agentProfile?.avatarUrl ?? agentAvatarUrl;
-  const handleToggle = React.useCallback(
-    (event: React.SyntheticEvent<HTMLDetailsElement>) => {
-      setIsExpanded(event.currentTarget.open);
-    },
-    [],
-  );
+const STALL_THRESHOLD_MS = 5 * 60 * 1000;
+const STALL_TICK_MS = 30 * 1000;
 
-  if (compactSummary.presentation === "message") {
-    return (
-      <div
-        className="not-prose w-full"
-        data-testid="transcript-tool-item"
-        title={timestampTitle}
-      >
-        <CompactMessageSummary
-          args={item.args}
-          avatarUrl={agentResolvedAvatarUrl}
-          description={buzzTool?.label}
-          displayName={agentLabel}
-          duration={duration}
-          hasArgs={hasArgs}
-          hasResult={hasResult}
-          isError={item.isError || item.status === "failed"}
-          label={compactSummary.label}
-          messageLink={messageLink}
-          preview={compactSummary.preview}
-          pubkey={agentPubkey}
-          result={item.result}
-          timestamp={item.timestamp}
-        />
-      </div>
-    );
+const KIND_ICONS: Record<string, typeof TerminalIcon> = {
+  edit: FileEditIcon,
+  delete: FileEditIcon,
+  move: FileEditIcon,
+  read: FileSearchIcon,
+  search: SearchIcon,
+  fetch: GlobeIcon,
+};
+
+/**
+ * Re-renders periodically while a tool call could still turn "stalled". Stops
+ * once the call resolves.
+ */
+function useStalenessTick(active: boolean): number {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), STALL_TICK_MS);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+function StatusMark({ status }: { status: ToolTranscriptItem["status"] | "stalled" }) {
+  switch (status) {
+    case "completed":
+      return <CheckIcon aria-label="completed" className="size-3.5 shrink-0 text-accent-success" />;
+    case "failed":
+      return <CloseIcon aria-label="failed" className="size-3.5 shrink-0 text-accent-danger" />;
+    case "stalled":
+      return <WarningIcon aria-label="stalled" className="size-3.5 shrink-0 text-accent-warning" />;
+    default:
+      return <LoaderIcon aria-label="running" className="size-3.5 shrink-0 animate-spin text-text-tertiary" />;
   }
+}
 
-  if (isTodoSummary(compactSummary)) {
-    return (
-      <div
-        className="not-prose w-full"
-        data-testid="transcript-tool-item"
-        title={timestampTitle}
-      >
-        <TodoToolSummary
-          duration={duration}
-          fallbackPreview={compactSummary.preview}
-          item={item}
-        />
-      </div>
-    );
-  }
-
+/** One tool call: a summary line that expands to its input, diff and output. */
+export function ToolItem({ item }: { item: ToolTranscriptItem }) {
+  const summary = buildToolSummary(item);
+  const running = isToolRunning(item);
+  const now = useStalenessTick(running);
+  const stalled = running && now - item.lastActivityAt > STALL_THRESHOLD_MS;
+  const Icon = KIND_ICONS[item.toolKind] ?? TerminalIcon;
+  const took = running ? 0 : item.lastActivityAt - item.startedAt;
   return (
-    <div
-      className="not-prose w-full"
-      data-testid="transcript-tool-item"
-      title={timestampTitle}
-    >
-      <details
-        className="group w-full"
-        onToggle={handleToggle}
-        open={isExpanded}
-      >
-        <summary
-          className={cn(
-            "group/row flex min-h-6 max-w-full cursor-pointer list-none items-center gap-1.5",
-            compactSummaryTone(),
-          )}
-        >
-          <CompactToolSummaryRow
-            action={compactSummary.action}
-            duration={duration}
-            fileEditSummary={compactSummary.fileEditSummary}
-            kind={compactSummary.kind}
-            preview={compactSummary.preview}
-            thumbnailSrc={compactSummary.thumbnailSrc}
-            label={compactSummary.label}
-          />
-        </summary>
-
-        <ToolDetailBlocks
-          args={item.args}
-          description={buzzTool?.label}
-          fileEditDiff={compactSummary.fileEditDiff}
-          fileReadContent={compactSummary.fileReadContent}
-          hasArgs={hasArgs}
-          hasResult={hasResult}
-          imagePreview={
-            compactSummary.imageContent != null && isExpanded
-              ? {
-                  src: compactSummary.imageContent.src,
-                  title: compactSummary.imageContent.title,
-                }
-              : null
-          }
-          isError={item.isError}
-          result={item.result}
-          shellCommand={compactSummary.shellContent}
-        />
-      </details>
-    </div>
+    <ActivityRow testId="transcript-tool-item" title={summary.objectTitle ?? undefined}>
+      <Icon className="size-3.5 shrink-0 text-text-tertiary" />
+      <ActivityRowLabel verb={summary.verb} object={summary.object} stats={summary.stats} />
+      <StatusMark status={stalled ? "stalled" : item.status} />
+      {took >= 1000 ? <span className="shrink-0 text-caption1 text-text-tertiary">{formatDuration(took)}</span> : null}
+      <ActivityRowContent>
+        <ToolDetailBlocks item={item} summary={summary} stalled={stalled} />
+      </ActivityRowContent>
+    </ActivityRow>
   );
 }

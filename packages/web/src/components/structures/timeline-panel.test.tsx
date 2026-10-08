@@ -41,44 +41,26 @@ describe("<TimelinePanel />", () => {
     await waitFor(() => expect(screen.getByText("hello world")).toBeInTheDocument());
   });
 
-  it("renders dev.zooid.agent_message_chunk events with their content", async () => {
+  it("groups an agent's tool calls into one turn block", async () => {
+    const tool = (id: string, title: string) => ({
+      type: "dev.zooid.tool_call",
+      sender: "@architect.acme:h.example",
+      content: { session_id: "s1", tool_call_id: id, title, kind: "execute" },
+    });
     stubSyncWithRooms(HS, [
       {
         roomId,
         myUserId: me,
         state: [{ type: "m.room.name", sender: me, stateKey: "", content: { name: "alpha" } }],
-        timeline: [
-          {
-            type: "dev.zooid.agent_message_chunk",
-            sender: "@architect.acme:h.example",
-            content: { session_id: "s1", content: "agent thinking…" },
-          },
-        ],
+        timeline: [tool("tc1", "Bash"), tool("tc2", "Grep")],
       },
     ]);
     render(<App config={{ homeserverUrl: HS }} initialRoute={`/room/${roomId}`} />);
-    await waitFor(() => expect(screen.getByText("agent thinking…")).toBeInTheDocument());
-  });
-
-  it("renders dev.zooid.tool_call as a (placeholder) collapsible card", async () => {
-    stubSyncWithRooms(HS, [
-      {
-        roomId,
-        myUserId: me,
-        state: [{ type: "m.room.name", sender: me, stateKey: "", content: { name: "alpha" } }],
-        timeline: [
-          {
-            type: "dev.zooid.tool_call",
-            sender: "@architect.acme:h.example",
-            content: { session_id: "s1", tool_call_id: "tc1", title: "Bash", kind: "execute" },
-          },
-        ],
-      },
-    ]);
-    render(<App config={{ homeserverUrl: HS }} initialRoute={`/room/${roomId}`} />);
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /bash/i })).toBeInTheDocument(),
-    );
+    const turn = await screen.findByTestId("agent-turn");
+    expect(screen.getAllByTestId("agent-turn")).toHaveLength(1);
+    expect(turn).toHaveTextContent(/is working · 2 tools/);
+    expect(turn).toHaveTextContent("Bash");
+    expect(turn).toHaveTextContent("Grep");
   });
 
   it("does not render unknown dev.zooid.* events (forward-compat)", async () => {

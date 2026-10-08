@@ -2,7 +2,9 @@
 import type { MatrixEvent } from "matrix-js-sdk";
 import type * as React from "react";
 
+import { TurnBlock } from "@/components/agents/activity/turn-block";
 import type { DecodedZooidEvent } from "@/events/zooid-events";
+import type { AgentTurn, ApprovalView } from "@/model/agent-activity";
 import type { TimelineEntry } from "@/model/types";
 import { ApprovalCard } from "./approval-card";
 import { ErrorTile } from "./error-tile";
@@ -10,7 +12,6 @@ import { MessageRow, type MessageRowActions } from "./message-row";
 import { QuestionCard } from "./question-card";
 import { SystemRow } from "./system-row";
 import { TimelineGap } from "./timeline-gap";
-import { ZooidEventTile } from "./zooid-event";
 
 export interface TimelineRowProps {
   entry: TimelineEntry;
@@ -68,17 +69,17 @@ export function TimelineRow({
         </div>
       );
     }
-    // ponytail: the agent cards still read Matrix events; W5 moves them onto the view model.
     case "approval":
       return (
         <AgentCard>
-          <ApprovalCard event={message.raw as MatrixEvent} />
+          <ApprovalCard roomId={roomId} approval={message.raw as ApprovalView} agent={message.author} />
         </AgentCard>
       );
+    // ponytail: the question card still reads its Matrix event; its hooks need the event's relations.
     case "question":
       return (
         <AgentCard>
-          <QuestionCard event={message.raw as MatrixEvent} />
+          <QuestionCard event={message.raw as MatrixEvent} agent={message.author} />
         </AgentCard>
       );
     case "error":
@@ -90,12 +91,7 @@ export function TimelineRow({
     case "agent-turn":
       return (
         <AgentCard>
-          <ZooidEventTile
-            decoded={message.raw as DecodedZooidEvent}
-            sender={message.author.id}
-            roomId={roomId}
-            ts={message.createdAt}
-          />
+          <TurnBlock turn={message.raw as AgentTurn} />
         </AgentCard>
       );
   }

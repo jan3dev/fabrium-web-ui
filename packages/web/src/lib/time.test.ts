@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDayDivider, formatRelativeTime, isSameDay } from "./time";
+import { formatDayDivider, formatDuration, formatRelativeTime, isSameDay } from "./time";
 
 // Build local-time timestamps so they line up with the local-calendar logic in
 // isSameDay (which uses getFullYear/getMonth/getDate).
@@ -47,5 +47,14 @@ describe("formatDayDivider", () => {
 
   it("labels older days with a full date containing the year", () => {
     expect(formatDayDivider(at(2026, 6, 14, 12, 0), now)).toMatch(/2026/);
+  });
+});
+
+describe("formatDuration", () => {
+  it("scales from seconds to hours", () => {
+    expect(formatDuration(42_400)).toBe("42s");
+    expect(formatDuration(192_000)).toBe("3m 12s");
+    expect(formatDuration(120_000)).toBe("2m");
+    expect(formatDuration(3_900_000)).toBe("1h 5m");
   });
 });

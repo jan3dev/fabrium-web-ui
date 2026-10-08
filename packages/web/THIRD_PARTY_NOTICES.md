@@ -64,6 +64,17 @@ Derived files:
 - `src/components/rooms/emoji-autocomplete.tsx` ← `desktop/src/features/messages/ui/EmojiAutocomplete.tsx`
 - `src/components/rooms/composer-attachments.tsx` ← `desktop/src/features/messages/ui/ComposerAttachments.tsx`
 - `src/components/rooms/typing-indicator.tsx` ← `desktop/src/features/messages/ui/TypingIndicatorRow.tsx`
+- `src/model/agent-activity.ts` ← `desktop/src/features/agents/ui/agentSessionTypes.ts`
+- `src/lib/agent-activity/tool-summary.ts` ← `desktop/src/features/agents/ui/agentSessionToolSummary.ts`
+- `src/components/agents/activity/activity-row.tsx` ← `desktop/src/features/agents/ui/activityRenderClasses/ActivityRow.tsx`
+- `src/components/agents/activity/plan-activity.tsx` ← `desktop/src/features/agents/ui/activityRenderClasses/PlanActivity.tsx`
+- `src/components/agents/activity/tool-item.tsx` ← `desktop/src/features/agents/ui/AgentSessionToolItem/ToolItem.tsx`, `CompactToolSummaryRow.tsx`
+- `src/components/agents/activity/tool-detail-blocks.tsx` ← `desktop/src/features/agents/ui/AgentSessionToolItem/ToolDetailBlocks.tsx`
+- `src/components/agents/activity/tool-shell-command.tsx` ← `desktop/src/features/agents/ui/AgentSessionToolItem/ShellCommandBlock.tsx`
+- `src/components/agents/activity/turn-block.tsx` ← `desktop/src/features/agents/ui/AgentSessionTranscriptList.tsx`
+- `src/components/agents/turn-liveness.tsx` ← `desktop/src/features/agents/ui/TurnLivenessIndicator.tsx`
+- `src/components/rooms/agent-activity-bar.tsx` ← `desktop/src/features/channels/ui/BotActivityBar.tsx`
+- `src/components/timeline/approval-card-view.tsx` ← `desktop/src/features/workflows/ui/WorkflowApprovalCard.tsx`
 
 ## Apache License 2.0
 

@@ -1,132 +1,116 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/agents/ui/agentSessionToolSummary.ts. Modified.
-import type {
-  AgentActivityAction,
-  ToolStatus,
-  TranscriptItem,
-} from "./agentSessionTypes";
-import type { AgentActivityDescriptor } from "./agentSessionTypes";
-import { getToolString } from "./agentSessionUtils";
-import { classifyToolItem } from "./agentSessionToolClassifier";
-import {
-  buildFileEditDiff,
-  type FileEditDiff,
-  type FileEditDiffSummary,
-} from "./agentSessionFileEditDiff";
-import {
-  buildFileReadContent,
-  buildSkillReadContent,
-  type FileReadContent,
-} from "./agentSessionFileRead";
-import {
-  buildImageContent,
-  type ImageToolContent,
-} from "./agentSessionImageContent";
+// The one-line label of a tool call ("Edited auth.ts +4 -1") and the parts its
+// detail view shows. Zooid sends ACP tool kinds, so the kind picks the verb;
+// Buzz's per-tool-name classifier has nothing to match here.
+import type { DiffBlock } from "@/events/zooid-events";
+import { lineDiff } from "@/lib/line-diff";
+import type { ToolTranscriptItem } from "@/model/agent-activity";
 
-export type CompactToolKind =
-  | "message"
-  | "relay-op"
-  | "file-edit"
-  | "file-read"
-  | "skill-read"
-  | "image"
-  | "shell"
-  | "status"
-  | "thought"
-  | "plan"
-  | "permission"
-  | "error"
-  | "generic"
-  | "raw-rail"
-  | "suppressed";
+export interface ToolSummary {
+  verb: string;
+  /** What the tool acted on: a file name, command, URL or query. */
+  object: string | null;
+  /** The full form of `object`, e.g. the whole path. */
+  objectTitle: string | null;
+  /** The command, for shell tools. */
+  shellCommand: string | null;
+  /** Diffs from the tool's output, else from an old/new string pair in its input. */
+  diffs: DiffBlock[];
+  stats: { additions: number; deletions: number } | null;
+}
 
-export type CompactToolSummary = {
-  action: AgentActivityAction | null;
-  kind: CompactToolKind;
-  label: string;
-  preview: string | null;
-  fileEditSummary: FileEditDiffSummary | null;
-  fileEditDiff: FileEditDiff | null;
-  fileReadContent: FileReadContent | null;
-  imageContent: ImageToolContent | null;
-  shellContent: string | null;
-  /** When set, the compact row renders a tiny image instead of text preview. */
-  thumbnailSrc: string | null;
-  presentation: "inline" | "message";
-  descriptor: AgentActivityDescriptor;
+// [finished, running]
+const VERBS: Record<string, [string, string]> = {
+  read: ["Read", "Reading"],
+  edit: ["Edited", "Editing"],
+  delete: ["Deleted", "Deleting"],
+  move: ["Moved", "Moving"],
+  search: ["Searched", "Searching"],
+  execute: ["Ran", "Running"],
+  think: ["Thought", "Thinking"],
+  fetch: ["Fetched", "Fetching"],
 };
 
-type ToolItem = Extract<TranscriptItem, { type: "tool" }>;
+const PATCH_FIELDS = new Set(["diff", "old_string", "new_string", "content"]);
 
-export type CompactFileEditSummary = FileEditDiffSummary;
+export function shortPath(p: string): string {
+  return p.split("/").filter(Boolean).pop() ?? p;
+}
 
-/** Build the muted compact summary label and preview for any tool row. */
-export function buildCompactToolSummary(item: ToolItem): CompactToolSummary {
-  const descriptor = item.descriptor ?? classifyToolItem(item);
-  const fileEditDiff = buildFileEditDiff(item, descriptor);
-  const fileEditSummary = fileEditDiff
-    ? {
-        path: fileEditDiff.path,
-        filename: fileEditDiff.filename,
-        additions: fileEditDiff.additions,
-        deletions: fileEditDiff.deletions,
-      }
-    : null;
-  const fileReadContent =
-    buildFileReadContent(item, descriptor) ??
-    buildSkillReadContent(item, descriptor);
-  const imageContent = buildImageContent(item, descriptor);
-  const shellContent = buildShellContent(item, descriptor);
-  const thumbnailSrc = imageContent?.src ?? null;
-  const failed = item.isError || item.status === "failed";
-  const running = item.status === "executing" || item.status === "pending";
+const str = (v: unknown): string | null =>
+  typeof v === "string" && v ? v : null;
+
+function filePath(input: Record<string, unknown>): string | null {
+  return str(input.file_path) ?? str(input.filepath) ?? str(input.path);
+}
+
+/** What the tool acted on, as [short, full]. */
+function objectOf(item: ToolTranscriptItem): [string, string] | null {
+  const input = item.rawInput ?? {};
+  const fp = filePath(input);
+  const pick = (v: string | null): [string, string] | null =>
+    v ? [v, v] : null;
+  switch (item.toolKind) {
+    case "read":
+    case "edit":
+    case "delete":
+    case "move":
+      if (fp) return [shortPath(fp), fp];
+      break;
+    case "execute":
+      if (str(input.command)) return pick(str(input.command));
+      break;
+    case "fetch":
+      if (str(input.url)) return pick(str(input.url));
+      break;
+    case "search":
+      if (str(input.query) ?? str(input.pattern))
+        return pick(str(input.query) ?? str(input.pattern));
+      break;
+  }
+  for (const [k, v] of Object.entries(input)) {
+    if (!PATCH_FIELDS.has(k) && typeof v === "string" && v && v.length < 120)
+      return [v, v];
+  }
+  const loc = item.locations[0]?.path;
+  return loc ? [shortPath(loc), loc] : null;
+}
+
+function inputDiff(item: ToolTranscriptItem): DiffBlock | null {
+  const input = item.rawInput;
+  if (!input || typeof input.new_string !== "string") return null;
   return {
-    action: descriptor.action ?? null,
-    kind: descriptor.renderClass,
-    label: labelForStatus(descriptor, item.status, failed, running),
-    preview: fileEditSummary?.filename ?? descriptor.preview,
-    fileEditSummary,
-    fileEditDiff,
-    fileReadContent,
-    imageContent,
-    shellContent,
-    thumbnailSrc,
-    presentation: descriptor.renderClass === "message" ? "message" : "inline",
-    descriptor,
+    path: filePath(input) ?? item.title,
+    oldText: typeof input.old_string === "string" ? input.old_string : "",
+    newText: input.new_string,
   };
 }
 
-function labelForStatus(
-  descriptor: AgentActivityDescriptor,
-  status: ToolStatus,
-  failed: boolean,
-  running: boolean,
-) {
-  const label = descriptor.label;
-  if (descriptor.groupKey === "file-edit:str_replace") {
-    if (failed) return "Edit failed";
-    if (running) return "Editing file";
-    return "Edited file";
-  }
-  if (failed) {
-    return label.endsWith("failed") ? label : `${label} failed`;
-  }
-  if (running) return label;
-  if (status === "completed") return label;
-  return label;
+export function isToolRunning(item: ToolTranscriptItem): boolean {
+  return item.status === "pending" || item.status === "in_progress";
 }
 
-function buildShellContent(
-  item: ToolItem,
-  descriptor: AgentActivityDescriptor,
-): string | null {
-  const command = getToolString(item.args, ["command"]);
-  if (!command) {
-    return null;
+export function buildToolSummary(item: ToolTranscriptItem): ToolSummary {
+  const verbs = VERBS[item.toolKind];
+  const object = verbs ? objectOf(item) : null;
+  const fromInput = item.diffs.length === 0 ? inputDiff(item) : null;
+  const diffs = fromInput ? [fromInput] : item.diffs;
+  let stats: ToolSummary["stats"] = null;
+  for (const d of diffs) {
+    stats ??= { additions: 0, deletions: 0 };
+    for (const row of lineDiff(d.oldText, d.newText)) {
+      if (row.type === "add") stats.additions++;
+      else if (row.type === "del") stats.deletions++;
+    }
   }
-
-  if (descriptor.renderClass === "shell" || descriptor.source === "shell") {
-    return command;
-  }
-
-  return null;
+  return {
+    // A kind without a verb, or nothing to name, falls back to the agent's own title.
+    verb: verbs && object ? verbs[isToolRunning(item) ? 1 : 0] : item.title,
+    object: object?.[0] ?? null,
+    objectTitle: object?.[1] ?? null,
+    shellCommand:
+      item.toolKind === "execute" ? str(item.rawInput?.command) : null,
+    diffs,
+    stats,
+  };
 }

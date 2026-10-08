@@ -5,13 +5,15 @@ import { buildFormModel } from "../../lib/elicitation-form";
 import { useElicitation } from "../../hooks/use-elicitation";
 import { useMyPowerLevel } from "../../hooks/use-my-power-level";
 import { useUserName } from "../../hooks/use-user-name";
+import type { ActorSummary } from "@/model/types";
 import { QuestionCardView } from "./question-card-view";
 
-export function QuestionCard({ event }: { event: MatrixEvent }) {
+/** `agent` is the timeline author, labelled "Persona · Project" when the roster knows it. */
+export function QuestionCard({ event, agent }: { event: MatrixEvent; agent?: ActorSummary }) {
   const roomId = event.getRoomId() ?? "";
   const { decoded, state, resolution, rejection, error, send } = useElicitation(event);
   const power = useMyPowerLevel(roomId);
-  const agentName = useUserName(decoded?.sender ?? "", roomId);
+  const senderName = useUserName(decoded?.sender ?? "", roomId);
   const responder = useUserName(resolution?.respondedBy ?? "", roomId);
   const model = useMemo(
     () => (decoded ? buildFormModel(decoded.requestedSchema) : null),
@@ -22,7 +24,7 @@ export function QuestionCard({ event }: { event: MatrixEvent }) {
   if (!decoded || !model) return null;
   return (
     <QuestionCardView
-      agentName={agentName}
+      agentName={agent?.displayName ?? senderName}
       message={decoded.message}
       model={model}
       state={state}

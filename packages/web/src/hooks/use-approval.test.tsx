@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   makeFakeClient,
@@ -6,7 +6,7 @@ import {
   mkMatrixEvent,
   pushTimelineEvent,
 } from "../../test/factories";
-import { ApprovalEventType } from "../events/approval";
+import { ApprovalEventType, decodeApprovalRequest } from "../events/approval";
 import { MatrixClientPeg } from "../client/peg";
 import { useApproval } from "./use-approval";
 
@@ -29,15 +29,17 @@ function setup(opts: { sendEvent?: ReturnType<typeof vi.fn> } = {}) {
   (client as unknown as { sendEvent: unknown }).sendEvent =
     opts.sendEvent ?? vi.fn().mockResolvedValue({ event_id: "$resp1" });
   MatrixClientPeg.injectClientForTest(client);
-  return { client, room, requestEv };
+  return { client, room, request: decodeApprovalRequest(requestEv)! };
 }
+
+const resolved = false;
 
 afterEach(() => MatrixClientPeg.reset());
 
 describe("useApproval — pending state", () => {
   it("starts pending", () => {
-    const { requestEv } = setup();
-    const { result } = renderHook(() => useApproval(requestEv));
+    const { request } = setup();
+    const { result } = renderHook(() => useApproval(roomId, request, resolved));
     expect(result.current.state).toBe("pending");
   });
 });
@@ -45,8 +47,8 @@ describe("useApproval — pending state", () => {
 describe("useApproval — send", () => {
   it("send('allow') flips state to sending then back to pending awaiting timeline echo", async () => {
     const sendEvent = vi.fn().mockResolvedValue({ event_id: "$r1" });
-    const { requestEv } = setup({ sendEvent });
-    const { result } = renderHook(() => useApproval(requestEv));
+    const { request } = setup({ sendEvent });
+    const { result } = renderHook(() => useApproval(roomId, request, resolved));
 
     let p: Promise<void>;
     act(() => {
@@ -74,8 +76,8 @@ describe("useApproval — send", () => {
           resolveSend = () => res({ event_id: "$r1" });
         }),
     );
-    const { requestEv } = setup({ sendEvent });
-    const { result } = renderHook(() => useApproval(requestEv));
+    const { request } = setup({ sendEvent });
+    const { result } = renderHook(() => useApproval(roomId, request, resolved));
 
     act(() => {
       result.current.send("allow");
@@ -91,33 +93,21 @@ describe("useApproval — send", () => {
     });
   });
 
-  it("idempotency: once resolved by *anyone*, send() is a no-op", async () => {
+  it("idempotency: once resolved by *anyone*, send() is a no-op", () => {
     const sendEvent = vi.fn();
-    const { requestEv, room } = setup({ sendEvent });
-    const { result } = renderHook(() => useApproval(requestEv));
-
+    const { request } = setup({ sendEvent });
+    const { result } = renderHook(() => useApproval(roomId, request, true));
+    expect(result.current.state).toBe("resolved");
     act(() => {
-      pushTimelineEvent(
-        room,
-        mkMatrixEvent({
-          roomId,
-          sender: "@bob:h.example",
-          type: ApprovalEventType.Response,
-          content: { approval_id: "a1", decision: "allow" },
-        }),
-      );
-    });
-    await waitFor(() => expect(result.current.state).toBe("resolved"));
-    act(() => {
-      result.current.send("allow");
+      void result.current.send("allow");
     });
     expect(sendEvent).not.toHaveBeenCalled();
   });
 
   it("send error surfaces and re-enables the buttons", async () => {
     const sendEvent = vi.fn().mockRejectedValue(new Error("M_FORBIDDEN"));
-    const { requestEv } = setup({ sendEvent });
-    const { result } = renderHook(() => useApproval(requestEv));
+    const { request } = setup({ sendEvent });
+    const { result } = renderHook(() => useApproval(roomId, request, resolved));
     await act(async () => {
       await result.current.send("allow").catch(() => {});
     });
@@ -128,47 +118,5 @@ describe("useApproval — send", () => {
       await result.current.send("allow");
     });
     expect(sendEvent).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe("useApproval — resolved state", () => {
-  it("flips to resolved when a matching response is in the timeline", () => {
-    const { requestEv, room } = setup();
-    pushTimelineEvent(
-      room,
-      mkMatrixEvent({
-        roomId,
-        sender: "@bob:h.example",
-        type: ApprovalEventType.Response,
-        content: { approval_id: "a1", decision: "cancel" },
-      }),
-    );
-    const { result } = renderHook(() => useApproval(requestEv));
-    expect(result.current.state).toBe("resolved");
-    expect(result.current.resolution).toEqual({
-      approvalId: "a1",
-      decision: "cancel",
-      optionId: undefined,
-      respondedBy: "@bob:h.example",
-    });
-  });
-
-  it("flips live when a response event arrives mid-render", () => {
-    const { requestEv, room } = setup();
-    const { result } = renderHook(() => useApproval(requestEv));
-    expect(result.current.state).toBe("pending");
-    act(() => {
-      pushTimelineEvent(
-        room,
-        mkMatrixEvent({
-          roomId,
-          sender: "@me:h.example",
-          type: ApprovalEventType.Response,
-          content: { approval_id: "a1", decision: "allow" },
-        }),
-      );
-    });
-    expect(result.current.state).toBe("resolved");
-    expect(result.current.resolution?.respondedBy).toBe("@me:h.example");
   });
 });

@@ -1,63 +1,18 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/agents/ui/activityRenderClasses/PlanActivity.tsx. Modified.
-import { Markdown } from "@/shared/ui/markdown";
-import {
-  ActivityRow,
-  ActivityRowContent,
-  ActivityRowLabel,
-} from "./ActivityRow";
-import { ToolActivity } from "./ToolActivity";
-import { formatTranscriptTimestampTitle } from "../agentSessionUtils";
-import type { ActivityRenderClassItemProps } from "./types";
+import { ListChecksIcon } from "@/components/icons";
+import { PlanEntryList } from "@/components/timeline/plan-board";
+import type { PlanTranscriptItem } from "@/model/agent-activity";
+import { ActivityRow, ActivityRowContent, ActivityRowLabel } from "./activity-row";
 
-export function PlanActivity(props: ActivityRenderClassItemProps) {
-  if (props.item.type === "tool") {
-    return <ToolActivity {...props} />;
-  }
-  if (props.item.type !== "plan") {
-    return null;
-  }
-
-  if (props.item.isUpdate) {
-    return (
-      <ActivityRow
-        testId="transcript-plan-update-item"
-        title={formatTranscriptTimestampTitle(props.item.timestamp)}
-      >
-        <ActivityRowLabel
-          object={<PlanUpdateLabelObject text={props.item.text} />}
-          openToneScope="none"
-          verb="Updated"
-        />
-      </ActivityRow>
-    );
-  }
-
+export function PlanActivity({ item }: { item: PlanTranscriptItem }) {
+  const done = item.entries.filter((e) => e.status === "completed").length;
   return (
-    <ActivityRow
-      testId="transcript-plan-item"
-      title={formatTranscriptTimestampTitle(props.item.timestamp)}
-    >
-      <ActivityRowLabel object="plan" openToneScope="tool" verb="Updated" />
-      <ActivityRowContent className="pt-1 pb-1.5 text-sm leading-5 text-muted-foreground">
-        <Markdown
-          className="leading-5"
-          content={props.item.text.trim() || "No plan details."}
-        />
+    <ActivityRow testId="transcript-plan-item">
+      <ListChecksIcon className="size-3.5 shrink-0 text-text-tertiary" />
+      <ActivityRowLabel verb="Updated" object={`plan · ${done}/${item.entries.length} done`} />
+      <ActivityRowContent>
+        <PlanEntryList entries={item.entries} className="py-1.5 pl-5" />
       </ActivityRowContent>
     </ActivityRow>
-  );
-}
-
-function PlanUpdateLabelObject({ text }: { text: string }) {
-  return (
-    <>
-      plan
-      {text ? (
-        <>
-          {" · "}
-          <span className="text-foreground">{text}</span>
-        </>
-      ) : null}
-    </>
   );
 }

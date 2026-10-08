@@ -7,33 +7,33 @@ export interface WorkforceView {
   ready: boolean;
   agents: RosterAgent[];
   isAgent: (userId: string) => boolean;
+  agent: (userId: string) => RosterAgent | undefined;
+  /** The workforce space's name. */
+  spaceName: string | undefined;
 }
 
-const EMPTY: WorkforceView = { ready: false, agents: [], isAgent: () => false };
-const cache = new WeakMap<Room, WorkforceView>();
+const none = () => undefined;
+const EMPTY: WorkforceView = { ready: false, agents: [], isAgent: () => false, agent: none, spaceName: undefined };
+const cache = new WeakMap<Room, { key: string; view: WorkforceView }>();
 
 function snapshot(spaceId: string): WorkforceView {
   const room = MatrixClientPeg.safeGet()?.getRoom(spaceId);
   if (!room) return EMPTY;
-  const cached = cache.get(room);
   const parsed = mergedRoster(room);
-  if (!parsed) {
-    if (cached && !cached.ready) return cached;
-    const v: WorkforceView = { ready: false, agents: [], isAgent: () => false };
-    cache.set(room, v);
-    return v;
-  }
-  if (
-    cached?.ready &&
-    cached.agents.length === parsed.length &&
-    cached.agents.every((a, i) => a.userId === parsed[i]!.userId)
-  ) {
-    return cached;
-  }
-  const set = makeAgentSet(parsed);
-  const v: WorkforceView = { ready: true, agents: parsed, isAgent: (id) => set.has(id) };
-  cache.set(room, v);
-  return v;
+  const key = `${room.name}|${JSON.stringify(parsed)}`;
+  const cached = cache.get(room);
+  if (cached?.key === key) return cached.view;
+  const byId = new Map((parsed ?? []).map((a) => [a.userId, a]));
+  const set = makeAgentSet(parsed ?? []);
+  const view: WorkforceView = {
+    ready: parsed !== null,
+    agents: parsed ?? [],
+    isAgent: (id) => set.has(id),
+    agent: (id) => byId.get(id),
+    spaceName: room.name || undefined,
+  };
+  cache.set(room, { key, view });
+  return view;
 }
 
 /**

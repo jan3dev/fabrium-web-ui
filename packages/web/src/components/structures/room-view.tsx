@@ -1,6 +1,7 @@
 import { useAwaitingInput } from "../../hooks/use-timeline";
 import { useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import type { LoggedInOutletContext } from "./logged-in-view";
+import { AgentActivityBar } from "../rooms/agent-activity-bar";
 import { Composer } from "../rooms/composer";
 import { TypingIndicator } from "../rooms/typing-indicator";
 import { NotJoinedRoom } from "./not-joined-room";
@@ -56,6 +57,12 @@ export function RoomView() {
         awaitingUserIds={awaitingUserIds}
         typingUserIds={typingUserIds}
         roomId={roomId}
+      />
+      <AgentActivityBar
+        roomId={roomId}
+        workforceSpaceId={workforceSpaceId}
+        openThreadId={searchParams.get("thread")}
+        onOpenThread={openThread}
       />
       <Composer roomId={roomId} workforceSpaceId={workforceSpaceId} />
     </article>

@@ -4,6 +4,8 @@ export interface RosterAgent {
   role: string | undefined;
   avatarUrl: string | undefined;
   rooms: string[];
+  persona?: string;
+  project?: string;
 }
 
 interface RawAgent {
@@ -12,6 +14,8 @@ interface RawAgent {
   role?: string;
   avatar_url?: string;
   rooms?: string[];
+  persona?: unknown;
+  project?: unknown;
 }
 
 export function parseWorkforceRoster(content: unknown): RosterAgent[] | null {
@@ -27,6 +31,8 @@ export function parseWorkforceRoster(content: unknown): RosterAgent[] | null {
       role: a.role,
       avatarUrl: a.avatar_url,
       rooms: Array.isArray(a.rooms) ? a.rooms : [],
+      ...(typeof a.persona === "string" && a.persona ? { persona: a.persona } : {}),
+      ...(typeof a.project === "string" && a.project ? { project: a.project } : {}),
     });
   }
   return out;
