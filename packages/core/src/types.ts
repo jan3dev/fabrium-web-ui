@@ -174,6 +174,10 @@ export interface AgentConfig {
   approval_timeout_ms: number
   /** Milliseconds before an idle ACP session is closed; 0 disables idle close. */
   session_idle_timeout_ms: number
+  /** Role the agent plays, e.g. "Coder". Shown in clients as "Persona · Project". */
+  persona?: string
+  /** Project the agent works on, e.g. "Payments". */
+  project?: string
   /** Container config. Rejected at parse time when runtime: local. */
   container?: ContainerConfig
   /** Exactly one of matrix / http is set per agent. */

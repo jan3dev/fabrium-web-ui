@@ -30,6 +30,17 @@ describe('buildWorkforceRoster', () => {
     })
   })
 
+  it('adds persona and project when the agent has them', () => {
+    const roster = buildWorkforceRoster([{ ...agents[0]!, persona: 'Coder', project: 'Payments' }])
+    expect(roster.agents[0]).toEqual({
+      user_id: '@planner:zoon.local',
+      name: 'planner',
+      rooms: ['!eng:zoon.local'],
+      persona: 'Coder',
+      project: 'Payments',
+    })
+  })
+
   it('handles empty workforce', () => {
     expect(buildWorkforceRoster([])).toEqual({ version: 1, agents: [] })
   })
@@ -106,6 +117,15 @@ describe('WorkforceDirectory', () => {
   const roster = (...ids: string[]) => ({
     version: 1,
     agents: ids.map((user_id) => ({ user_id, name: user_id, rooms: [] })),
+  })
+
+  it('keeps persona and project from a roster entry', () => {
+    const dir = new WorkforceDirectory()
+    dir.apply('', {
+      version: 1,
+      agents: [{ user_id: '@coder:hs', name: 'coder', rooms: [], persona: 'Coder', project: 'Payments' }],
+    })
+    expect(dir.entries()[0]).toMatchObject({ persona: 'Coder', project: 'Payments' })
   })
 
   it('merges every workstation roster in the space', () => {

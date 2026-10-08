@@ -480,6 +480,42 @@ agents:
     expect(config.agents.docs!.matrix?.display_name).toBe('Docs Agent')
   })
 
+  it('accepts optional persona and project on an agent', () => {
+    const config = loadZooidConfig(`
+runtime: local
+${MATRIX_TRANSPORT.trimStart()}
+agents:
+  docs:
+    acp: { preset: claude }
+    persona: ' Writer '
+    project: Payments
+    matrix:
+      transport: matrix-local
+      user_id: '@docs:localhost'
+      rooms:
+        - '!r1:localhost'
+`)
+    expect(config.agents.docs).toMatchObject({ persona: 'Writer', project: 'Payments' })
+  })
+
+  it('rejects an empty persona', () => {
+    expect(() =>
+      loadZooidConfig(`
+runtime: local
+${MATRIX_TRANSPORT.trimStart()}
+agents:
+  docs:
+    acp: { preset: claude }
+    persona: '  '
+    matrix:
+      transport: matrix-local
+      user_id: '@docs:localhost'
+      rooms:
+        - '!r1:localhost'
+`),
+    ).toThrow(/agents\.docs\.persona must be a non-empty string/)
+  })
+
   it('trims surrounding whitespace from display_name', () => {
     const config = loadZooidConfig(`
 runtime: local

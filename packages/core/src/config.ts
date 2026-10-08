@@ -817,6 +817,14 @@ function parseAgents(
       approval_timeout_ms,
       session_idle_timeout_ms,
     }
+    for (const k of ['persona', 'project'] as const) {
+      const v = entry[k]
+      if (v === undefined) continue
+      if (typeof v !== 'string' || v.trim() === '') {
+        throw new Error(`agents.${name}.${k} must be a non-empty string`)
+      }
+      agentCfg[k] = v.trim()
+    }
     if (containerBlock) agentCfg.container = containerBlock
     if (binding.matrix) agentCfg.matrix = binding.matrix
     if (binding.http) agentCfg.http = binding.http
