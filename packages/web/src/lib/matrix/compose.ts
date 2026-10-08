@@ -21,6 +21,17 @@ const markdown = new Marked({ gfm: true, breaks: true });
 
 const permalink = (id: string) => `https://matrix.to/#/${id}`;
 
+/**
+ * A Markdown link whose text and target come from other people (display
+ * names, room names), so neither can break out and plant a link of its own.
+ */
+function markdownLink(text: string, id: string): string {
+  const label = text.replace(/[\\`*_[\]<>~|!#]/g, "\\$&");
+  // Angle brackets let the target hold any character but <, > and newlines,
+  // none of which a Matrix ID can contain.
+  return `[${label}](<${permalink(id.replace(/[<>\s]/g, ""))}>)`;
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -84,12 +95,12 @@ export function composeText(
       markdownText,
       "@",
       mentions,
-      (l) => `[${l.label}](${permalink(l.target)})`,
+      (l) => markdownLink(l.label, l.target),
       new Set(),
     ),
     "#",
     rooms,
-    (l) => `[#${l.label}](${permalink(l.target)})`,
+    (l) => markdownLink(`#${l.label}`, l.target),
     new Set(),
   );
   const html = DOMPurify.sanitize(

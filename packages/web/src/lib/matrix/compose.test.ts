@@ -59,6 +59,13 @@ describe("composeText", () => {
     );
   });
 
+  it("keeps a hostile display name from planting its own link", () => {
+    const evil = { label: "x](https://evil.example) [y", target: "@eve:h.example" };
+    const html = composeText("hi @x](https://evil.example) [y", { mentions: [evil] }).formattedBody ?? "";
+    expect(html).not.toContain("evil.example\"");
+    expect(html).toContain('<a href="https://matrix.to/#/@eve:h.example">x](https://evil.example) [y</a>');
+  });
+
   it("strips unsafe HTML", () => {
     expect(
       composeText("[x](javascript:alert(1))").formattedBody ?? "",
