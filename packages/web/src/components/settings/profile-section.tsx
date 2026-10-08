@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { UserAvatar } from "@/components/user-avatar";
 import { MatrixClientPeg } from "@/client/peg";
 
 export function ProfileSection({ onSaved }: { onSaved: () => void }) {
@@ -51,11 +52,19 @@ export function ProfileSection({ onSaved }: { onSaved: () => void }) {
         </div>
         <div className="space-y-1">
           <Label htmlFor="profile-avatar">Avatar</Label>
-          <Input
+          <div className="flex items-center gap-3">
+            <UserAvatar userId={userId} size="lg" />
+            <Button type="button" variant="secondary" size="sm" onClick={() => fileRef.current?.click()}>
+              Choose image
+            </Button>
+            <span className="min-w-0 truncate text-caption1 text-text-tertiary">{file?.name}</span>
+          </div>
+          <input
             id="profile-avatar"
             ref={fileRef}
             type="file"
             accept="image/*"
+            className="sr-only"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />
         </div>

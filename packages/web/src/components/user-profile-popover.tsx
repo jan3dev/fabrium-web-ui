@@ -13,10 +13,9 @@ import {
 import { UserAvatar } from "@/components/user-avatar";
 import { MatrixClientPeg } from "@/client/peg";
 import { usePresence } from "@/hooks/use-presence";
-import { useUserName } from "@/hooks/use-user-name";
+import { useActor } from "@/hooks/use-actor";
 import { type KnownAgent, useKnownAgent } from "@/hooks/use-workforce";
 import { createDirectRoom, findDirectRoom } from "@/lib/matrix/direct-messages";
-import { toActor } from "@/model/from-matrix";
 import type { ActorSummary } from "@/model/types";
 
 const ACTOR_BADGE = { agent: "Agent", system: "System" } as const;
@@ -53,21 +52,6 @@ export function UserProfilePopover({
   );
 }
 
-function useActor(
-  userId: string,
-  roomId: string | undefined,
-  known: KnownAgent | undefined,
-): ActorSummary {
-  const name = useUserName(userId, roomId);
-  const room = (roomId && MatrixClientPeg.safeGet()?.getRoom(roomId)) || null;
-  const actor = toActor(userId, room, {
-    isAgent: () => !!known,
-    agent: () => known?.agent,
-    spaceName: known?.spaceName,
-  });
-  return actor.kind === "agent" ? actor : { ...actor, displayName: name };
-}
-
 function ProfileCard({
   userId,
   roomId,
@@ -78,7 +62,7 @@ function ProfileCard({
   onDone: () => void;
 }) {
   const known = useKnownAgent(userId);
-  const actor = useActor(userId, roomId, known);
+  const actor = useActor(userId, roomId);
   const { presence } = usePresence(userId);
 
   return (

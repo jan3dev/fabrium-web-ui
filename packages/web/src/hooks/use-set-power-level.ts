@@ -1,6 +1,7 @@
 import { EventType } from "matrix-js-sdk";
 import { useCallback } from "react";
 import { MatrixClientPeg } from "../client/peg";
+import { isRoomCreator, userLevel } from "../lib/roles";
 
 interface PowerLevelContent {
   users?: Record<string, number>;
@@ -22,9 +23,9 @@ function readContext(roomId: string) {
   const users = { ...(content.users ?? {}) };
   const usersDefault = content.users_default ?? 0;
   const stateDefault = content.state_default ?? 50;
-  const myLevel = users[me] ?? usersDefault;
+  const myLevel = userLevel(room, me, content);
   const plGate = content.events?.[PL_TYPE] ?? stateDefault;
-  return { client, roomId, me, content, users, usersDefault, myLevel, plGate };
+  return { client, room, roomId, me, content, users, usersDefault, myLevel, plGate };
 }
 
 // Throws if the viewer is not permitted to make this change (mirrors Rule 9 +
@@ -36,8 +37,10 @@ function assertAllowed(
 ) {
   if (ctx.myLevel < ctx.plGate) throw new Error("insufficient power to edit roles");
   if (newLevel > ctx.myLevel) throw new Error("cannot set a level above your own");
+  // Room v12 creators may not be listed in `users`; their level is fixed.
+  if (isRoomCreator(ctx.room, targetUserId)) throw new Error("a room creator's role cannot change");
   if (targetUserId !== ctx.me) {
-    const currentTarget = ctx.users[targetUserId] ?? ctx.usersDefault;
+    const currentTarget = userLevel(ctx.room, targetUserId, ctx.content);
     if (currentTarget >= ctx.myLevel) throw new Error("cannot re-role a peer at or above you");
   }
 }

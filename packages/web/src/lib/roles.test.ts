@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  CREATOR_LEVEL,
+  isRoomCreator,
+  userLevel,
   ADMIN_LEVEL,
   MANAGER_LEVEL,
   MEMBER_LEVEL,
@@ -49,12 +52,52 @@ describe("levelForRole", () => {
 
 describe("standardRoleOptions", () => {
   it("returns owner/admin/manager/member in descending order", () => {
-    expect(standardRoleOptions().map((o) => o.kind)).toEqual(["owner", "admin", "manager", "member"]);
+    expect(standardRoleOptions().map((o) => o.kind)).toEqual([
+      "owner",
+      "admin",
+      "manager",
+      "member",
+    ]);
   });
 
   it("disables options above a viewer's own level", () => {
     // viewer at 50 may grant manager/member, not owner or admin
     const opts = standardRoleOptions(50);
-    expect(opts.filter((o) => o.disabled).map((o) => o.kind)).toEqual(["owner", "admin"]);
+    expect(opts.filter((o) => o.disabled).map((o) => o.kind)).toEqual([
+      "owner",
+      "admin",
+    ]);
+  });
+});
+
+describe("room creators (room v12)", () => {
+  const room = (version: string, sender = "@ann:h", extra: string[] = []) => ({
+    currentState: {
+      getStateEvents: (type: string) =>
+        type === "m.room.create"
+          ? {
+              getSender: () => sender,
+              getContent: () => ({
+                room_version: version,
+                additional_creators: extra,
+              }),
+            }
+          : null,
+    },
+  });
+  const pl = { users: { "@bob:h": 50 }, users_default: 0 };
+
+  it("outrank every power level from v12 and read as owner", () => {
+    expect(userLevel(room("12"), "@ann:h", pl)).toBe(CREATOR_LEVEL);
+    expect(userLevel(room("12", "@x:h", ["@ann:h"]), "@ann:h", pl)).toBe(
+      CREATOR_LEVEL,
+    );
+    expect(roleForLevel(CREATOR_LEVEL).kind).toBe("owner");
+    expect(userLevel(room("12"), "@bob:h", pl)).toBe(50);
+  });
+
+  it("are ordinary members before v12", () => {
+    expect(isRoomCreator(room("11"), "@ann:h")).toBe(false);
+    expect(userLevel(room("11"), "@ann:h", pl)).toBe(0);
   });
 });

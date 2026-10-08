@@ -1,5 +1,5 @@
-import { renderHook, waitFor } from "@testing-library/react";
-import { EventType, type Room } from "matrix-js-sdk";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { ClientEvent, EventType, type Room } from "matrix-js-sdk";
 import { mkMatrixEvent } from "matrix-js-sdk/lib/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeFakeClient, makeRoom } from "../../test/factories";
@@ -153,5 +153,23 @@ describe("useMessageSearch", () => {
     const { result } = renderHook(() => useMessageSearch("from:@bob:h"));
     expect(result.current.status).toBe("idle");
     expect(search).not.toHaveBeenCalled();
+  });
+  it("searches once the joined rooms arrive with the first sync", async () => {
+    const search = vi.fn(async () => ({
+      search_categories: { room_events: { results: [hit("$1", "pineapple")] } },
+    }));
+    setup(search);
+    const client = MatrixClientPeg.get() as unknown as Record<string, unknown> & {
+      emit(event: string, ...args: unknown[]): void;
+    };
+    const synced = client.getRooms as () => Room[];
+    client.getRooms = () => [];
+    const { result } = renderHook(() => useMessageSearch("pineapple"));
+    await waitFor(() => expect(result.current.status).toBe("done"));
+    expect(search).not.toHaveBeenCalled();
+
+    client.getRooms = synced;
+    act(() => client.emit(ClientEvent.Room, synced()[0]));
+    await waitFor(() => expect(result.current.hits.map((h) => h.id)).toEqual(["$1"]));
   });
 });

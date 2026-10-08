@@ -17,7 +17,7 @@ export type InboxFilter = "all" | InboxCategory;
 
 const FILTERS = [
   { value: "all", label: "All" },
-  { value: "needs_action", label: "Needs action" },
+  { value: "needs_action", label: "To do" },
   { value: "mention", label: "Mentions" },
   { value: "activity", label: "Threads" },
 ] as const satisfies readonly { value: InboxFilter; label: string }[];

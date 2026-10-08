@@ -1,7 +1,7 @@
 import { EventType, type Room, type RoomMember, RoomStateEvent } from "matrix-js-sdk";
 import { useMemo, useSyncExternalStore } from "react";
 import { MatrixClientPeg } from "../client/peg";
-import { ADMIN_LEVEL, MANAGER_LEVEL, OWNER_LEVEL, type Role, roleForLevel } from "../lib/roles";
+import { ADMIN_LEVEL, MANAGER_LEVEL, OWNER_LEVEL, type Role, roleForLevel, userLevel } from "../lib/roles";
 import { subscribeRoomState } from "./matrix-subscriptions";
 import { useSpaceMembers } from "./use-space-members";
 
@@ -135,10 +135,8 @@ function snapshot(roomId: string): MemberRole[] {
     users?: Record<string, number>;
     users_default?: number;
   };
-  const usersDefault = pl.users_default ?? 0;
-
   const result: MemberRole[] = members.map((m) => {
-    const powerLevel = pl.users?.[m.userId] ?? usersDefault;
+    const powerLevel = userLevel(room, m.userId, pl);
     return {
       userId: m.userId,
       displayName: m.name,

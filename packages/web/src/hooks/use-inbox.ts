@@ -110,7 +110,8 @@ export function useInbox(workforceSpaceId: string | null): InboxState {
       setNotifications((prev) =>
         from ? [...prev, ...res.notifications] : res.notifications,
       );
-      setNextToken(res.next_token ?? null);
+      // Tuwunel sends a next_token even on the last page; a short page is the end.
+      setNextToken(res.notifications.length < Number(PAGE) ? null : (res.next_token ?? null));
       setMentions("ready");
     } catch (err) {
       const e = err as { errcode?: string; httpStatus?: number };

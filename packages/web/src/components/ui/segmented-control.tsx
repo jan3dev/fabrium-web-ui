@@ -197,7 +197,7 @@ export function SegmentedControl<Value extends string>({
           <button
             aria-pressed={value === optionValue}
             className={cn(
-              "relative z-10 flex h-full cursor-pointer items-center justify-center gap-1.5 rounded-[6px] bg-transparent px-2.5 text-caption1 font-medium transition-colors duration-(--duration-fast) ease-standard focus-visible:outline-offset-0 motion-reduce:transition-none",
+              "relative z-10 flex h-full min-w-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-[6px] bg-transparent px-2.5 text-caption1 font-medium transition-colors duration-(--duration-fast) ease-standard focus-visible:outline-offset-0 motion-reduce:transition-none",
               displayedValue === optionValue
                 ? "text-text-primary"
                 : "text-text-secondary hover:text-text-primary",
@@ -213,8 +213,8 @@ export function SegmentedControl<Value extends string>({
             }}
             type="button"
           >
-            {Icon ? <Icon className="size-3.5" /> : null}
-            {label}
+            {Icon ? <Icon className="size-3.5 shrink-0" /> : null}
+            <span className="truncate">{label}</span>
           </button>
         ))}
       </div>

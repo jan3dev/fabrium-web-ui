@@ -20,7 +20,6 @@ export function AppearanceSection() {
         options={OPTIONS}
         value={theme}
         onValueChange={setTheme}
-        size="compact"
         testId="theme-control"
         optionTestIdPrefix="theme"
       />

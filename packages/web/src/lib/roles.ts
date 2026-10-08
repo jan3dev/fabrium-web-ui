@@ -29,7 +29,58 @@ const LABELS: Record<StandardRoleKind, string> = {
 
 const STANDARD = Object.keys(LEVELS) as StandardRoleKind[];
 
+/**
+ * A room creator's level from room version 12 on: the create event's sender
+ * and `additional_creators` outrank every power level and may not be listed in
+ * `users`.
+ */
+export const CREATOR_LEVEL = Infinity;
+
+interface PowerLevelsContent {
+  users?: Record<string, number>;
+  users_default?: number;
+}
+
+interface RoomState {
+  currentState: {
+    getStateEvents(
+      type: string,
+      stateKey: string,
+    ): {
+      getSender(): string | undefined;
+      getContent(): Record<string, unknown>;
+    } | null;
+  };
+}
+
+export function isRoomCreator(room: RoomState, userId: string): boolean {
+  const create = room.currentState.getStateEvents("m.room.create", "");
+  if (!create) return false;
+  const c = create.getContent() as {
+    room_version?: unknown;
+    additional_creators?: unknown;
+  };
+  // Versions are strings; only the numbered ones from 12 up have privileged creators.
+  if (!(Number(c.room_version ?? "1") >= 12)) return false;
+  return (
+    create.getSender() === userId ||
+    (Array.isArray(c.additional_creators) &&
+      c.additional_creators.includes(userId))
+  );
+}
+
+/** `userId`'s power level in `room`, room creators included. */
+export function userLevel(
+  room: RoomState,
+  userId: string,
+  pl: PowerLevelsContent,
+): number {
+  if (isRoomCreator(room, userId)) return CREATOR_LEVEL;
+  return pl.users?.[userId] ?? pl.users_default ?? 0;
+}
+
 export function roleForLevel(level: number): Role {
+  if (level === CREATOR_LEVEL) return { kind: "owner", level };
   const kind = STANDARD.find((k) => LEVELS[k] === level);
   return { kind: kind ?? "custom", level };
 }

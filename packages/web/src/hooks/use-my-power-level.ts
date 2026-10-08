@@ -1,6 +1,7 @@
 import { EventType, type MatrixEvent, RoomStateEvent } from "matrix-js-sdk";
 import { useSyncExternalStore } from "react";
 import { MatrixClientPeg } from "../client/peg";
+import { userLevel } from "../lib/roles";
 import { subscribeRoomState } from "./matrix-subscriptions";
 
 export interface MyPowerLevel {
@@ -46,7 +47,7 @@ function snapshot(roomId: string): MyPowerLevel {
     ban?: number;
   };
 
-  const level = pl.users?.[me] ?? pl.users_default ?? 0;
+  const level = userLevel(room, me, pl);
   const eventsDefault = pl.events_default ?? 0;
   const stateDefault = pl.state_default ?? 50;
 

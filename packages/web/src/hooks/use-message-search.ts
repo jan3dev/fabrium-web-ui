@@ -14,6 +14,7 @@ import { displayNameOf } from "../lib/sender";
 import { toActor } from "../model/from-matrix";
 import type { ActorSummary } from "../model/types";
 import { useDebounce } from "./use-debounce";
+import { useRoomList } from "./use-room-list";
 import { useWorkforce } from "./use-workforce";
 
 export type MessageSearchStatus =
@@ -131,6 +132,9 @@ export function useMessageSearch(
   const debounced = useDebounce(trimmed, 300);
   const parsed = parseSearchOperators(debounced);
   const roster = useWorkforce(workforceSpaceId ?? "");
+  // The search scope is the joined rooms: on a cold load they arrive with the
+  // first sync, after the first run.
+  const knownRooms = useRoomList();
   const [raw, setRaw] = useState<RawState>(IDLE);
 
   useEffect(() => {
@@ -186,7 +190,7 @@ export function useMessageSearch(
           });
       });
     return () => controller.abort();
-  }, [enabled, parsed.text, parsed.in, parsed.from, roomId, limit]);
+  }, [enabled, parsed.text, parsed.in, parsed.from, roomId, limit, knownRooms]);
 
   const hits = useMemo(() => {
     const client = MatrixClientPeg.safeGet();

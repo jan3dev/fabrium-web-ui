@@ -17,8 +17,8 @@ import type { MemberRole } from "../../hooks/use-member-roles";
 import { useMyPowerLevel } from "../../hooks/use-my-power-level";
 import { usePresence } from "../../hooks/use-presence";
 import { useSetPowerLevel } from "../../hooks/use-set-power-level";
-import { useUserName } from "../../hooks/use-user-name";
-import { roleForLevel, roleLabel, standardRoleOptions } from "../../lib/roles";
+import { useActor } from "../../hooks/use-actor";
+import { CREATOR_LEVEL, roleForLevel, roleLabel, standardRoleOptions } from "../../lib/roles";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -66,7 +66,7 @@ export function MemberRow({
   working?: boolean;
 }) {
   const { presence } = usePresence(userId);
-  const name = useUserName(userId, roomId);
+  const name = useActor(userId, roomId).displayName;
   const myPL = useMyPowerLevel(roomId);
   const me = MatrixClientPeg.safeGet()?.getUserId();
 
@@ -129,7 +129,9 @@ export function MemberRow({
   // Rule 9: editable only if viewer outranks the target (peers/superiors locked).
   // Self is editable (self-demote) regardless of own level.
   const targetLevel = member?.powerLevel ?? 0;
-  const editable = canEditRoles && (isSelf ? true : targetLevel < myPL.level);
+  // A room creator's level is fixed (room v12), even for themselves.
+  const editable =
+    canEditRoles && targetLevel !== CREATOR_LEVEL && (isSelf ? true : targetLevel < myPL.level);
   const canModerate = !isSelf && (myPL.canKick || myPL.canBan);
 
   return shell(

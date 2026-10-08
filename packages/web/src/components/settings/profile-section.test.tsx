@@ -14,7 +14,7 @@ function setup() {
   cast.setDisplayName = vi.fn().mockResolvedValue({});
   cast.setAvatarUrl = vi.fn().mockResolvedValue({});
   cast.uploadContent = vi.fn().mockResolvedValue({ content_uri: "mxc://h.example/abc" });
-  cast.getUser = () => ({ displayName: "Old Name", avatarUrl: null });
+  cast.getUser = () => ({ displayName: "Old Name", avatarUrl: null, on() {}, off() {} });
   MatrixClientPeg.injectClientForTest(client);
   return { client: cast };
 }
