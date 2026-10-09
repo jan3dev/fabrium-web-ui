@@ -1,0 +1,33 @@
+# Rendered by deploy/deploy.sh into ${ZOOID_HOME}/data/matrix/config/tuwunel.toml.
+# Placeholders: SERVER_NAME, WORKFORCE_SPACE, HOMESERVER_URL.
+# ip_range_denylist keeps its default: pushes go to zooid through the public
+# hostname (Caddy /_matrix/push/*), not the private compose network.
+
+[global]
+server_name = "${SERVER_NAME}"
+address = ["0.0.0.0"]
+port = [8448]
+
+database_path = "/var/lib/tuwunel/db"
+# No media_path: this Tuwunel version ignores the key ("unknown to tuwunel")
+# and keeps media under database_path, so it is persisted with the DB.
+appservice_dir = "/var/lib/tuwunel/registrations"
+
+# Registration is closed: accounts are created through the zooid appservice
+# (registrations/zooid.yaml). The acknowledgement key below is kept as in prod;
+# it has no effect while allow_registration = false.
+allow_registration = false
+yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse = true
+
+allow_local_presence = true
+# The workforce space (matrix.space in zooid.yaml, WORKFORCE_SPACE here) and
+# the default channel the daemon creates.
+auto_join_rooms = ["#${WORKFORCE_SPACE}:${SERVER_NAME}", "#general:${SERVER_NAME}"]
+
+# Kept from prod: new rooms stay on v11, so the v12 fix stays inert.
+default_room_version = "11"
+
+# Served at /.well-known/matrix/client (through Caddy) for other Matrix clients.
+# The web UI itself reads /config.json.
+[global.well_known]
+client = "${HOMESERVER_URL}"

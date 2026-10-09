@@ -296,6 +296,10 @@ export function buildAcpRegistry(
   // its container, so the daemon socket + the (self-contained) bin must be
   // bind-mounted in. Local runtime needs neither — the host spec resolves
   // directly. Only agents that actually got a context factory get the mounts.
+  // ZOOID_CONTEXT_MCP_HOST_DIR: host path of the context-mcp `dist/`, for a
+  // daemon that runs in a container (the engine resolves mount sources on the
+  // host, not in the daemon's filesystem).
+  const contextMcpHostDir = process.env.ZOOID_CONTEXT_MCP_HOST_DIR?.trim() || undefined
   if (cfg.runtime !== 'local' && contextSpawns) {
     for (const name of Object.keys(cfg.agents)) {
       if (!contextSpawns[name]) continue
@@ -303,7 +307,7 @@ export function buildAcpRegistry(
       if (!agentSock) continue
       mountsByAgent[name] = [
         ...(mountsByAgent[name] ?? []),
-        ...contextContainerMounts({ sockPath: agentSock }),
+        ...contextContainerMounts({ sockPath: agentSock, binHostDir: contextMcpHostDir }),
       ]
     }
   }

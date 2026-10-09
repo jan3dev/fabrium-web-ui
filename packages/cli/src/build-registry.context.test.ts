@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { buildAcpRegistry } from './build-registry.js'
 import type { ZooidConfig } from '@zooid/core'
 import {
@@ -90,6 +90,28 @@ describe('buildAcpRegistry — context provider in a container runtime', () => {
     expect(sock).toMatchObject({ path: '/home/ubuntu/hq/data/run/context.sock', mode: 'rw' })
     expect(bin?.mode).toBe('ro')
     expect(bin?.path).toMatch(/context-mcp[/\\]dist$/)
+  })
+
+  describe('ZOOID_CONTEXT_MCP_HOST_DIR', () => {
+    const saved = process.env.ZOOID_CONTEXT_MCP_HOST_DIR
+    afterEach(() => {
+      if (saved === undefined) delete process.env.ZOOID_CONTEXT_MCP_HOST_DIR
+      else process.env.ZOOID_CONTEXT_MCP_HOST_DIR = saved
+    })
+
+    it('uses the env var as the bin mount source', () => {
+      process.env.ZOOID_CONTEXT_MCP_HOST_DIR = '  /host/ctx  '
+      const mounts = buildAcpRegistry(podmanCfg(), opts).resolveSpawnMounts('architect')
+      const bin = mounts.find((m) => m.target === CONTEXT_CONTAINER_BIN_DIR)
+      expect(bin).toMatchObject({ path: '/host/ctx', mode: 'ro' })
+    })
+
+    it('ignores a blank value', () => {
+      process.env.ZOOID_CONTEXT_MCP_HOST_DIR = '   '
+      const mounts = buildAcpRegistry(podmanCfg(), opts).resolveSpawnMounts('architect')
+      const bin = mounts.find((m) => m.target === CONTEXT_CONTAINER_BIN_DIR)
+      expect(bin?.path).toMatch(/context-mcp[/\\]dist$/)
+    })
   })
 
   it('threads a containerized mcpServers spec into the agent factory', async () => {

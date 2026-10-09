@@ -11,3 +11,12 @@ examples
 .env.*
 **/.env
 **/.env.*
+.omc
+**/.omc
+.local
+**/storybook-static
+**/test-results
+**/playwright-report
+*.tgz
+deploy/**
+!deploy/Caddyfile

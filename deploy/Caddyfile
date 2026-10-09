@@ -1,0 +1,36 @@
+{$SITE_ADDRESS} {
+	encode gzip
+
+	# zooid's push gateway. Tuwunel reaches it at the public hostname so its
+	# default ip_range_denylist (private ranges, incl. the compose network) stays on.
+	handle /_matrix/push/* {
+		reverse_proxy zooid:{$APPSERVICE_PORT:9000}
+	}
+
+	handle /_matrix/* {
+		reverse_proxy tuwunel:8448
+	}
+
+	handle /.well-known/matrix/* {
+		reverse_proxy tuwunel:8448
+	}
+
+	# Rendered per instance by deploy.sh into ${ZOOID_HOME}/web, mounted read-only.
+	handle /config.json {
+		header Cache-Control "no-cache"
+		root * /srv/config
+		file_server
+	}
+
+	# SPA: hashed bundles are immutable; everything else (index.html served for any
+	# route via try_files, sw.js, favicon) must revalidate so a deploy shows up at once.
+	handle {
+		root * /srv/www
+		@hashed path /assets/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+		@unhashed not path /assets/*
+		header @unhashed Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}
