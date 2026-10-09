@@ -6,7 +6,7 @@ Everything an instance runs comes from this repo as one Docker Compose project
 | Service | Image | Role |
 |---|---|---|
 | `tuwunel` | `ghcr.io/matrix-construct/tuwunel` pinned by digest | Matrix homeserver (chats, accounts, rooms). |
-| `zooid` | `fabrium-zooid:<git sha>`, built from `deploy/Dockerfile` | The daemon (`zooid start`). Starts one container per agent through the host's Docker socket. |
+| `zooid` | `fabrium-zooid:<git sha>`, built from `deploy/Dockerfile` | The daemon (`zooid start`). Starts one container per agent through the engine socket (podman's Docker-compatible socket on a box, Docker's on a laptop). |
 | `web` | `fabrium-web:<git sha>`, built from `deploy/Dockerfile` | Caddy serving `packages/web/dist`, `/config.json`, and proxying `/_matrix/*` to Tuwunel. HTTPS is automatic for a public domain. |
 
 Per-instance state lives outside the repo, under `ZOOID_HOME` (default `~/zooid`):
@@ -32,7 +32,7 @@ deploy.log                    one line per successful deploy
 
 | Script | What it does |
 |---|---|
-| `deploy/provision.sh` | Fresh Ubuntu 24.04 box: installs Docker CE + compose plugin, clones the repo, creates the `ZOOID_HOME` layout, generates `.env` (with fresh tokens) and `zooid.yaml` from the examples when missing. Idempotent. |
+| `deploy/provision.sh` | Fresh Ubuntu 24.04 box: installs rootless podman and the docker CLI + compose plugin (no Docker daemon), enables the user podman socket and the restart at boot, clones the repo, creates the `ZOOID_HOME` layout, generates `.env` (with fresh tokens) and `zooid.yaml` from the examples when missing. Idempotent. |
 | `deploy/deploy.sh` | `git fetch` + fast-forward pull of the branch the checkout is on, render the config files, `docker compose build`, `up -d`, wait for health, print a summary. Run it for every code or config change. A new commit rebuilds both images (full `pnpm install` + `pnpm build`, a few minutes on the box) and recreates every container; a run without new commits hits the build cache and recreates nothing. |
 | `deploy/backup.sh` | Stops `zooid` and `tuwunel`, tars the essential state (owner-only file), restarts them. |
 | `deploy/restore.sh` | Extracts a backup into an empty `ZOOID_HOME`. |
@@ -49,7 +49,7 @@ All scripts take `-h`. They never print secret values.
    curl -fsSL https://raw.githubusercontent.com/jan3dev/fabrium-web-ui/feat/deploy/deploy/provision.sh -o provision.sh
    bash provision.sh            # or: bash provision.sh --branch main
    ```
-   Log out and in again so the `docker` group applies.
+   Open a new shell (or `source ~/.bashrc`) so `DOCKER_HOST` points the docker CLI at podman.
 3. Edit `~/zooid/.env`: `SERVER_NAME`, `SITE_ADDRESS`, `HOMESERVER_URL`, agent secrets (`GH_TOKEN`, `HAVEN_API_KEY`, …).
    See `deploy/.env.example` for every key.
 4. Edit `~/zooid/workforce/zooid.yaml` (agents, rooms). Rules: `runtime: docker`, `homeserver: http://tuwunel:8448`,
@@ -57,6 +57,20 @@ All scripts take `-h`. They never print secret values.
 5. Put agent credentials under `~/zooid/home/` (for opencode: `.config/opencode/` and `.local/share/opencode/`).
    The daemon mounts those directories into every agent container.
 6. `~/fabrium-web-ui/deploy/deploy.sh`
+
+## Engine: rootless podman
+
+A box runs rootless podman, driven by the docker CLI through podman's Docker-compatible socket
+(`DOCKER_HOST=unix:///run/user/<uid>/podman/podman.sock`, set in `~/.bashrc` by `provision.sh`).
+`deploy.sh` detects podman and then:
+
+- mounts that socket into the daemon container (`DOCKER_SOCK`);
+- runs the daemon as uid 0 in the container, which is the deploy user on the host, so every file
+  under `ZOOID_HOME`, including what agents write, belongs to that user;
+- builds with the classic builder (`DOCKER_BUILDKIT=0`, `COMPOSE_BAKE=false`), because podman has no BuildKit API.
+
+After a reboot, `podman-restart.service` (user unit, enabled by `provision.sh`, needs linger) starts every
+container with `restart: always`. The daemon restarts its agents itself.
 
 ## Routine deploy
 

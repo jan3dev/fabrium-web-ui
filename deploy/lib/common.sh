@@ -115,6 +115,30 @@ compose() {
   fi
 }
 
+# engine_env: export ENGINE (docker or podman), DOCKER_SOCK and DAEMON_UID/GID
+# defaults. Rootless podman (provision.sh) is reached through DOCKER_HOST; its
+# socket is bind-mounted into the daemon container, and container root is the
+# deploy user on the host, so the daemon runs as uid 0 there.
+engine_env() {
+  ENGINE=docker
+  if docker version --format '{{range .Server.Components}}{{.Name}};{{end}}' 2>/dev/null | grep -q 'Podman'; then
+    ENGINE=podman
+  fi
+  if [ "$ENGINE" = "podman" ]; then
+    case "${DOCKER_HOST:-}" in
+      unix://*) DOCKER_SOCK="${DOCKER_SOCK:-${DOCKER_HOST#unix://}}" ;;
+      *) [ -n "${DOCKER_SOCK:-}" ] || die "podman: set DOCKER_HOST=unix://<podman socket> (provision.sh adds it to ~/.bashrc)" ;;
+    esac
+    DAEMON_UID="${DAEMON_UID:-0}"
+    DAEMON_GID="${DAEMON_GID:-0}"
+  else
+    DOCKER_SOCK="${DOCKER_SOCK:-/var/run/docker.sock}"
+    DAEMON_UID="${DAEMON_UID:-$(id -u)}"
+    DAEMON_GID="${DAEMON_GID:-$(id -g)}"
+  fi
+  export ENGINE DOCKER_SOCK DAEMON_UID DAEMON_GID
+}
+
 # wait_http <url> <timeout_s> [status-regex] [body-regex]: poll every 2 s. Returns 1 on timeout.
 # WAIT_HTTP_HOST, when set, is sent as the Host header.
 wait_http() {

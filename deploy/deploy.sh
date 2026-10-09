@@ -164,9 +164,8 @@ else
 fi
 
 export GIT_SHA="$NEW_SHA"
-DAEMON_UID="${DAEMON_UID:-$(id -u)}"
-DAEMON_GID="${DAEMON_GID:-$(id -g)}"
-export DAEMON_UID DAEMON_GID
+engine_env
+log "engine: $ENGINE (socket $DOCKER_SOCK, daemon uid $DAEMON_UID)"
 
 # --- 3. layout and rendered files -----------------------------------------
 for d in data/matrix/db data/matrix/media data/matrix/config/registrations \
@@ -211,6 +210,10 @@ if [ "$NO_BUILD" -eq 0 ]; then
   # default attestations and the export timestamp both change the ID.
   SOURCE_DATE_EPOCH="$(git -C "$REPO_DIR" log -1 --format=%ct HEAD)"
   export SOURCE_DATE_EPOCH BUILDX_NO_DEFAULT_ATTESTATIONS=1
+  # podman has no BuildKit API: use the classic build endpoint (buildah behind it).
+  if [ "$ENGINE" = "podman" ]; then
+    export COMPOSE_BAKE=false DOCKER_BUILDKIT=0
+  fi
   compose build --build-arg GIT_SHA="$GIT_SHA" --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH"
 else
   log "--no-build: skipping image build"
@@ -218,7 +221,7 @@ fi
 
 # --- 5. docker socket gid -------------------------------------------------
 IMAGE="fabrium-zooid:${GIT_SHA}"
-DOCKER_GID="$(docker run --rm -v /var/run/docker.sock:/s --entrypoint stat "$IMAGE" -c %g /s)" ||
+DOCKER_GID="$(docker run --rm -v "$DOCKER_SOCK":/s --entrypoint stat "$IMAGE" -c %g /s)" ||
   die "cannot read docker socket gid from image $IMAGE"
 export DOCKER_GID
 

@@ -10,6 +10,8 @@ x-logging: &logging
     max-size: "10m"
     max-file: "3"
 
+# restart: always, not unless-stopped: rootless podman has no daemon, and its
+# podman-restart.service brings back only `always` containers after a reboot.
 services:
   tuwunel:
     image: ${TUWUNEL_IMAGE:-ghcr.io/matrix-construct/tuwunel@sha256:678b7f5350e06a41614444497c587da9dddf66767e4068a27480402f3c1367d0}
@@ -26,7 +28,7 @@ services:
     labels:
       fabrium.config-hash: ${CONFIG_HASH_TUWUNEL:-}
     logging: *logging
-    restart: unless-stopped
+    restart: always
 
   zooid:
     image: fabrium-zooid:${GIT_SHA:-dev}
@@ -59,7 +61,8 @@ services:
       - ZOOID_REFRESH_IMAGES
     volumes:
       - ${ZOOID_HOME}:${ZOOID_HOME}
-      - /var/run/docker.sock:/var/run/docker.sock
+      # Engine socket on the host (rootless podman: set by deploy.sh from DOCKER_HOST).
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
     ports:
       - 127.0.0.1:${APPSERVICE_PORT:-9000}:${APPSERVICE_PORT:-9000}
     depends_on:
@@ -67,7 +70,7 @@ services:
     labels:
       fabrium.config-hash: ${CONFIG_HASH_ZOOID:-}
     logging: *logging
-    restart: unless-stopped
+    restart: always
     stop_grace_period: 30s
 
   web:
@@ -94,7 +97,7 @@ services:
     depends_on:
       - tuwunel
     logging: *logging
-    restart: unless-stopped
+    restart: always
 
 volumes:
   caddy_data:

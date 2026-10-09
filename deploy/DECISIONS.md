@@ -14,26 +14,17 @@ owner. Each open item lists the current default so the stack works without an an
 | Instance state | Everything under `ZOOID_HOME` (default `~/zooid`): `.env`, `workforce/`, `data/matrix/`, `home/`. | Mirrors the current prod layout, so `backup.sh`/`restore.sh` move the essential state (Matrix DB with chats and accounts, `zooid.yaml`, agent persona files, secrets) as a single tarball. |
 | Instance env file | `ZOOID_HOME/.env` is optional; the same keys may come from the shell environment. | Lets CI and local tests run without writing a secrets file. The production path still uses the file (created by `provision.sh`). |
 | Reproducible image IDs | `deploy.sh` builds with `SOURCE_DATE_EPOCH` = commit time and `BUILDX_NO_DEFAULT_ATTESTATIONS=1`. | With the containerd image store the image ID is the OCI index digest; default attestations and the export timestamp change it on every build, and then `compose up` recreates the containers on every deploy even when nothing changed. Verified locally: same ID across builds, second deploy recreates nothing. |
+| Engine on a box | Rootless podman, driven by the docker CLI and compose plugin through `podman.socket`. No Docker daemon. | Same engine as the old prod. The socket the daemon holds is not root-equivalent on the box. Container root maps to the deploy user, so agent files under `ZOOID_HOME` stay readable by `backup.sh` without `sudo`. Tested on `zooid-stage` (Ubuntu 24.04, podman 4.9.3, API 1.41; the docker 29 CLI inside the daemon image negotiates down to it). |
+| Restart policy | `restart: always` on all three services; `podman-restart.service` enabled for the deploy user, with linger. | Rootless podman has no daemon to restart containers after a reboot; its restart unit only starts `always` containers. |
 | Config rendering | `tuwunel.toml`, the appservice registration and `config.json` are rendered from templates on every deploy. `zooid.yaml` is never rewritten. | The registration URL changes between layouts (`host.docker.internal:9000` in the old prod, `zooid:9000` in compose). Rendering from `.env` keeps the two tokens in sync between Tuwunel and the daemon. |
 
 ## Open decisions (defaults in effect)
 
-1. **Rootful Docker CE vs rootless engine.** Default: Docker CE from Docker's apt repo, rootful.
-   Prod today uses rootless podman. With a rootful engine the daemon's socket access is root-equivalent
-   on the box. Options: Docker rootless mode (`dockerd-rootless-setuptool.sh`, needs
-   `net.ipv4.ip_unprivileged_port_start=0` for ports 80/443) or podman with `podman.socket` and
-   `podman compose`. Both need a test pass; the compose file has no Docker-only features.
 2. **Agent images.** Default: the upstream `ghcr.io/zooid-ai/agent-*:latest` images (unpinned, pulled by the
    daemon on first start; `deploy.sh --refresh-agent-images` pulls newer ones). The fork's
    `publish-agent-images.yml` still pushes to `zooid-ai` and would fail here. Decide whether to build and
    pin images under `ghcr.io/jan3dev` (needs the preset image names in `packages/acp-client/src/presets.ts`
    and the four Dockerfiles changed) or keep upstream's.
-3. **Agents run as root inside their containers.** Upstream passes no `--user`. On a rootful engine, files
-   the agents write under `workforce/agents/<name>/` belong to root on the host. Consequences: `backup.sh`
-   needs read access (`sudo deploy/backup.sh --zooid-home /home/<user>/zooid`, because `sudo` resets `HOME`),
-   and the daemon, which runs as the deploy user, cannot write into root-owned directories an agent created
-   (attachments go to `<workdir>/.zooid/attachments`; the daemon creates that directory first, so this only
-   bites when an agent deletes and recreates it). Not changed in this branch.
 4. **Prod cutover.** Default: migrate the current prod data with `backup.sh`-style tar (manual on the old
    layout, see `README.md`) into a freshly provisioned box (`zooid-stage` exists), then move DNS. The public IP
    of the Lightsail instances is not static; attach a static IP before the cutover. Alternative: run

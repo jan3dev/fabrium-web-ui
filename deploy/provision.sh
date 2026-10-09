@@ -11,7 +11,8 @@ usage() {
   cat <<USAGE
 Usage: provision.sh [--repo-dir DIR] [--branch B] [--zooid-home DIR] [--repo-url URL]
 
-Installs Docker CE + compose plugin, clones the repo, creates the ZOOID_HOME
+Installs rootless podman, the docker CLI + compose plugin, enables the user
+podman socket and restart at boot, clones the repo, creates the ZOOID_HOME
 layout, and generates .env and zooid.yaml when missing. Ubuntu only. Needs sudo.
 
   --repo-dir DIR     repo clone path       (default: \$HOME/fabrium-web-ui)
@@ -51,25 +52,53 @@ log "Installing base packages"
 sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update
 sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y ca-certificates curl git gnupg openssl
 
-# --- Docker CE ----------------------------------------------------------
-if docker compose version >/dev/null 2>&1 || sudo docker compose version >/dev/null 2>&1; then
-  log "Docker with compose plugin already installed; skipping"
+# --- Rootless podman + docker CLI ----------------------------------------
+# The engine is rootless podman (same as the old prod). deploy.sh drives it
+# with the docker CLI and compose plugin through podman's Docker-compatible
+# socket; Docker's daemon (docker-ce) is not installed.
+log "Installing rootless podman"
+sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y \
+  podman uidmap passt slirp4netns netavark aardvark-dns
+grep -q "^$(id -un):" /etc/subuid || die "no /etc/subuid entry for $(id -un); rootless podman needs one"
+
+if docker compose version >/dev/null 2>&1; then
+  log "docker CLI with compose plugin already installed; skipping"
 else
-  log "Installing Docker CE from the official apt repository"
+  log "Installing the docker CLI and compose plugin from Docker's apt repository"
   sudo install -m 0755 -d /etc/apt/keyrings
   sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
   sudo chmod a+r /etc/apt/keyrings/docker.asc
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
     | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
   sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update
-  sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y docker-ce-cli docker-compose-plugin docker-buildx-plugin
 fi
 
-if ! id -nG "$(id -un)" | tr ' ' '\n' | grep -qx docker; then
-  log "Adding $(id -un) to the docker group (log out and in to apply)"
-  sudo usermod -aG docker "$(id -un)"
+# Caddy publishes 80 and 443 from a rootless container.
+log "Allowing unprivileged ports from 80"
+echo "net.ipv4.ip_unprivileged_port_start=80" | sudo tee /etc/sysctl.d/90-rootless-ports.conf >/dev/null
+sudo sysctl -q --system
+
+# Linger keeps the user's systemd instance (socket and containers) alive
+# without a login session and starts it at boot. podman-restart.service then
+# starts every container with restart: always.
+log "Enabling linger, podman.socket and podman-restart.service for $(id -un)"
+sudo loginctl enable-linger "$(id -un)"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [ -S "$XDG_RUNTIME_DIR/bus" ] && break
+  sleep 1
+done
+systemctl --user enable --now podman.socket
+systemctl --user enable podman-restart.service
+
+DOCKER_HOST_LINE="export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock"
+if ! grep -qxF "$DOCKER_HOST_LINE" "$HOME/.bashrc" 2>/dev/null; then
+  log "Adding DOCKER_HOST to ~/.bashrc"
+  printf '%s\n' "$DOCKER_HOST_LINE" >>"$HOME/.bashrc"
 fi
-sudo systemctl enable --now docker
+export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"
+docker version >/dev/null || die "docker CLI cannot reach podman at $DOCKER_HOST"
 
 # --- Repo ---------------------------------------------------------------
 if [ ! -d "$REPO_DIR/.git" ]; then
@@ -117,7 +146,7 @@ else
   log "$YAML_FILE exists; not touched"
 fi
 
-cat <<NEXT
+cat <<EOF_NEXT
 
 NEXT STEPS
   1. Edit $ENV_FILE: SERVER_NAME, SITE_ADDRESS, HOMESERVER_URL and the agent secrets.
@@ -125,6 +154,6 @@ NEXT STEPS
   3. Put agent auth under $ZOOID_HOME/home/
      (for example .config/opencode and .local/share/opencode).
   4. Open ports 80 and 443 in the Lightsail firewall. Point DNS at the box.
-  5. Log out and in again so the docker group applies.
+  5. Open a new shell (or: source ~/.bashrc) so DOCKER_HOST applies.
   6. Run: $REPO_DIR/deploy/deploy.sh
-NEXT
+EOF_NEXT
