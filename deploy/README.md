@@ -192,7 +192,3 @@ To see an agent start, invite that user to `#zooid`, send a message that mention
 mounted from `ZOOID_HOME`.
 
 Tear down: `docker compose -p fabrium down -v && rm -rf ~/zooid-local`.
-
-## Open decisions
-
-See [`DECISIONS.md`](./DECISIONS.md).
