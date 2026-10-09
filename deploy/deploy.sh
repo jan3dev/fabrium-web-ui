@@ -285,13 +285,23 @@ fi
 # --- 10. summary ----------------------------------------------------------
 log "deploy ok: branch=$BRANCH $OLD_SHA -> $NEW_SHA"
 compose ps
+# The previous deploy is the last sha in deploy.log that differs from this one
+# (OLD_SHA is only the checkout before the pull, which equals GIT_SHA on --no-pull).
+PREV_SHA=""
+if [ -f "$ZOOID_HOME/deploy.log" ]; then
+  PREV_SHA="$(sed -nE 's/.* sha=([0-9a-f]+) ok$/\1/p' "$ZOOID_HOME/deploy.log" | grep -vx "$GIT_SHA" | tail -n 1 || true)"
+fi
 printf '%s branch=%s sha=%s ok\n' "$(date -u +%FT%TZ)" "$BRANCH" "$NEW_SHA" >>"$ZOOID_HOME/deploy.log"
 
-# Keep the images of this deploy and of the previous one (rollback); drop the rest.
+# Keep the images of this deploy and of the previous one (rollback); drop the
+# other fabrium-zooid/fabrium-web tags. Only images built from this repo.
+keep="$GIT_SHA"
+[ -z "$PREV_SHA" ] || keep="$keep|$PREV_SHA"
 old_images="$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null |
-  grep -E '^fabrium-(zooid|web):' | grep -v -E ":(${GIT_SHA}|${OLD_SHA})$" || true)"
+  grep -E '^fabrium-(zooid|web):' | grep -v -E ":(${keep})$" || true)"
 for img in $old_images; do
   log "removing old image $img"
   docker rmi "$img" >/dev/null 2>&1 || warn "could not remove $img"
 done
-docker image prune -f >/dev/null 2>&1 || true
+# Untagged leftovers of a rebuilt tag; the label limits this to this repo's images.
+docker image prune -f --filter label=fabrium.image=true >/dev/null 2>&1 || true

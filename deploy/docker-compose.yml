@@ -36,6 +36,9 @@ services:
       target: daemon
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
+      # deploy.sh prunes only images with this label.
+      labels:
+        fabrium.image: "true"
     working_dir: ${ZOOID_HOME}/workforce
     user: "${DAEMON_UID:-0}:${DAEMON_GID:-0}"
     group_add:
@@ -75,6 +78,9 @@ services:
       target: web
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
+      # deploy.sh prunes only images with this label.
+      labels:
+        fabrium.image: "true"
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS}
       APPSERVICE_PORT: ${APPSERVICE_PORT:-9000}
