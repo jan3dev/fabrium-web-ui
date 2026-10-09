@@ -45,7 +45,9 @@ OS_VERSION="$(. /etc/os-release && echo "${VERSION_ID:-}")"
 [ "$OS_ID" = "ubuntu" ] || die "unsupported OS '$OS_ID'. This script supports Ubuntu only."
 [ "$OS_VERSION" = "24.04" ] || warn "Ubuntu $OS_VERSION found; 24.04 is the tested version."
 command -v sudo >/dev/null 2>&1 || die "sudo is required."
-sudo -v || die "sudo authentication failed."
+# `sudo -v` asks for a password even with NOPASSWD when another sudoers rule
+# matches without it (the %sudo group on Ubuntu cloud images); try -n first.
+sudo -n true 2>/dev/null || sudo -v || die "sudo authentication failed."
 
 # --- Base packages ------------------------------------------------------
 log "Installing base packages"
