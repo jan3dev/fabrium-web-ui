@@ -51,7 +51,8 @@ All scripts take `-h`. They never print secret values.
    ```
    Open a new shell (or `source ~/.bashrc`) so `DOCKER_HOST` points the docker CLI at podman.
 3. Edit `~/zooid/.env`: `SERVER_NAME`, `SITE_ADDRESS`, `HOMESERVER_URL`, agent secrets (`GH_TOKEN`, `HAVEN_API_KEY`, …).
-   See `deploy/.env.example` for every key.
+   See `deploy/.env.example` for every key. Format: `KEY=value`, one per line; no inline comments after a
+   value, no `$` in values, no quotes needed. `deploy.sh` refuses `<placeholders>`.
 4. Edit `~/zooid/workforce/zooid.yaml` (agents, rooms). Rules: `runtime: docker`, `homeserver: http://tuwunel:8448`,
    `port` equal to `APPSERVICE_PORT`, `user_namespace` host equal to `SERVER_NAME`.
 5. Put agent credentials under `~/zooid/home/` (for opencode: `.config/opencode/` and `.local/share/opencode/`).

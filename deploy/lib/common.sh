@@ -115,10 +115,9 @@ compose() {
   fi
 }
 
-# engine_env: export ENGINE (docker or podman), DOCKER_SOCK and DAEMON_UID/GID
-# defaults. Rootless podman (provision.sh) is reached through DOCKER_HOST; its
-# socket is bind-mounted into the daemon container, and container root is the
-# deploy user on the host, so the daemon runs as uid 0 there.
+# engine_env: export ENGINE (docker or podman), DOCKER_SOCK and the DAEMON_UID/GID defaults.
+# On podman the socket comes from DOCKER_HOST and the daemon runs as uid 0 (the deploy user on the host).
+# See "Engine: rootless podman" in deploy/README.md.
 engine_env() {
   ENGINE=docker
   if docker version --format '{{range .Server.Components}}{{.Name}};{{end}}' 2>/dev/null | grep -q 'Podman'; then

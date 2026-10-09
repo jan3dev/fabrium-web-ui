@@ -38,10 +38,8 @@ export const CONTEXT_CONTAINER_SOCK = '/zooid/context.sock'
  * subprocess connect()s to it). Host sources default to the resolved package
  * dist and the passed daemon socket path.
  *
- * `binHostDir` overrides the bin dir's host source. Set it when the daemon
- * itself runs in a container: the resolved `dist/` is then a path inside the
- * daemon's filesystem, but the container engine resolves `-v` sources on the
- * host, so it needs the host path of the directory that contains `bin.js`.
+ * `binHostDir` overrides the bin dir's host source. Set it when the daemon runs in a
+ * container: the engine resolves `-v` sources on the host, not in the daemon's filesystem.
  */
 export function contextContainerMounts(opts: {
   sockPath: string
