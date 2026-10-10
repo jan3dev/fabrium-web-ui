@@ -446,6 +446,24 @@ describe('matrix transport /transactions', () => {
   })
 })
 
+describe('dev.zooid.approval_response from an agent', () => {
+  it('is ignored', async () => {
+    const { transport, approvals } = makeTransport()
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'dev.zooid.approval_response',
+          event_id: '$resp',
+          room_id: '!r:example.com',
+          sender: '@architect:example.com',
+          content: { approval_id: 'a1', session_id: 'sess-$root', decision: 'allow' },
+        },
+      ],
+    })
+    expect(approvals.resolve).not.toHaveBeenCalled()
+  })
+})
+
 describe('dev.zooid.turn.end', () => {
   function topLevelMention() {
     return {

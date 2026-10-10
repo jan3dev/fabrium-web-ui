@@ -3,7 +3,7 @@ import type { AgentBinding } from './router.js'
 
 export interface WorkforceRoster {
   version: 1
-  agents: { user_id: string; name: string; rooms: string[] }[]
+  agents: { user_id: string; name: string; rooms: string[]; persona?: string; project?: string }[]
 }
 
 export function buildWorkforceRoster(agents: AgentBinding[]): WorkforceRoster {
@@ -13,6 +13,8 @@ export function buildWorkforceRoster(agents: AgentBinding[]): WorkforceRoster {
       user_id: a.userId,
       name: a.name,
       rooms: a.rooms.map((r) => r.alias),
+      ...(a.persona ? { persona: a.persona } : {}),
+      ...(a.project ? { project: a.project } : {}),
     })),
   }
 }
@@ -68,6 +70,8 @@ export interface WorkforceEntry {
   name: string
   workstation?: string
   rooms: string[]
+  persona?: string
+  project?: string
 }
 
 /**
@@ -97,6 +101,8 @@ export class WorkforceDirectory {
             name: typeof a.name === 'string' ? a.name : a.user_id,
             workstation: stateKey || undefined,
             rooms: Array.isArray(a.rooms) ? a.rooms.filter((r): r is string => typeof r === 'string') : [],
+            ...(typeof a.persona === 'string' ? { persona: a.persona } : {}),
+            ...(typeof a.project === 'string' ? { project: a.project } : {}),
           }))
       : []
     if (entries.length > 0) this.rosters.set(stateKey, entries)

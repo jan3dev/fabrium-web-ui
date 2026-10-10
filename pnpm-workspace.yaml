@@ -1,2 +1,10 @@
 packages:
   - packages/*
+
+# Only resolve dependency versions published at least 3 days ago (minutes).
+minimumReleaseAge: 4320
+
+allowBuilds:
+  esbuild: true
+  # Only copies a mock service worker into a public dir; nothing here uses it.
+  msw: false

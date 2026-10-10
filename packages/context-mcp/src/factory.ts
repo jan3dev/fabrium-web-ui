@@ -37,14 +37,18 @@ export const CONTEXT_CONTAINER_SOCK = '/zooid/context.sock'
  * is read-only (self-contained bundle); the socket is read-write (the MCP
  * subprocess connect()s to it). Host sources default to the resolved package
  * dist and the passed daemon socket path.
+ *
+ * `binHostDir` overrides the bin dir's host source. Set it when the daemon runs in a
+ * container: the engine resolves `-v` sources on the host, not in the daemon's filesystem.
  */
 export function contextContainerMounts(opts: {
   sockPath: string
   binPath?: string
+  binHostDir?: string
 }): AcpMount[] {
-  const binFile = opts.binPath ?? getDefaultBin()
+  const binDir = opts.binHostDir ?? dirname(opts.binPath ?? getDefaultBin())
   return [
-    { path: dirname(binFile), target: CONTEXT_CONTAINER_BIN_DIR, mode: 'ro' },
+    { path: binDir, target: CONTEXT_CONTAINER_BIN_DIR, mode: 'ro' },
     { path: opts.sockPath, target: CONTEXT_CONTAINER_SOCK, mode: 'rw' },
   ]
 }

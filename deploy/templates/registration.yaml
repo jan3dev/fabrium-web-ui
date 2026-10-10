@@ -1,0 +1,17 @@
+# Rendered by deploy/deploy.sh into ${ZOOID_HOME}/data/matrix/config/registrations/zooid.yaml (mode 600).
+# Placeholders: APPSERVICE_PORT, MATRIX_AS_TOKEN, MATRIX_HS_TOKEN, SERVER_NAME_RE
+# (SERVER_NAME with regex metacharacters escaped).
+id: zooid
+url: http://zooid:${APPSERVICE_PORT}
+as_token: ${MATRIX_AS_TOKEN}
+hs_token: ${MATRIX_HS_TOKEN}
+sender_localpart: zooid
+rate_limited: false
+namespaces:
+  users:
+    - exclusive: false
+      regex: '@.*:${SERVER_NAME_RE}'
+  aliases:
+    - exclusive: false
+      regex: '#.*:${SERVER_NAME_RE}'
+  rooms: []

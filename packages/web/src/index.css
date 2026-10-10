@@ -1,0 +1,608 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/manrope";
+@import "@fontsource-variable/inter";
+@import "./styles/tokens.css";
+@import "./styles/fabrium-tokens.css";
+
+@plugin "@tailwindcss/typography";
+
+/* `dark:` follows the data-theme attribute, on <html> or on any island. */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/*
+ * Bridge the semantic tokens into Tailwind, so utilities read as token names:
+ * bg-surface-primary, text-text-secondary, rounded-card, shadow-modal, text-body2.
+ * `inline` keeps var() references live, so they re-resolve when data-theme flips.
+ * Every key here must point at a differently named token (see styles/tokens.css).
+ */
+@theme inline {
+	--color-text-primary: var(--text-primary);
+	--color-text-secondary: var(--text-secondary);
+	--color-text-tertiary: var(--text-tertiary);
+	--color-text-inverse: var(--text-inverse);
+
+	--color-surface-primary: var(--surface-primary);
+	--color-surface-secondary: var(--surface-secondary);
+	--color-surface-tertiary: var(--surface-tertiary);
+	--color-surface-inverse: var(--surface-inverse);
+	--color-surface-background: var(--surface-background);
+	--color-surface-selected: var(--surface-selected);
+	--color-surface-border-primary: var(--surface-border-primary);
+	--color-surface-border-secondary: var(--surface-border-secondary);
+	--color-surface-border-selected: var(--surface-border-selected);
+
+	--color-kbd-background: var(--kbd-background);
+
+	--color-glass-surface: var(--glass-surface);
+	--color-glass-surface-secondary: var(--glass-surface-secondary);
+	--color-glass-surface-border: var(--glass-surface-border);
+	--color-glass-inverse: var(--glass-inverse);
+	--color-glass-background: var(--glass-background);
+
+	--color-accent-brand: var(--accent-brand);
+	--color-accent-brand-transparent: var(--accent-brand-transparent);
+	--color-accent-success: var(--accent-success);
+	--color-accent-success-transparent: var(--accent-success-transparent);
+	--color-accent-warning: var(--accent-warning);
+	--color-accent-warning-transparent: var(--accent-warning-transparent);
+	--color-accent-danger: var(--accent-danger);
+	--color-accent-danger-transparent: var(--accent-danger-transparent);
+	--color-accent-thinking: var(--accent-thinking);
+
+	--color-chip-success-background: var(--chip-success-background);
+	--color-chip-success-foreground: var(--chip-success-foreground);
+	--color-chip-error-background: var(--chip-error-background);
+	--color-chip-error-foreground: var(--chip-error-foreground);
+	--color-chip-brand-background: var(--chip-brand-background);
+	--color-chip-brand-foreground: var(--chip-brand-foreground);
+
+	--color-button-primary-background: var(--button-primary-background);
+	--color-button-primary-background-flat: var(--button-primary-background-flat);
+	--color-button-primary-foreground: var(--button-primary-foreground);
+	--color-button-utility-background: var(--button-utility-background);
+	--color-button-utility-foreground: var(--button-utility-foreground);
+
+	--font-heading: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+	--font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+	--font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+	--text-h1: 50px;
+	--text-h1--line-height: 1.25;
+	--text-h1--letter-spacing: -0.5px;
+	--text-h2: 40px;
+	--text-h2--line-height: 1.25;
+	--text-h2--letter-spacing: -0.4px;
+	--text-h3: 30px;
+	--text-h3--line-height: 1.375;
+	--text-h3--letter-spacing: -0.3px;
+	--text-h4: 24px;
+	--text-h4--line-height: 1.375;
+	--text-h4--letter-spacing: -0.24px;
+	--text-h5: 20px;
+	--text-h5--line-height: 1.375;
+	--text-h5--letter-spacing: -0.2px;
+	--text-subtitle: 18px;
+	--text-subtitle--line-height: 1.5;
+	--text-subtitle--letter-spacing: -0.18px;
+	--text-body1: 16px;
+	--text-body1--line-height: 1.625;
+	--text-body1--letter-spacing: -0.16px;
+	--text-body2: 14px;
+	--text-body2--line-height: 1.625;
+	--text-body2--letter-spacing: -0.14px;
+	--text-caption1: 12px;
+	--text-caption1--line-height: 1.5;
+	--text-caption1--letter-spacing: 0;
+	--text-caption2: 10px;
+	--text-caption2--line-height: 1.5;
+	--text-caption2--letter-spacing: 0;
+
+	--radius-pill: var(--fab-radius-pill);
+	--radius-utility: var(--fab-radius-utility);
+	--radius-card: var(--fab-radius-card);
+	--radius-modal: var(--fab-radius-modal);
+
+	--shadow-button: var(--elevation-button);
+	--shadow-surface: var(--elevation-surface);
+	--shadow-modal: var(--elevation-modal);
+
+	--blur-glass: var(--fab-blur-glass);
+	--blur-glass-strong: var(--fab-blur-glass-strong);
+
+	--ease-standard: var(--fab-ease-standard);
+
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-destructive: var(--destructive);
+	--color-destructive-foreground: var(--destructive-foreground);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+	--color-warning: var(--warning);
+	--color-sidebar: var(--sidebar);
+	--color-sidebar-foreground: var(--sidebar-foreground);
+	--color-sidebar-primary: var(--sidebar-primary);
+	--color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+	--color-sidebar-accent: var(--sidebar-accent);
+	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+	--color-sidebar-active: var(--sidebar-active);
+	--color-sidebar-active-foreground: var(--sidebar-active-foreground);
+	--color-sidebar-border: var(--sidebar-border);
+	--color-sidebar-ring: var(--sidebar-ring);
+
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
+	--radius-2xl: calc(var(--radius) * 1.8);
+	--radius-3xl: calc(var(--radius) * 2.2);
+	--radius-4xl: calc(var(--radius) * 2.6);
+
+	--color-actor-agent: var(--actor-agent);
+	--color-actor-agent-transparent: var(--actor-agent-transparent);
+	--color-actor-human: var(--actor-human);
+	--color-actor-human-transparent: var(--actor-human-transparent);
+	--color-actor-system: var(--actor-system);
+	--color-actor-system-transparent: var(--actor-system-transparent);
+	--color-trust-enclave: var(--trust-enclave);
+	--color-trust-enclave-transparent: var(--trust-enclave-transparent);
+	--color-control-plane: var(--control-plane);
+	--color-control-plane-transparent: var(--control-plane-transparent);
+	--color-risk: var(--risk);
+	--color-risk-transparent: var(--risk-transparent);
+	--color-money: var(--money);
+	--color-money-transparent: var(--money-transparent);
+}
+
+/*
+ * shadcn variable names, aliased to the semantic tokens so copied shadcn classes
+ * (bg-background, text-muted-foreground) render in the design system unchanged.
+ * Declared on every theme root so a [data-theme] island resolves its own values.
+ */
+:root,
+[data-theme] {
+	--font-manrope: "Manrope Variable";
+	--font-inter: "Inter Variable";
+
+	--background: var(--surface-background);
+	--foreground: var(--text-primary);
+	--card: var(--surface-primary);
+	--card-foreground: var(--text-primary);
+	--popover: var(--surface-primary);
+	--popover-foreground: var(--text-primary);
+	--primary: var(--button-primary-background);
+	--primary-foreground: var(--button-primary-foreground);
+	--secondary: var(--surface-secondary);
+	--secondary-foreground: var(--text-primary);
+	--muted: var(--surface-secondary);
+	--muted-foreground: var(--text-secondary);
+	--accent: var(--surface-selected);
+	--accent-foreground: var(--text-primary);
+	--destructive: var(--accent-danger);
+	/* On scarlet-500: 5.3:1 in dark, 3.5:1 (white) in light. Bold or large text only. */
+	--destructive-foreground: var(--text-inverse);
+	--border: var(--surface-border-primary);
+	--input: var(--surface-border-secondary);
+	--ring: var(--button-focus-ring);
+	--warning: var(--accent-warning);
+	--sidebar: var(--surface-primary);
+	--sidebar-foreground: var(--text-primary);
+	--sidebar-primary: var(--accent-brand);
+	--sidebar-primary-foreground: var(--button-primary-foreground);
+	--sidebar-accent: var(--surface-secondary);
+	--sidebar-accent-foreground: var(--text-primary);
+	--sidebar-active: var(--surface-selected);
+	--sidebar-active-foreground: var(--text-primary);
+	--sidebar-border: var(--surface-border-primary);
+	--sidebar-ring: var(--button-focus-ring);
+	--radius: var(--fab-radius-utility);
+}
+
+@layer base {
+	*,
+	*::before,
+	*::after {
+		border-color: var(--surface-border-primary);
+	}
+
+	html {
+		-webkit-text-size-adjust: 100%;
+	}
+
+	body {
+		background-color: var(--surface-background);
+		color: var(--text-primary);
+		font: var(--text-body1) / var(--text-body1--line-height) var(--font-sans);
+		letter-spacing: var(--text-body1--letter-spacing);
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+	}
+
+	h1,
+	h2,
+	h3,
+	h4,
+	h5,
+	h6 {
+		font-family: var(--font-heading);
+	}
+
+	:focus-visible {
+		outline: var(--fab-focus-ring-width) solid var(--button-focus-ring);
+		outline-offset: var(--fab-focus-ring-offset);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		*,
+		*::before,
+		*::after,
+		*::backdrop {
+			animation-duration: 0.01ms !important;
+			animation-iteration-count: 1 !important;
+			transition-duration: 0.01ms !important;
+			scroll-behavior: auto !important;
+		}
+	}
+}
+
+@layer components {
+	.markdown {
+		overflow-wrap: anywhere;
+	}
+
+	/* The composer's TipTap document: chat-tight paragraphs and a placeholder. */
+	.composer-editor > :first-child,
+	.composer-editor p {
+		margin-top: 0;
+	}
+	.composer-editor p.is-editor-empty:first-child::before {
+		content: attr(data-placeholder);
+		float: left;
+		height: 0;
+		color: var(--text-tertiary);
+		pointer-events: none;
+	}
+
+	.markdown > div:first-child > :first-child {
+		margin-top: 0;
+	}
+
+	.markdown p,
+	.markdown ul,
+	.markdown ol,
+	.markdown .md-table {
+		margin-top: 12px;
+	}
+
+	.markdown blockquote {
+		margin-top: 1em;
+	}
+
+	.markdown h1,
+	.markdown h2,
+	.markdown h3,
+	.markdown h4,
+	.markdown h5,
+	.markdown h6 {
+		font-family: var(--font-heading);
+		font-weight: 600;
+		line-height: 1.375;
+		margin-top: 1.5em;
+	}
+
+	.markdown h1 {
+		font-size: var(--text-h4);
+		margin: 28px 0 8px;
+	}
+	.markdown h2 {
+		font-size: var(--text-h5);
+		margin: 24px 0 8px;
+	}
+	.markdown h3 {
+		font-size: var(--text-subtitle);
+		margin: 20px 0 8px;
+	}
+	.markdown h4,
+	.markdown h5,
+	.markdown h6 {
+		font-size: var(--text-body1);
+	}
+
+	.markdown ul,
+	.markdown ol {
+		padding-inline-start: 1.5em;
+	}
+	.markdown ul {
+		list-style: disc;
+	}
+	.markdown ol {
+		list-style: decimal;
+	}
+	.markdown li + li {
+		margin-top: 4px;
+	}
+
+	.markdown li > ul,
+	.markdown li > ol {
+		margin-top: 0.25em;
+	}
+
+	.markdown a {
+		color: var(--accent-brand);
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+
+	.markdown strong {
+		font-weight: 600;
+	}
+
+	.markdown blockquote {
+		border-inline-start: 2px solid var(--surface-border-secondary);
+		padding-inline-start: 1em;
+		color: var(--text-secondary);
+	}
+
+	.markdown hr {
+		margin-block: 1.5em;
+		border-top: 1px solid var(--surface-border-primary);
+	}
+
+	.markdown .md-code-block {
+		margin-top: 12px;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+
+	.markdown :not(pre) > code {
+		font-family: var(--font-mono);
+		font-size: 0.9em;
+		background-color: var(--surface-secondary);
+		border-radius: 4px;
+		padding: 0.15em 0.35em;
+	}
+
+	.markdown .md-table {
+		overflow-x: auto;
+	}
+	.markdown table {
+		border-collapse: collapse;
+		font-size: var(--text-body2);
+	}
+	.markdown th,
+	.markdown td {
+		border: 1px solid var(--surface-border-primary);
+		padding: 0.5em 0.75em;
+		text-align: start;
+
+		min-width: 80px;
+	}
+	.markdown th {
+		background-color: var(--surface-secondary);
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	.markdown img {
+		max-width: 100%;
+		height: auto;
+		border-radius: var(--fab-radius-utility);
+	}
+
+	.hljs-comment,
+	.hljs-quote {
+		color: var(--syntax-comment);
+		font-style: italic;
+	}
+	.hljs-keyword,
+	.hljs-selector-tag,
+	.hljs-literal,
+	.hljs-doctag,
+	.hljs-name {
+		color: var(--syntax-keyword);
+	}
+	.hljs-string,
+	.hljs-regexp,
+	.hljs-addition,
+	.hljs-attribute,
+	.hljs-meta .hljs-string {
+		color: var(--syntax-string);
+	}
+	.hljs-number,
+	.hljs-symbol,
+	.hljs-bullet,
+	.hljs-link,
+	.hljs-variable,
+	.hljs-template-variable,
+	.hljs-type,
+	.hljs-built_in {
+		color: var(--syntax-number);
+	}
+	.hljs-title,
+	.hljs-section,
+	.hljs-selector-id,
+	.hljs-selector-class {
+		color: var(--syntax-title);
+		font-weight: 600;
+	}
+	.hljs-deletion,
+	.hljs-meta {
+		color: var(--syntax-meta);
+	}
+	.hljs-emphasis {
+		font-style: italic;
+	}
+	.hljs-strong {
+		font-weight: 600;
+	}
+}
+
+:root {
+	--scrollbar-thickness: 8px;
+
+	/* Motion durations for components: `duration-(--duration-fast)`. */
+	--duration-fast: var(--fab-duration-fast);
+	--duration-base: var(--fab-duration-base);
+}
+
+@utility scrollbar-custom {
+	scrollbar-width: thin;
+	scrollbar-color: var(--surface-tertiary) transparent;
+
+	&::-webkit-scrollbar {
+		width: var(--scrollbar-thickness);
+		height: var(--scrollbar-thickness);
+	}
+	&::-webkit-scrollbar-track {
+		background: transparent;
+	}
+	&::-webkit-scrollbar-thumb {
+		background-color: var(--surface-tertiary);
+		border-radius: 4px;
+	}
+}
+
+@utility modal-motion {
+	animation: fab-modal-in var(--fab-duration-base) var(--fab-ease-standard);
+
+	&::backdrop {
+		animation: fab-modal-backdrop-in var(--fab-duration-base) var(--fab-ease-standard);
+	}
+
+	&[data-state="closing"],
+	&[data-state="closed"] {
+		animation: fab-modal-out var(--fab-duration-fast) var(--fab-ease-standard) forwards;
+
+		pointer-events: none;
+	}
+
+	&[data-state="closing"]::backdrop {
+		animation: fab-modal-backdrop-out var(--fab-duration-fast) var(--fab-ease-standard) forwards;
+	}
+
+	@media (width < 48rem) {
+		&[data-sheet] {
+			animation-name: fab-sheet-in;
+		}
+
+		&[data-sheet][data-state="closing"],
+		&[data-sheet][data-state="closed"] {
+			animation-name: fab-sheet-out;
+		}
+	}
+}
+
+/* The scrim behind a Radix dialog: fades with modal-motion. */
+@utility backdrop-motion {
+	animation: fab-modal-backdrop-in var(--fab-duration-base) var(--fab-ease-standard);
+
+	&[data-state="closed"] {
+		animation: fab-modal-backdrop-out var(--fab-duration-fast) var(--fab-ease-standard) forwards;
+	}
+}
+
+@utility drawer-motion {
+	animation: fab-drawer-in var(--fab-duration-base) var(--fab-ease-standard);
+
+	&[data-state="closing"] {
+		animation: fab-drawer-out var(--fab-duration-fast) var(--fab-ease-standard) forwards;
+		pointer-events: none;
+	}
+
+	@media (min-width: 48rem) {
+		animation-name: fab-drawer-in-md;
+
+		&[data-state="closing"] {
+			animation-name: fab-drawer-out-md;
+		}
+	}
+}
+
+@keyframes fab-drawer-in {
+	from {
+		transform: translateX(100%);
+	}
+}
+
+@keyframes fab-drawer-out {
+	to {
+		transform: translateX(100%);
+	}
+}
+
+@keyframes fab-drawer-in-md {
+	from {
+		width: 0;
+		min-width: 0;
+		transform: translateX(40%);
+		opacity: 0;
+	}
+}
+
+@keyframes fab-drawer-out-md {
+	to {
+		width: 0;
+		min-width: 0;
+		transform: translateX(40%);
+		opacity: 0;
+	}
+}
+
+@keyframes fab-sheet-in {
+	from {
+		transform: translateY(100%);
+	}
+}
+
+@keyframes fab-sheet-out {
+	to {
+		transform: translateY(100%);
+	}
+}
+
+@keyframes fab-tooltip-in {
+	from {
+		opacity: 0;
+		transform: translateY(2px);
+	}
+}
+
+@keyframes fab-modal-in {
+	from {
+		opacity: 0;
+		transform: translateY(4px) scale(0.98);
+	}
+}
+
+@keyframes fab-modal-out {
+	to {
+		opacity: 0;
+		transform: translateY(2px) scale(0.99);
+	}
+}
+
+@keyframes fab-modal-backdrop-in {
+	from {
+		opacity: 0;
+	}
+}
+
+@keyframes fab-modal-backdrop-out {
+	to {
+		opacity: 0;
+	}
+}

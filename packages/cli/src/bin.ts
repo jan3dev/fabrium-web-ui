@@ -36,7 +36,7 @@ cli
   .option('--admin-password <pw>', 'Admin password', { default: 'admin' })
   .option(
     '--watch-web [path]',
-    'Run vite build --watch on @zooid/web. Path defaults to sibling ../zooid-clients/packages/web.',
+    'Run vite build --watch on the web UI. Path defaults to packages/web in this repo.',
   )
   .example('$ zooid dev')
   .example('$ zooid dev --engine podman --ui-port 5174')

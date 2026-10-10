@@ -82,6 +82,18 @@ describe('contextContainerMounts', () => {
     ])
   })
 
+  it('mounts binHostDir as the bin source when the daemon runs in a container', () => {
+    const mounts = contextContainerMounts({
+      sockPath: '/data/run/context.sock',
+      binPath: '/app/node_modules/@zooid/context-mcp/dist/bin.js',
+      binHostDir: '/host/ctx',
+    })
+    expect(mounts).toEqual([
+      { path: '/host/ctx', target: CONTEXT_CONTAINER_BIN_DIR, mode: 'ro' },
+      { path: '/data/run/context.sock', target: CONTEXT_CONTAINER_SOCK, mode: 'rw' },
+    ])
+  })
+
   it('uses each agent host socket at the same container target', () => {
     const alice = contextContainerMounts({ sockPath: '/data/run/context-alice.sock' })
     const bob = contextContainerMounts({ sockPath: '/data/run/context-bob.sock' })

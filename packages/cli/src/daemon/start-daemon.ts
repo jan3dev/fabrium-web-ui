@@ -235,6 +235,8 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         trigger: a.matrix.trigger,
       }
       if (a.matrix.display_name !== undefined) binding.displayName = a.matrix.display_name
+      if (a.persona !== undefined) binding.persona = a.persona
+      if (a.project !== undefined) binding.project = a.project
       // Resolve workspace dirs for media attachment routing.
       const workspaceDir = isAbsolute(a.workdir) ? a.workdir : resolve(configDir, a.workdir)
       binding.workspaceDir = workspaceDir

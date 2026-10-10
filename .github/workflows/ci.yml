@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v4
         with:
@@ -30,6 +30,9 @@ jobs:
 
       - name: Typecheck
         run: pnpm typecheck
+
+      - name: Web design guard
+        run: pnpm -C packages/web lint
 
       - name: Build
         run: pnpm build

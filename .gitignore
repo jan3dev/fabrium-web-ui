@@ -17,3 +17,10 @@ playwright-report/
 
 # npm pack output (isolated-build deploys; see manage-community-ec2 skill)
 packages/cli/*.tgz
+
+# Local deploy test state (deploy/README.md)
+.local/
+
+# oh-my-claudecode state
+.omc/
+**/.omc/

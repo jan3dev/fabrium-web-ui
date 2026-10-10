@@ -1,0 +1,211 @@
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
+import { MatrixClientPeg } from "@/client/peg";
+import { QUOTE_FIELD, type QuoteRef } from "@/lib/matrix/quote";
+import { getQuoteDraft, resetQuoteDrafts } from "@/lib/quote-draft-store";
+import { makeFakeClient, makeMatrixEvent, makeRoom, pushTimelineEvent } from "../../../test/factories";
+import { MemoryRouter } from "react-router-dom";
+import { ThreadPane } from "../structures/thread-pane";
+import { TimelinePanel } from "../structures/timeline-panel";
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+const roomId = "!r:h.example";
+const me = "@me:h.example";
+let writeText: ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+});
+afterEach(() => {
+  MatrixClientPeg.reset();
+  resetQuoteDrafts();
+  vi.clearAllMocks();
+});
+
+function setup(content: Record<string, unknown>, opts: { sender?: string; eventId?: string } = {}) {
+  const client = makeFakeClient({ userId: me });
+  const room = makeRoom(roomId, { client, myUserId: me });
+  const cast = client as unknown as Record<string, unknown>;
+  cast.getRoom = () => room;
+  cast.sendEvent = vi.fn().mockResolvedValue({ event_id: "$new" });
+  MatrixClientPeg.injectClientForTest(client);
+  const event = makeMatrixEvent({
+    eventId: opts.eventId ?? "$m1",
+    roomId,
+    sender: opts.sender ?? "@coding:h.example",
+    type: "m.room.message",
+    content,
+  });
+  pushTimelineEvent(room, event);
+  return { client: cast, room, event };
+}
+
+function renderRoom() {
+  return render(
+    <MemoryRouter>
+      <TimelinePanel roomId={roomId} onOpenThread={() => {}} />
+    </MemoryRouter>,
+  );
+}
+
+function renderThread(rootId: string) {
+  return render(
+    <MemoryRouter>
+      <ThreadPane roomId={roomId} rootEventId={rootId} onClose={() => {}} />
+    </MemoryRouter>,
+  );
+}
+
+async function openMenu() {
+  const user = userEvent.setup();
+  // userEvent.setup() installs its own clipboard stub; put ours back on top.
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  await user.click(screen.getByRole("button", { name: /more actions/i }));
+  return user;
+}
+
+describe("message hover bar", () => {
+  it("shows React, Reply in thread, Copy link and More; Edit/Delete live in the menu", () => {
+    setup({ msgtype: "m.text", body: "hi" }, { sender: me });
+    renderRoom();
+    expect(screen.getByRole("button", { name: /^add reaction$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^reply in thread$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^copy link$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /more actions/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^edit$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^delete$/i })).toBeNull();
+  });
+
+  it("hides Reply in thread inside a thread", () => {
+    setup({ msgtype: "m.text", body: "re", "m.relates_to": { rel_type: "m.thread", event_id: "$m1" } }, { eventId: "$reply" });
+    renderThread("$m1");
+    expect(screen.queryByRole("button", { name: /^reply in thread$/i })).toBeNull();
+  });
+});
+
+describe("⋯ menu", () => {
+  it("lists Copy text, Quote, Share, and Edit/Delete only when allowed", async () => {
+    setup({ msgtype: "m.text", body: "hi" }, { sender: "@alice:h.example" });
+    renderRoom();
+    await openMenu();
+    expect(await screen.findByRole("menuitem", { name: /copy text/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^share$/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^quote$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^edit$/i })).toBeNull();
+  });
+
+  it("Copy link copies the thread URL and toasts", async () => {
+    setup(
+      { msgtype: "m.text", body: "re", "m.relates_to": { rel_type: "m.thread", event_id: "$root" } },
+      { eventId: "$reply" },
+    );
+    renderThread("$root");
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    await user.click(screen.getAllByRole("button", { name: /^copy link$/i }).at(-1)!);
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        `${window.location.origin}/room/!r%3Ah.example?thread=%24root&event=%24reply`,
+      ),
+    );
+    expect(toast.success).toHaveBeenCalledWith("Link copied");
+  });
+
+  it("Copy text copies the plain body", async () => {
+    setup({ msgtype: "m.text", body: "copy me" });
+    renderRoom();
+    const user = await openMenu();
+    await user.click(await screen.findByRole("menuitem", { name: /copy text/i }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("copy me"));
+  });
+
+  it("toasts an error when the clipboard is denied", async () => {
+    setup({ msgtype: "m.text", body: "copy me" });
+    renderRoom();
+    const user = await openMenu();
+    writeText.mockRejectedValue(new Error("denied"));
+    await user.click(await screen.findByRole("menuitem", { name: /copy text/i }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("Quote in the room timeline drafts into the room composer", async () => {
+    setup({ msgtype: "m.text", body: "quote me" });
+    renderRoom();
+    const user = await openMenu();
+    await user.click(await screen.findByRole("menuitem", { name: /^quote$/i }));
+    const draft = getQuoteDraft(roomId, null);
+    expect(draft?.quote).toMatchObject({ event_id: "$m1", thread_id: "$m1", snapshot: { body: "quote me" } });
+    expect(draft?.senderName).toBeTruthy();
+  });
+
+  it("Quote inside a thread drafts into that thread's composer", async () => {
+    setup(
+      { msgtype: "m.text", body: "re", "m.relates_to": { rel_type: "m.thread", event_id: "$root" } },
+      { eventId: "$reply" },
+    );
+    renderThread("$root");
+    const user = await openMenu();
+    await user.click(await screen.findByRole("menuitem", { name: /^quote$/i }));
+    expect(getQuoteDraft(roomId, "$root")?.quote.event_id).toBe("$reply");
+    expect(getQuoteDraft(roomId, null)).toBeNull();
+  });
+});
+
+describe("quote messages", () => {
+  const quote: QuoteRef = {
+    room_id: "!src:h.example",
+    event_id: "$q",
+    thread_id: "$q",
+    sender: "@coding:h.example",
+    origin_server_ts: Date.UTC(2026, 8, 25, 14, 42),
+    snapshot: { msgtype: "m.text", body: "the quoted answer" },
+  };
+  const fallback = "> Coding · 2026-09-25 14:42 UTC · link\n> the quoted answer";
+
+  it("renders the comment and a card, not the raw fallback", () => {
+    setup({ msgtype: "m.text", body: `my take\n\n${fallback}`, [QUOTE_FIELD]: quote });
+    renderRoom();
+    expect(screen.getByText("my take")).toBeInTheDocument();
+    const card = screen.getByRole("link", { name: /quoted message/i });
+    expect(within(card).getByText("the quoted answer")).toBeInTheDocument();
+    expect(screen.queryByText(/2026-09-25 14:42 UTC/)).toBeNull();
+  });
+
+  it("quoting a quote snapshots the comment, not the fallback", async () => {
+    setup({ msgtype: "m.text", body: `my take\n\n${fallback}`, [QUOTE_FIELD]: quote });
+    renderRoom();
+    const user = await openMenu();
+    await user.click(await screen.findByRole("menuitem", { name: /^quote$/i }));
+    expect(getQuoteDraft(roomId, null)?.quote.snapshot).toEqual({ msgtype: "m.text", body: "my take" });
+  });
+
+  it("quoting a bare quote snapshots the nested snapshot", async () => {
+    setup({ msgtype: "m.text", body: fallback, [QUOTE_FIELD]: quote });
+    renderRoom();
+    const user = await openMenu();
+    await user.click(await screen.findByRole("menuitem", { name: /^quote$/i }));
+    expect(getQuoteDraft(roomId, null)?.quote.snapshot).toEqual(quote.snapshot);
+  });
+
+  it("editing a quote edits the comment and keeps the fallback", async () => {
+    const { client } = setup(
+      { msgtype: "m.text", body: `my take\n\n${fallback}`, [QUOTE_FIELD]: quote },
+      { sender: me },
+    );
+    renderRoom();
+    const user = await openMenu();
+    await user.click(await screen.findByRole("menuitem", { name: /^edit$/i }));
+    const box = screen.getByRole("textbox", { name: /edit message/i });
+    expect(box).toHaveValue("my take");
+    await user.clear(box);
+    await user.type(box, "better take{Enter}");
+    await waitFor(() => expect(client.sendEvent).toHaveBeenCalled());
+    const content = (client.sendEvent as ReturnType<typeof vi.fn>).mock.calls[0][3];
+    expect(content["m.new_content"]).toEqual({ msgtype: "m.text", body: `better take\n\n${fallback}` });
+  });
+});

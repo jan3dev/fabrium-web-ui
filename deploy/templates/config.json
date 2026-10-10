@@ -1,0 +1,4 @@
+{
+  "homeserver_url": "${HOMESERVER_URL}",
+  "workforce_space": "${WORKFORCE_SPACE}"
+}

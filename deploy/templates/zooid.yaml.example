@@ -1,0 +1,17 @@
+# Copy to ${ZOOID_HOME}/workforce/zooid.yaml and edit. deploy.sh never rewrites it.
+# ${VAR} values are read from the daemon environment (${ZOOID_HOME}/.env).
+runtime: docker
+transports:
+  matrix:
+    homeserver: http://tuwunel:8448        # compose service name, not localhost
+    port: 9000                             # must equal APPSERVICE_PORT and the registration url port
+    user_namespace: '@.*:fabrium.net'      # host part must equal SERVER_NAME; do not escape the dots
+agents:
+  s-meow:
+    acp: { preset: opencode }
+    matrix: { display_name: 'Meow', rooms: ['#zooid'], trigger: mention }
+    container:
+      # Quote ${VAR}: the file is parsed as YAML before the values are substituted.
+      env:
+        GH_TOKEN: "${GH_TOKEN}"
+        HAVEN_API_KEY: "${HAVEN_API_KEY}"

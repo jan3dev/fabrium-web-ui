@@ -10,6 +10,9 @@ export interface AgentBinding {
   userId: string
   /** Optional human-readable display name. Falls back to the user_id localpart. */
   displayName?: string
+  /** Role and project from zooid.yaml, published in the workforce roster for clients. */
+  persona?: string
+  project?: string
   /**
    * Rooms this agent is bound to. Each entry's `alias` starts out as the
    * configured `#alias` (or `!id`) and is rewritten to the canonical room

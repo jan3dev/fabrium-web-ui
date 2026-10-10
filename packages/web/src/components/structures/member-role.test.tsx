@@ -1,0 +1,93 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeFakeClient, makeRoom, mkMatrixEvent } from "../../../test/factories";
+import { MatrixClientPeg } from "../../client/peg";
+import type { MemberRole } from "../../hooks/use-member-roles";
+import { roleForLevel } from "../../lib/roles";
+import { MemberRow } from "./member-row";
+
+const me = "@me:h.example";
+const roomId = "!r:h.example";
+
+// The parent panel resolves each member's role and passes it down; mirror that
+// here so the row renders the role under test.
+function memberAt(userId: string, powerLevel: number): MemberRole {
+  return { userId, displayName: userId, powerLevel, role: roleForLevel(powerLevel) };
+}
+
+function makeMembership(userId: string) {
+  return mkMatrixEvent({
+    roomId,
+    sender: userId,
+    type: "m.room.member",
+    stateKey: userId,
+    content: { membership: "join" },
+  });
+}
+
+function setup(powerLevels: Record<string, number>) {
+  const sendStateEvent = vi.fn(
+    async (_r: string, _t: string, _c: Record<string, unknown>, _k: string) => ({
+      event_id: "$ev",
+    }),
+  );
+  const client = makeFakeClient({ userId: me });
+  const room = makeRoom(roomId, { client, myUserId: me, powerLevels });
+  room.currentState.setStateEvents(Object.keys(powerLevels).map(makeMembership));
+  (client as unknown as { getRoom: () => unknown }).getRoom = () => room;
+  (client as unknown as { sendStateEvent: typeof sendStateEvent }).sendStateEvent =
+    sendStateEvent;
+  MatrixClientPeg.injectClientForTest(client);
+  return { sendStateEvent };
+}
+
+afterEach(() => MatrixClientPeg.reset());
+
+describe("MemberRow roles", () => {
+  it("shows each member's role label", () => {
+    setup({ [me]: 100, "@bob:h.example": 0 });
+    render(<MemberRow roomId={roomId} userId="@bob:h.example" member={memberAt("@bob:h.example", 0)} />);
+    expect(screen.getByText("Member")).toBeInTheDocument();
+  });
+
+  it("renders an editable selector when the viewer outranks the target", () => {
+    setup({ [me]: 100, "@bob:h.example": 0 });
+    render(<MemberRow roomId={roomId} userId="@bob:h.example" member={memberAt("@bob:h.example", 0)} />);
+    expect(screen.getByRole("button", { name: /member actions/i })).toBeEnabled();
+  });
+
+  it("renders a static, non-interactive role for a peer at or above the viewer", () => {
+    setup({ [me]: 50, "@peer:h.example": 50 });
+    render(<MemberRow roomId={roomId} userId="@peer:h.example" member={memberAt("@peer:h.example", 50)} />);
+    expect(screen.queryByRole("button", { name: /manager/i })).toBeNull();
+    expect(screen.getByText("Manager")).toBeInTheDocument();
+  });
+
+  it("disables the selector entirely when the viewer cannot send power_levels", () => {
+    // viewer at 0, state_default 50 → no edit anywhere
+    setup({ [me]: 0, "@bob:h.example": 0 });
+    render(<MemberRow roomId={roomId} userId="@bob:h.example" member={memberAt("@bob:h.example", 0)} />);
+    expect(screen.queryByRole("button", { name: /member actions/i })).toBeNull();
+    expect(screen.getByText("Member")).toBeInTheDocument();
+  });
+
+  it("writes the chosen role's level on selection", async () => {
+    const { sendStateEvent } = setup({ [me]: 100, "@bob:h.example": 0 });
+    render(<MemberRow roomId={roomId} userId="@bob:h.example" member={memberAt("@bob:h.example", 0)} />);
+    await userEvent.click(screen.getByRole("button", { name: /member actions/i }));
+    await userEvent.click(await screen.findByRole("menuitemradio", { name: /manager/i }));
+    expect(sendStateEvent).toHaveBeenCalledTimes(1);
+    const content = sendStateEvent.mock.calls[0][2] as { users: Record<string, number> };
+    expect(content.users["@bob:h.example"]).toBe(50);
+  });
+
+  it("disables role options above the viewer's own level", async () => {
+    // A manager may not make anyone an admin.
+    setup({ [me]: 50, "@bob:h.example": 0 });
+    render(<MemberRow roomId={roomId} userId="@bob:h.example" member={memberAt("@bob:h.example", 0)} />);
+    await userEvent.click(screen.getByRole("button", { name: /member actions/i }));
+    const admin = await screen.findByRole("menuitemradio", { name: /admin/i });
+    expect(admin).toHaveAttribute("aria-disabled", "true");
+  });
+});

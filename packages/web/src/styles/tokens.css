@@ -1,0 +1,221 @@
+/*
+ * Design tokens.
+ *
+ * Layer 1 (--fab-*) are raw primitives; only styles/ may reference them.
+ * Layer 2 (semantic, e.g. --surface-primary) is what components consume, through
+ * the `@theme inline` bridge in index.css. The two layers must never share a name
+ * with an `@theme` key: index.css re-declares every bridged name, so `--x: var(--x)`
+ * would be a silent cycle.
+ *
+ * Light is declared on :root and [data-theme="light"]; dark on [data-theme="dark"]
+ * and must stay below light (same specificity, source order wins). Dark repeats only
+ * what differs.
+ *
+ * Contrast notes: --button-primary-background uses the darker brand step so white text
+ * clears AA (5.02:1); dark --chip-brand-foreground and --syntax-keyword use neon-blue-300
+ * for the same reason. Light syntax colours on --surface-secondary are a known AA gap.
+ */
+
+:root {
+
+	--fab-white: #ffffff;
+	--fab-black: #000000;
+
+	--fab-metal-50: #f5f5f8;
+	--fab-metal-100: #f0f0f4;
+	--fab-metal-200: #e4e4e8;
+	--fab-metal-300: #c8c8ce;
+	--fab-metal-400: #ababb2;
+	--fab-metal-500: #8a8a92;
+	--fab-metal-750: #2c3136;
+	--fab-metal-850: #1e2226;
+	--fab-metal-900: #15181b;
+	--fab-metal-950: #0f1214;
+	--fab-metal-1000: #070708;
+
+	--fab-neon-blue-300: #7a92f3;
+	--fab-neon-blue-400: #5773ef;
+	--fab-neon-blue-500: #4361ee;
+	--fab-neon-blue-800: #0e2795;
+	--fab-neon-blue-16: rgba(67, 97, 238, 0.16);
+	--fab-neon-blue-8: rgba(67, 97, 238, 0.08);
+	--fab-neon-blue-400-transparent-8: rgba(87, 115, 239, 0.08);
+
+	--fab-forest-green-500: #18a23b;
+	--fab-forest-green-24: rgba(24, 162, 59, 0.24);
+
+	--fab-forest-green-8: rgba(24, 162, 59, 0.08);
+	--fab-harvest-gold-500: #ffab1b;
+	--fab-harvest-gold-16: rgba(255, 171, 27, 0.16);
+	--fab-scarlet-500: #ff3b13;
+	--fab-scarlet-16: rgba(255, 59, 19, 0.16);
+
+	--fab-violet-400: #a78bfa;
+	--fab-violet-600: #7c3aed;
+
+	--fab-glass-surface-light: rgba(255, 255, 255, 0.9);
+	--fab-glass-inverse-light: rgba(0, 0, 0, 0.85);
+	--fab-glass-background-light: rgba(245, 245, 248, 0.5);
+	--fab-glass-surface-secondary-light: rgba(0, 0, 0, 0.08);
+	--fab-glass-surface-border-light: rgba(0, 0, 0, 0.04);
+	--fab-glass-surface-dark: rgba(15, 18, 20, 0.9);
+	--fab-glass-inverse-dark: rgba(255, 255, 255, 0.85);
+	--fab-glass-background-dark: rgba(7, 7, 8, 0.5);
+	--fab-glass-surface-secondary-dark: rgba(255, 255, 255, 0.16);
+	--fab-glass-surface-border-dark: rgba(255, 255, 255, 0.04);
+
+	--fab-ripple-light: rgba(9, 10, 11, 0.1);
+	--fab-ripple-dark: rgba(244, 245, 246, 0.1);
+	--fab-ripple-on-primary: rgba(255, 255, 255, 0.2);
+
+	--fab-system-background: #d0d5dc;
+
+	--fab-wave-orange: #f7931a;
+	--fab-wave-cyan: #16bac5;
+
+	--fab-radius-pill: 80px;
+	--fab-radius-utility: 8px;
+	--fab-radius-card: 12px;
+	--fab-radius-modal: 16px;
+
+	--fab-focus-ring-width: 2px;
+	--fab-focus-ring-offset: 3px;
+
+	--fab-blur-glass: 32px;
+	--fab-blur-glass-strong: 60px;
+
+	--fab-duration-fast: 120ms;
+	--fab-duration-base: 200ms;
+	--fab-duration-slow: 320ms;
+	--fab-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+	--fab-elevation-button-light: 0 2px 8px rgba(0, 0, 0, 0.07);
+	--fab-elevation-surface-light: 0 4px 16px rgba(0, 0, 0, 0.13);
+	--fab-elevation-modal-light: 0 10px 32px rgba(0, 0, 0, 0.18);
+	--fab-elevation-button-dark: 0 2px 8px rgba(0, 0, 0, 0.3);
+	--fab-elevation-surface-dark: 0 4px 16px rgba(0, 0, 0, 0.34);
+	--fab-elevation-modal-dark: 0 10px 32px rgba(0, 0, 0, 0.48);
+}
+
+:root,
+[data-theme="light"] {
+
+	color-scheme: light;
+
+	--text-primary: var(--fab-metal-950);
+	--text-secondary: var(--fab-metal-750);
+	--text-tertiary: var(--fab-metal-500);
+	--text-inverse: var(--fab-white);
+
+	--surface-primary: var(--fab-white);
+	--surface-border-primary: var(--fab-metal-100);
+	--surface-secondary: var(--fab-metal-200);
+	--surface-border-secondary: var(--fab-metal-300);
+	--surface-tertiary: var(--fab-metal-300);
+	--surface-inverse: var(--fab-metal-950);
+	--surface-background: var(--fab-metal-50);
+	--surface-selected: var(--fab-neon-blue-400-transparent-8);
+	--surface-border-selected: var(--fab-neon-blue-500);
+
+	--kbd-background: var(--fab-metal-200);
+
+	--highlight-background: var(--fab-neon-blue-500);
+	--highlight-foreground: var(--fab-white);
+
+	--glass-surface: var(--fab-glass-surface-light);
+	--glass-surface-secondary: var(--fab-glass-surface-secondary-light);
+	--glass-surface-border: var(--fab-glass-surface-border-light);
+	--glass-inverse: var(--fab-glass-inverse-light);
+	--glass-background: var(--fab-glass-background-light);
+
+	--accent-brand: var(--fab-neon-blue-500);
+	--accent-brand-transparent: var(--fab-neon-blue-16);
+	--accent-success: var(--fab-forest-green-500);
+	--accent-success-transparent: var(--fab-forest-green-24);
+	--accent-warning: var(--fab-harvest-gold-500);
+	--accent-warning-transparent: var(--fab-harvest-gold-16);
+	--accent-danger: var(--fab-scarlet-500);
+	--accent-danger-transparent: var(--fab-scarlet-16);
+	--accent-thinking: var(--fab-violet-600);
+
+	--chip-success-background: var(--fab-forest-green-24);
+	--chip-success-foreground: var(--fab-forest-green-500);
+	--chip-error-background: var(--fab-scarlet-16);
+	--chip-error-foreground: var(--fab-scarlet-500);
+
+	--chip-brand-background: var(--fab-neon-blue-16);
+	--chip-brand-foreground: var(--fab-neon-blue-500);
+
+	--syntax-comment: var(--text-tertiary);
+	--syntax-keyword: var(--fab-neon-blue-500);
+	--syntax-string: var(--accent-success);
+	--syntax-number: var(--accent-warning);
+	--syntax-title: var(--text-primary);
+	--syntax-meta: var(--accent-danger);
+
+	--ripple: var(--fab-ripple-light);
+	--ripple-on-primary: var(--fab-ripple-on-primary);
+
+	--button-primary-background: var(--fab-neon-blue-500);
+	--button-primary-background-flat: var(--fab-neon-blue-400);
+	--button-primary-foreground: var(--fab-white);
+	--button-focus-ring: var(--fab-neon-blue-400);
+
+	--button-utility-background: var(--fab-metal-200);
+	--button-utility-foreground: var(--text-primary);
+
+	--elevation-button: var(--fab-elevation-button-light);
+	--elevation-surface: var(--fab-elevation-surface-light);
+	--elevation-modal: var(--fab-elevation-modal-light);
+}
+
+[data-theme="dark"] {
+	color-scheme: dark;
+
+	--text-primary: var(--fab-metal-50);
+	--text-secondary: var(--fab-metal-400);
+	--text-tertiary: var(--fab-metal-500);
+	--text-inverse: var(--fab-metal-950);
+
+	--surface-primary: var(--fab-metal-950);
+	--surface-border-primary: var(--fab-metal-900);
+	--surface-secondary: var(--fab-metal-900);
+	--surface-border-secondary: var(--fab-metal-850);
+	--surface-tertiary: var(--fab-metal-850);
+	--surface-inverse: var(--fab-white);
+	--surface-background: var(--fab-metal-1000);
+	--surface-selected: var(--fab-neon-blue-8);
+	--surface-border-selected: var(--fab-neon-blue-800);
+
+	--kbd-background: var(--fab-metal-850);
+
+	--highlight-background: var(--fab-neon-blue-500);
+	--highlight-foreground: var(--fab-white);
+
+	--glass-surface: var(--fab-glass-surface-dark);
+	--glass-surface-secondary: var(--fab-glass-surface-secondary-dark);
+	--glass-surface-border: var(--fab-glass-surface-border-dark);
+	--glass-inverse: var(--fab-glass-inverse-dark);
+	--glass-background: var(--fab-glass-background-dark);
+
+	--accent-brand: var(--fab-neon-blue-400);
+	--accent-brand-transparent: var(--fab-neon-blue-16);
+	--accent-thinking: var(--fab-violet-400);
+
+	--chip-brand-foreground: var(--fab-neon-blue-300);
+	--syntax-keyword: var(--fab-neon-blue-300);
+
+	--chip-success-background: var(--fab-forest-green-8);
+
+	--ripple: var(--fab-ripple-dark);
+
+	--button-primary-background: var(--fab-neon-blue-500);
+	--button-primary-background-flat: var(--fab-neon-blue-400);
+	--button-focus-ring: var(--fab-neon-blue-400);
+
+	--button-utility-background: var(--fab-metal-850);
+
+	--elevation-button: var(--fab-elevation-button-dark);
+	--elevation-surface: var(--fab-elevation-surface-dark);
+	--elevation-modal: var(--fab-elevation-modal-dark);
+}

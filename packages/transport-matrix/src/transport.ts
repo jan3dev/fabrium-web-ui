@@ -1100,6 +1100,11 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         option_id?: string
       }
       if (!content.session_id || !content.approval_id || !content.decision) return
+      // Agents never approve, not even their own tool calls (Fabrium trust rule).
+      if (!evt.sender || ourBotUserIds.has(evt.sender) || workforce.agentIds.has(evt.sender)) {
+        console.warn(`[matrix] ignoring approval response from agent ${evt.sender}`)
+        return
+      }
       const decision = content.option_id
         ? { decision: content.decision, optionId: content.option_id }
         : { decision: content.decision }

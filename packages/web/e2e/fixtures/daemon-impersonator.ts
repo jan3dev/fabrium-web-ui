@@ -1,0 +1,260 @@
+import { test as base } from "@playwright/test";
+import { type MatrixClient, createClient } from "matrix-js-sdk";
+import { randomUUID } from "node:crypto";
+
+const HS_PORT = process.env.MATRIX_HS_PORT ?? "8448";
+export const HS_URL = process.env.MATRIX_HOMESERVER_URL ?? `http://localhost:${HS_PORT}`;
+const AS_TOKEN =
+  process.env.MATRIX_AS_TOKEN ?? "as-zoon-test-fixed-token-do-not-use-in-prod";
+const AS_NAMESPACE_PREFIX = process.env.MATRIX_AS_NAMESPACE_PREFIX ?? "_zoon_test_";
+
+export interface MatrixRoomEvent {
+  event_id: string;
+  type: string;
+  sender: string;
+  content: unknown;
+  origin_server_ts: number;
+}
+
+export interface DaemonImpersonator {
+  agentClient: MatrixClient;
+  agentUserId: string;
+  createRoomWithHuman(humanUserId: string): Promise<string>;
+  sendApprovalRequest(
+    roomId: string,
+    opts: { sessionId: string; toolCallId: string },
+  ): Promise<{ approvalId: string; eventId: string }>;
+  waitForApprovalResponse(
+    roomId: string,
+    approvalId: string,
+    timeoutMs?: number,
+  ): Promise<{ decision: string; sender: string }>;
+  waitForMessage(
+    roomId: string,
+    predicate: (e: MatrixRoomEvent) => boolean,
+    timeoutMs?: number,
+  ): Promise<MatrixRoomEvent>;
+  downloadMedia(mxcUri: string): Promise<Buffer>;
+  /** Sends a plain m.text message and returns its event_id. */
+  sendText(roomId: string, body: string): Promise<string>;
+  /** Sends an m.text message related to `rootEventId` via m.thread. */
+  sendThreadReply(roomId: string, rootEventId: string, body: string): Promise<string>;
+  /**
+   * Upload bytes and set them as the profile avatar of the identity this
+   * fixture actually writes as — which today is the AS's own sender_localpart
+   * user, not `agentUserId` (the `?user_id=` impersonation on `agentClient`
+   * isn't reaching the homeserver). Returns that user id so callers can assert
+   * against the sender they'll see in the timeline.
+   */
+  setAvatar(bytes: Buffer, mimetype?: string): Promise<{ userId: string; mxcUri: string }>;
+}
+
+export interface FreshHuman {
+  userId: string;
+  accessToken: string;
+  password: string;
+  username: string;
+}
+
+export const test = base.extend<{ daemon: DaemonImpersonator; human: FreshHuman }>({
+  human: async ({}, use) => {
+    const username = `human_${randomUUID().slice(0, 8)}`;
+    const password = randomUUID();
+    // Open registration is enabled in the test fixture's tuwunel.toml.
+    const reg = await fetch(`${HS_URL}/_matrix/client/v3/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: { type: "m.login.dummy" },
+        username,
+        password,
+        inhibit_login: false,
+      }),
+    });
+    if (!reg.ok) {
+      throw new Error(`human registration failed: ${reg.status} ${await reg.text()}`);
+    }
+    const j = (await reg.json()) as { user_id: string; access_token: string };
+    await use({ userId: j.user_id, accessToken: j.access_token, username, password });
+  },
+
+  daemon: async ({}, use) => {
+    const localpart = `${AS_NAMESPACE_PREFIX}architect_${randomUUID().slice(0, 8)}`;
+    // AS-namespaced users are registered via /register with the AS token,
+    // type m.login.application_service. No password, no captcha.
+    const reg = await fetch(
+      `${HS_URL}/_matrix/client/v3/register?access_token=${encodeURIComponent(AS_TOKEN)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "m.login.application_service",
+          username: localpart,
+        }),
+      },
+    );
+    if (!reg.ok) {
+      throw new Error(`AS user registration failed: ${reg.status} ${await reg.text()}`);
+    }
+    const j = (await reg.json()) as { user_id: string };
+    const agentUserId = j.user_id;
+
+    // AS-impersonating client: AS_TOKEN as bearer + ?user_id= on every request.
+    const agentClient = createClient({
+      baseUrl: HS_URL,
+      accessToken: AS_TOKEN,
+      userId: agentUserId,
+      queryParams: { user_id: agentUserId },
+    });
+    await agentClient.startClient({ initialSyncLimit: 0 });
+
+    const impersonator: DaemonImpersonator = {
+      agentClient,
+      agentUserId,
+
+      async createRoomWithHuman(humanUserId) {
+        // Default PL: creator (agent) gets 100, invitee defaults to 0. That's
+        // fine for the e2e — dev.zooid.approval_response gates at events_default
+        // (0) per the Permissions section of the spec, so the human can
+        // respond with PL 0.
+        const { room_id } = await agentClient.createRoom({
+          preset: "private_chat",
+          invite: [humanUserId],
+        });
+        return room_id;
+      },
+
+      async sendApprovalRequest(roomId, opts) {
+        const approvalId = randomUUID();
+        const res = await (agentClient.sendEvent as (
+          roomId: string,
+          type: string,
+          content: Record<string, unknown>,
+        ) => Promise<{ event_id: string }>)(roomId, "dev.zooid.approval_request", {
+          approval_id: approvalId,
+          session_id: opts.sessionId,
+          tool_call_id: opts.toolCallId,
+          options: [
+            { id: "allow", label: "Allow" },
+            { id: "cancel", label: "Cancel" },
+          ],
+        });
+        return { approvalId, eventId: res.event_id };
+      },
+
+      async waitForApprovalResponse(roomId, approvalId, timeoutMs = 15_000) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          const room = agentClient.getRoom(roomId);
+          const events = room?.getLiveTimeline().getEvents() ?? [];
+          for (const ev of events) {
+            if (ev.getType() !== "dev.zooid.approval_response") continue;
+            const c = ev.getContent() as { approval_id?: string; decision?: string };
+            if (c.approval_id === approvalId && typeof c.decision === "string") {
+              return { decision: c.decision, sender: ev.getSender() ?? "?" };
+            }
+          }
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        throw new Error(
+          `Timed out waiting for approval_response with approval_id=${approvalId}`,
+        );
+      },
+
+      async waitForMessage(roomId, predicate, timeoutMs = 30_000) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          const r = await fetch(
+            `${HS_URL}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=50`,
+            { headers: { Authorization: `Bearer ${AS_TOKEN}`, "Content-Type": "application/json" } },
+          );
+          const j = (await r.json()) as { chunk: MatrixRoomEvent[] };
+          const found = j.chunk.find(predicate);
+          if (found) return found;
+          await new Promise((res) => setTimeout(res, 500));
+        }
+        throw new Error(`waitForMessage timed out after ${timeoutMs}ms in ${roomId}`);
+      },
+
+      async downloadMedia(mxcUri) {
+        const m = /^mxc:\/\/([^/]+)\/(.+)$/.exec(mxcUri);
+        if (!m) throw new Error(`not an mxc uri: ${mxcUri}`);
+        const [, serverName, mediaId] = m;
+        const url =
+          `${HS_URL}/_matrix/client/v1/media/download/` +
+          `${encodeURIComponent(serverName)}/${encodeURIComponent(mediaId)}` +
+          `?user_id=${encodeURIComponent(agentUserId)}`;
+        const r = await fetch(url, {
+          headers: { Authorization: `Bearer ${AS_TOKEN}` },
+        });
+        if (!r.ok) throw new Error(`media download failed: ${r.status}`);
+        return Buffer.from(await r.arrayBuffer());
+      },
+
+      async setAvatar(bytes, mimetype = "image/png") {
+        const who = await fetch(`${HS_URL}/_matrix/client/v3/account/whoami`, {
+          headers: { Authorization: `Bearer ${AS_TOKEN}` },
+        });
+        if (!who.ok) throw new Error(`whoami failed: ${who.status}`);
+        const { user_id: userId } = (await who.json()) as { user_id: string };
+
+        // Uploads stayed on the media/v3 path when Matrix 1.11 moved
+        // downloads behind authentication.
+        const up = await fetch(`${HS_URL}/_matrix/media/v3/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${AS_TOKEN}`, "Content-Type": mimetype },
+          body: new Uint8Array(bytes),
+        });
+        if (!up.ok) throw new Error(`avatar upload failed: ${up.status} ${await up.text()}`);
+        const { content_uri: mxcUri } = (await up.json()) as { content_uri: string };
+
+        const put = await fetch(
+          `${HS_URL}/_matrix/client/v3/profile/${encodeURIComponent(userId)}/avatar_url`,
+          {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${AS_TOKEN}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ avatar_url: mxcUri }),
+          },
+        );
+        if (!put.ok) throw new Error(`avatar set failed: ${put.status} ${await put.text()}`);
+        return { userId, mxcUri };
+      },
+
+      async sendText(roomId, body) {
+        const res = await (agentClient.sendEvent as (
+          roomId: string,
+          type: string,
+          content: Record<string, unknown>,
+        ) => Promise<{ event_id: string }>)(roomId, "m.room.message", {
+          msgtype: "m.text",
+          body,
+        });
+        return res.event_id;
+      },
+
+      async sendThreadReply(roomId, rootEventId, body) {
+        const res = await (agentClient.sendEvent as (
+          roomId: string,
+          type: string,
+          content: Record<string, unknown>,
+        ) => Promise<{ event_id: string }>)(roomId, "m.room.message", {
+          msgtype: "m.text",
+          body,
+          "m.relates_to": { rel_type: "m.thread", event_id: rootEventId },
+        });
+        return res.event_id;
+      },
+    };
+
+    try {
+      await use(impersonator);
+    } finally {
+      agentClient.stopClient();
+    }
+  },
+});
+
+export const expect = test.expect;

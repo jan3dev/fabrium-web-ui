@@ -1,0 +1,104 @@
+# Started by deploy/deploy.sh; see deploy/README.md. Build context is the repo root.
+# ZOOID_HOME must be the same absolute path inside and outside the daemon
+# container: the daemon passes host paths to `docker run -v` for agent containers.
+name: ${COMPOSE_PROJECT_NAME:-fabrium}
+
+# Container logs rotate; without this the json-file logs grow without limit.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# restart: always, not unless-stopped: rootless podman has no daemon, and its
+# podman-restart.service brings back only `always` containers after a reboot.
+services:
+  tuwunel:
+    image: ${TUWUNEL_IMAGE:-ghcr.io/matrix-construct/tuwunel@sha256:678b7f5350e06a41614444497c587da9dddf66767e4068a27480402f3c1367d0}
+    environment:
+      TUWUNEL_CONFIG: /etc/tuwunel/tuwunel.toml
+    volumes:
+      - ${ZOOID_HOME:?set ZOOID_HOME}/data/matrix/db:/var/lib/tuwunel/db
+      - ${ZOOID_HOME}/data/matrix/media:/var/lib/tuwunel/media
+      - ${ZOOID_HOME}/data/matrix/config/tuwunel.toml:/etc/tuwunel/tuwunel.toml:ro
+      - ${ZOOID_HOME}/data/matrix/config/registrations:/var/lib/tuwunel/registrations:ro
+    ports:
+      - ${TUWUNEL_BIND:-127.0.0.1:8448}:8448
+    # Changes when a rendered config changes, so `compose up` recreates the container.
+    labels:
+      fabrium.config-hash: ${CONFIG_HASH_TUWUNEL:-}
+    logging: *logging
+    restart: always
+
+  zooid:
+    image: fabrium-zooid:${GIT_SHA:-dev}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: daemon
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+      # deploy.sh prunes only images with this label.
+      labels:
+        fabrium.image: "true"
+    working_dir: ${ZOOID_HOME}/workforce
+    user: "${DAEMON_UID:-0}:${DAEMON_GID:-0}"
+    group_add:
+      - "${DOCKER_GID:-0}"
+    env_file:
+      - path: ${ZOOID_HOME}/.env
+        required: false
+    # Keys without a value are copied from the shell when set (deploy.sh exports them).
+    environment:
+      - HOME=${ZOOID_HOME}/home
+      - ZOOID_CONTEXT_MCP_HOST_DIR=${ZOOID_HOME}/app/context-mcp
+      - APPSERVICE_PORT=${APPSERVICE_PORT:-9000}
+      - MATRIX_AS_TOKEN
+      - MATRIX_HS_TOKEN
+      - GH_TOKEN
+      - HAVEN_API_KEY
+      - ZOOID_NO_PREPULL
+      - ZOOID_REFRESH_IMAGES
+    volumes:
+      - ${ZOOID_HOME}:${ZOOID_HOME}
+      # Engine socket on the host (rootless podman: set by deploy.sh from DOCKER_HOST).
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
+    ports:
+      - 127.0.0.1:${APPSERVICE_PORT:-9000}:${APPSERVICE_PORT:-9000}
+    depends_on:
+      - tuwunel
+    labels:
+      fabrium.config-hash: ${CONFIG_HASH_ZOOID:-}
+    logging: *logging
+    restart: always
+    stop_grace_period: 30s
+
+  web:
+    image: fabrium-web:${GIT_SHA:-dev}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: web
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+      # deploy.sh prunes only images with this label.
+      labels:
+        fabrium.image: "true"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS}
+      APPSERVICE_PORT: ${APPSERVICE_PORT:-9000}
+    volumes:
+      - ${ZOOID_HOME}/web:/srv/config:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - ${HTTP_PORT:-80}:80
+      - ${HTTPS_PORT:-443}:443
+    depends_on:
+      - tuwunel
+    logging: *logging
+    restart: always
+
+volumes:
+  caddy_data:
+  caddy_config:

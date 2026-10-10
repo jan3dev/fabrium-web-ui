@@ -40,13 +40,32 @@ export function buildRunArgs(opts: TuwunelOpts): string[] {
 
 export class TuwunelService {
   private child: ChildProcess | null = null
+  /** Last bit of the engine's stderr, for the error when `run` fails. */
+  private stderrTail = ''
   constructor(private readonly opts: TuwunelOpts) {}
 
   start(): ChildProcess {
     this.child = spawn(this.opts.engine, buildRunArgs(this.opts), {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
+    this.child.stderr?.on('data', (chunk) => {
+      this.stderrTail = (this.stderrTail + String(chunk)).slice(-2000)
+    })
     return this.child
+  }
+
+  /**
+   * The engine process ended: `run` failed (a taken port, a bad mount) or the
+   * container died. With --rm the container is gone too, so `inspect` can't
+   * tell us; the engine's own stderr can.
+   */
+  private engineExited(): Error | null {
+    const code = this.child?.exitCode ?? this.child?.signalCode ?? null
+    if (code === null || code === undefined) return null
+    return new Error(
+      `${this.opts.engine} run exited (${code}) before Tuwunel served HTTP: ` +
+        (this.stderrTail.trim() || 'no output'),
+    )
   }
 
   async stop(): Promise<void> {
@@ -96,6 +115,8 @@ export class TuwunelService {
     // case where today we just hang for 60s and say "did not become healthy"
     // with no clue what really broke.
     while (Date.now() < deadline) {
+      const exited = this.engineExited()
+      if (exited) throw exited
       const state = await this.inspectState().catch(() => null)
       if (state?.status === 'running') break
       if (state?.status === 'exited') {
@@ -111,6 +132,8 @@ export class TuwunelService {
     // Phase 2: container is running (or we ran out of time). Poll the HTTP
     // endpoint until either it answers or the deadline passes.
     while (Date.now() < deadline) {
+      const exited = this.engineExited()
+      if (exited) throw exited
       try {
         const r = await fetch(`${opts.url}/_matrix/client/versions`)
         if (r.ok) return

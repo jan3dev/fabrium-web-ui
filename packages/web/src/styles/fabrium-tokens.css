@@ -1,0 +1,84 @@
+/*
+ * Fabrium semantic tokens: identity and trust markers (agent, human, system,
+ * enclave, control plane, risk, money). Built from --fab-* primitives only; no new
+ * hex. Use them for actor badges and trust chips, not for general UI chrome.
+ */
+
+:root,
+[data-theme="light"] {
+  --actor-agent: var(--fab-neon-blue-500);
+  --actor-human: var(--fab-harvest-gold-500);
+  --actor-system: var(--fab-metal-500);
+  --trust-enclave: var(--fab-wave-cyan);
+  --control-plane: var(--fab-violet-600);
+  --risk: var(--accent-danger);
+  --money: var(--fab-wave-orange);
+  /* OKLCH lightness and chroma for per-sender name colors (lib/sender.ts). */
+  --sender-lc: 46% 0.12;
+}
+
+[data-theme="dark"] {
+  --actor-agent: var(--fab-neon-blue-300);
+  --actor-system: var(--fab-metal-400);
+  --control-plane: var(--fab-violet-400);
+  /* Text-safe brand blue, as upstream already uses for dark --chip-brand-foreground. */
+  --accent-brand: var(--fab-neon-blue-300);
+  --sender-lc: 78% 0.12;
+}
+
+/*
+ * Chip backgrounds. Declared on every theme root, not only :root: var() resolves where
+ * the property is declared, so a [data-theme] island needs its own copy.
+ */
+:root,
+[data-theme] {
+  --actor-agent-transparent: color-mix(
+    in srgb,
+    var(--actor-agent) 16%,
+    transparent
+  );
+  --actor-human-transparent: color-mix(
+    in srgb,
+    var(--actor-human) 16%,
+    transparent
+  );
+  --actor-system-transparent: color-mix(
+    in srgb,
+    var(--actor-system) 16%,
+    transparent
+  );
+  --trust-enclave-transparent: color-mix(
+    in srgb,
+    var(--trust-enclave) 16%,
+    transparent
+  );
+  --control-plane-transparent: color-mix(
+    in srgb,
+    var(--control-plane) 16%,
+    transparent
+  );
+  --risk-transparent: color-mix(in srgb, var(--risk) 16%, transparent);
+  --money-transparent: color-mix(in srgb, var(--money) 16%, transparent);
+}
+
+/*
+ * Light-theme text contrast. The upstream light values of these tokens sit below
+ * WCAG AA (4.5:1) as text on the light surfaces, so they are darkened with
+ * existing primitives until they clear 4.5:1 on --surface-secondary and on their
+ * own 16-24% chip backgrounds. Fills that derive from them get darker too; the
+ * -transparent chip backgrounds keep their primitives. Selector excludes a dark root so it cannot beat the dark block.
+ */
+:root:not([data-theme="dark"]),
+[data-theme="light"] {
+  --text-tertiary: color-mix(in srgb, var(--fab-metal-500), var(--fab-metal-750) 45%);
+  --accent-danger: color-mix(in srgb, var(--fab-scarlet-500), var(--fab-metal-1000) 30%);
+  --accent-warning: color-mix(in srgb, var(--fab-harvest-gold-500), var(--fab-metal-1000) 50%);
+  --chip-error-foreground: var(--accent-danger);
+  --accent-brand: color-mix(in srgb, var(--fab-neon-blue-500), var(--fab-neon-blue-800) 25%);
+  --chip-brand-foreground: var(--accent-brand);
+  --actor-agent: var(--accent-brand);
+  --actor-human: var(--accent-warning);
+  --trust-enclave: color-mix(in srgb, var(--fab-wave-cyan), var(--fab-metal-1000) 45%);
+  --accent-success: color-mix(in srgb, var(--fab-forest-green-500), var(--fab-metal-1000) 35%);
+  --chip-success-foreground: var(--accent-success);
+}
