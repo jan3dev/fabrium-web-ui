@@ -358,6 +358,17 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const DECLINE_REASON =
     'Bots are placed in rooms only by the zooid daemon (workforce-as-code). ' +
     'Ad-hoc invites are declined — add the bot to the room in zooid.yaml.'
+  // Pull mode's first /sync replays invites the bot has since accepted (an
+  // operator admitting another workstation's bots, for example). Only a pending
+  // invite is ad hoc: leaving on a replay would take the bot out of its rooms.
+  async function alreadyJoined(roomId: string, userId: string): Promise<boolean> {
+    try {
+      const { joined } = await client.getJoinedMembers(roomId, userId)
+      return Object.hasOwn(joined, userId)
+    } catch {
+      return false
+    }
+  }
   const sessions = new Map<string, SessionContext>()
   const buffers = new Map<string, string>()
   // Last messageId seen per session's buffer. opencode streams each assistant
@@ -925,7 +936,8 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         target &&
         evt.room_id &&
         ourBotUserIds.has(target) &&
-        (!inviter || !ourBotUserIds.has(inviter))
+        (!inviter || !ourBotUserIds.has(inviter)) &&
+        !(await alreadyJoined(evt.room_id, target))
       ) {
         console.log(
           `[matrix] declining ad-hoc invite for ${target} in ${evt.room_id} ` +

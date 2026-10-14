@@ -1966,6 +1966,32 @@ describe('ad-hoc bot invite declines', () => {
     expect(client.leaveRoom).not.toHaveBeenCalled()
   })
 
+  it('does NOT decline a replayed invite the bot already accepted (pull-mode catch-up)', async () => {
+    const { transport, client } = makeTransport()
+    Object.assign(client, {
+      getJoinedMembers: vi.fn(async () => ({ joined: { '@architect:example.com': {} } })),
+    })
+    await postTxn(transport.app, {
+      events: [invite('@architect:example.com', '@zongshan:example.com')],
+    })
+    expect(client.leaveRoom).not.toHaveBeenCalled()
+  })
+
+  it('declines a pending invite when the bot is not in the room yet', async () => {
+    const { transport, client } = makeTransport()
+    Object.assign(client, {
+      getJoinedMembers: vi.fn(async () => ({ joined: { '@zongshan:example.com': {} } })),
+    })
+    await postTxn(transport.app, {
+      events: [invite('@architect:example.com', '@zongshan:example.com')],
+    })
+    expect(client.leaveRoom).toHaveBeenCalledWith(
+      '!r:example.com',
+      '@architect:example.com',
+      expect.objectContaining({ reason: expect.any(String) }),
+    )
+  })
+
   it('ignores an invite to a human (not one of our bots)', async () => {
     const { transport, client } = makeTransport()
     await postTxn(transport.app, {
