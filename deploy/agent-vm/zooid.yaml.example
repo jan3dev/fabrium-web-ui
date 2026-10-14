@@ -1,8 +1,10 @@
 # Agent VM config. deploy/add-workstation.sh renders it on the central instance into
 # ${ZOOID_HOME}/workstations/<workstation>/workforce/zooid.yaml; copy that bundle to the VM.
 # See "Agent VM (workstation)" in deploy/README.md.
-# Quoted ${VAR} values are read by zooid from the daemon environment (~/zooid/.env).
-workstation: ${WORKSTATION}
+# add-workstation.sh fills in the names; the quotes keep them strings in YAML.
+# zooid reads "${HOMESERVER_URL}" from the daemon environment (~/zooid/.env and
+# ~/zooid/secrets.env on the VM).
+workstation: '${WORKSTATION}'
 # The agent is a process of the VM, with the access of the VM user (Docker, sudo).
 runtime: local
 transports:
@@ -10,14 +12,14 @@ transports:
     homeserver: "${HOMESERVER_URL}"
     # The VM reads with /sync and opens no port.
     mode: client
-    sender_localpart: ${WORKSTATION}
+    sender_localpart: '${WORKSTATION}'
     user_namespace: '@${WORKSTATION}\..*:${SERVER_NAME}'   # host part: SERVER_NAME, dots not escaped
-    space: ${WORKFORCE_SPACE}
+    space: '${WORKFORCE_SPACE}'
 agents:
   # Persona and project are in the roster that add-workstation.sh publishes.
   # The rooms must stay equal to its --room values.
-  ${AGENT_NAME}:
-    acp: { preset: ${AGENT_PRESET} }
+  '${AGENT_NAME}':
+    acp: { preset: '${AGENT_PRESET}' }
     matrix: { display_name: '${AGENT_NAME}', rooms: [${AGENT_ROOMS}], trigger: mention }
 
 # Optional, not recommended: run the harness in a container to pin its version.

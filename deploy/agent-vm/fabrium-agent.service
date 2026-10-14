@@ -7,6 +7,9 @@ Description=Fabrium agent VM (zooid workstation, client mode)
 [Service]
 WorkingDirectory=${ZOOID_HOME}/workforce
 EnvironmentFile=${ZOOID_HOME}/.env
+# The agent secrets. A new bundle overwrites .env, not this file. "-" makes the
+# file optional. systemd reads it last, so its values win over .env.
+EnvironmentFile=-${ZOOID_HOME}/secrets.env
 ExecStart=${NODE_BIN} ${REPO_DIR}/packages/cli/dist/bin.js start --data ./data
 Restart=always
 RestartSec=5

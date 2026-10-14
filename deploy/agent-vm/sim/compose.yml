@@ -13,7 +13,10 @@ services:
       target: build
     # zooid reads zooid.yaml from its working directory: the file next to this one.
     working_dir: /etc/fabrium-vm
-    command: ["sh", "-c", "mkdir -p /vm/agents/echo && exec node /src/packages/cli/dist/bin.js start --data /vm/data"]
+    # Under runtime: local zooid does not create the agent's working directory:
+    # /vm/agents/echo for the file next to this one, ./agents/<agent> for the
+    # bundle's zooid.yaml (it sets no workdir). $$ stops compose interpolation.
+    command: ["sh", "-c", "mkdir -p /vm/agents/echo \"/etc/fabrium-vm/agents/$$AGENT_NAME\" && exec node /src/packages/cli/dist/bin.js start --data /vm/data"]
     # The bundle that deploy/add-workstation.sh wrote: the VM tokens.
     env_file:
       - ${ZOOID_HOME:?set ZOOID_HOME}/workstations/vm1/.env
