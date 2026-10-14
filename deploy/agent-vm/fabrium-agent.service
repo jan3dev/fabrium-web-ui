@@ -1,0 +1,17 @@
+# Rendered by deploy/agent-vm/provision.sh into ~/.config/systemd/user/fabrium-agent.service.
+# The zooid workstation of an agent VM: client mode, one agent, run as this user.
+# Placeholders: ZOOID_HOME, REPO_DIR, NODE_BIN.
+[Unit]
+Description=Fabrium agent VM (zooid workstation, client mode)
+
+[Service]
+WorkingDirectory=${ZOOID_HOME}/workforce
+EnvironmentFile=${ZOOID_HOME}/.env
+ExecStart=${NODE_BIN} ${REPO_DIR}/packages/cli/dist/bin.js start --data ./data
+Restart=always
+RestartSec=5
+# zooid stops its agent on SIGTERM.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

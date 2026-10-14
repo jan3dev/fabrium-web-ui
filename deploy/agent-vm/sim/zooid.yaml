@@ -1,0 +1,19 @@
+# Agent VM simulation (compose.yml next to this file). Same shape as
+# deploy/agent-vm/zooid.yaml.example for `deploy/add-workstation.sh vm1 --agent echo
+# --room '#zooid'` on the local test stack (SERVER_NAME=localhost), with the
+# echo fixture as the agent.
+workstation: vm1
+runtime: local
+transports:
+  matrix:
+    homeserver: "${HOMESERVER_URL}"
+    mode: client
+    sender_localpart: vm1
+    user_namespace: '@vm1\..*:localhost'
+    space: dev
+agents:
+  echo:
+    workdir: /vm/agents/echo
+    # Replies with one chunk and asks for an approval on every turn.
+    acp: { command: node, args: ['/src/packages/acp-client/test/fixtures/echo-agent.ts'] }
+    matrix: { display_name: 'echo', rooms: ['#zooid:localhost'], trigger: mention }

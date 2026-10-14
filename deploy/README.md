@@ -37,6 +37,8 @@ deploy.log                    one line per successful deploy
 | `deploy/backup.sh` | Stops `zooid` and `tuwunel`, tars the essential state (owner-only file), restarts them. |
 | `deploy/restore.sh` | Extracts a backup into an empty `ZOOID_HOME`. |
 | `deploy/compose.sh` | `docker compose` bound to this instance, for `logs`, `ps`, `stop`, `start`, `down`. |
+| `deploy/add-workstation.sh` | Admits an agent VM: writes its tokens and tuwunel registration, adds its users to the workforce space and its rooms, publishes its roster entry. See [Agent VM](#agent-vm-workstation). |
+| `deploy/agent-vm/provision.sh` | Runs on the agent VM: installs Node, pnpm and Docker CE, builds the zooid CLI at a commit, runs it as a systemd user service. Idempotent; also the update path. |
 
 All scripts take `-h`. They never print secret values.
 
@@ -193,3 +195,131 @@ To see an agent start, invite that user to `#zooid`, send a message that mention
 mounted from `ZOOID_HOME`.
 
 Tear down: `docker compose -p fabrium down -v && rm -rf ~/zooid-local`.
+
+## Agent VM (workstation)
+
+An agent can run on its own VM instead of in a container on this box. The VM runs a second zooid
+daemon: a *workstation* with one agent, in client mode. It reads with `/sync` over HTTPS and opens no
+port, so the VM can be on AWS or on an external server, also behind NAT. The agent is a plain process
+of the VM, with the access of the VM user: Docker and, on AWS, sudo. Container agents on this box do
+not change.
+
+```
+this box                                            agent VM (one agent)
+Caddy :443 ─ /_matrix/* ─► tuwunel  ◄──── HTTPS ──── zooid, systemd user service fabrium-agent
+  registrations/zooid.yaml + vm1.yaml                 workstation: vm1, mode: client
+zooid: container agents, cron triggers                runtime: local ─► the agent process
+```
+
+| Item | Where |
+|---|---|
+| VM tokens and tuwunel registration (users `@vm1\..*`) | this box, `deploy/add-workstation.sh` |
+| Agent ID | `@<workstation>.<agent>:SERVER_NAME`, for example `@vm1.coder:fabrium.net` |
+| Roster entry (persona, project, rooms) | published by this box; the VM cannot change it |
+| Cron | `triggers:` in this box's `zooid.yaml` |
+| Agent credentials, instructions and secrets | on the VM, put there by the operator |
+
+### Admit a VM (on this box)
+
+The rooms must exist. Run the script before the VM's first start:
+
+```bash
+deploy/add-workstation.sh vm1 --agent coder --room '#zooid' --persona Coder --project Fabrium
+```
+
+It writes the bundle for the VM in `ZOOID_HOME/workstations/vm1/` (`.env` with new tokens and
+`workforce/zooid.yaml`), writes `registrations/vm1.yaml` and restarts tuwunel. If tuwunel does not come
+back, it removes the registration and restarts tuwunel again. Then it adds `@vm1` and `@vm1.coder` to the
+workforce space and the rooms at power level 0 and publishes the roster entry `vm1`. A new or changed
+registration restarts tuwunel: the chat is down for a few seconds for every user of the instance.
+
+Run it again to change the persona, the project or the rooms. It keeps the tokens and the bundle's
+`zooid.yaml`: keep the rooms in the VM's `zooid.yaml` equal to `--room`. When it must invite a VM user
+again (for example after the user left a room), stop the agent on the VM first
+(`systemctl --user stop fabrium-agent`).
+
+### Prepare the VM
+
+1. Create an Ubuntu 24.04 VM. Inbound: SSH for the operator only. Outbound: HTTPS to `SITE_ADDRESS`.
+2. Copy the bundle. It holds the VM tokens:
+   ```bash
+   tar -C ~/zooid/workstations/vm1 -cf - .env workforce | ssh <vm> 'mkdir -p ~/zooid && tar -C ~/zooid -xf -'
+   ```
+3. On the VM, as the user that runs the agent, with the commit this box runs (pushed to GitHub):
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/jan3dev/fabrium-web-ui/<sha>/deploy/agent-vm/provision.sh -o provision.sh
+   bash provision.sh --ref <sha>
+   ```
+4. Give the agent its credentials (for example `~/.claude` or `~/.config/opencode`) and its secrets in
+   `~/zooid/.env`, its instructions in `~/zooid/workforce/agents/<agent>/`, then
+   `systemctl --user restart fabrium-agent`.
+
+Logs: `journalctl --user -u fabrium-agent -f`. Two warnings at each start are expected:
+`m.space.child(…) failed: … 403` and `workforce roster publication failed: … 403`. The VM has power
+level 0; this box publishes its roster entry.
+
+Update the VM every time this box deploys a new commit: `bash ~/fabrium-web-ui/deploy/agent-vm/provision.sh
+--ref <sha>`. All daemons of a workforce must run the same version (see the CLI changelog).
+
+To pin the harness version with an image, replace `runtime: local` with `runtime: docker` and add a
+`container.image` in the VM's `zooid.yaml`. This is optional and not recommended: in a container the
+agent cannot use the VM directly or start other containers.
+
+### Cron for a VM agent
+
+Triggers stay on this box. Mention the agent by its full ID, and give the room as a full alias:
+
+```yaml
+triggers:
+  daily-report:
+    schedule: '0 9 * * *'
+    as: cron
+    room: '#zooid:fabrium.net'
+    mention: '@vm1.coder:fabrium.net'
+    text: 'Daily report, please.'
+```
+
+### Security
+
+- The agent inherits the daemon environment, so it can read the VM token. With it, it can act as `@vm1`
+  and `@vm1.*`: read and send in their rooms, and join any `restricted` room of the space. Keep
+  sensitive rooms invite-only. It cannot act as other users (`M_EXCLUSIVE`).
+- At power level 0 the VM cannot change the roster or the space. The agent stays marked as an agent, so
+  its approval responses are ignored.
+- One agent per VM.
+
+### Remove a VM
+
+1. Stop the agent on the VM (`systemctl --user disable --now fabrium-agent`) or destroy the VM.
+2. On this box, with `MATRIX_AS_TOKEN` in the shell, remove the users from the agent's rooms and from
+   the space, then empty the roster entry. `ROOMS` holds the room IDs and the space ID last:
+   ```bash
+   h="Authorization: Bearer $MATRIX_AS_TOKEN" j="content-type: application/json"
+   for r in $ROOMS; do
+     for u in @vm1:fabrium.net @vm1.coder:fabrium.net; do
+       curl -s -X POST -H "$h" -H "$j" "http://127.0.0.1:8448/_matrix/client/v3/rooms/$r/kick" -d "{\"user_id\":\"$u\"}"
+     done
+   done
+   curl -s -X PUT -H "$h" -H "$j" "http://127.0.0.1:8448/_matrix/client/v3/rooms/$SPACE_ID/state/dev.zooid.workforce/vm1" -d '{}'
+   ```
+   Without the roster entry, the UI no longer marks `@vm1.coder` as an agent: its old messages show
+   without the `agent` badge. To keep the badge on that history, skip the last command.
+3. `rm ~/zooid/data/matrix/config/registrations/vm1.yaml && deploy/compose.sh restart tuwunel`, then
+   `rm -r ~/zooid/workstations/vm1`.
+
+### Local simulation
+
+`deploy/agent-vm/sim/` runs the VM as a container next to the [local test](#local-test-macos-or-linux-docker-desktop-or-docker-ce)
+stack, with an echo agent that replies once and asks for one approval per turn. In the shell of the local
+test (`SERVER_NAME=localhost`):
+
+```bash
+deploy/add-workstation.sh vm1 --agent echo --room '#zooid'
+STACK_PROJECT=fabrium docker compose -p fabrium-vm-sim -f deploy/agent-vm/sim/compose.yml up -d --build
+docker logs -f fabrium-vm-sim-agent-vm-1      # expect: pull mode: 1 sync loop(s) running
+```
+
+`STACK_PROJECT` is the compose project of the local stack. Mention `@vm1.echo` in `#zooid` from the UI,
+approve, and the reply appears. To start the bundle's own config instead of the echo agent, set
+`SIM_ZOOID_YAML=$ZOOID_HOME/workstations/vm1/workforce/zooid.yaml`. Tear down:
+`docker compose -p fabrium-vm-sim -f deploy/agent-vm/sim/compose.yml down && rm -rf $ZOOID_HOME/vm-sim`.

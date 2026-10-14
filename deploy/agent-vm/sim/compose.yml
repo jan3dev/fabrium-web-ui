@@ -1,0 +1,33 @@
+# Local simulation of an agent VM: one container that runs a zooid workstation in
+# client mode against the local test stack. See "Local simulation" in deploy/README.md.
+# Start it as its own project, so deploy.sh's `up --remove-orphans` leaves it alone.
+# STACK_PROJECT is the project name of the test stack (its COMPOSE_PROJECT_NAME):
+#   STACK_PROJECT=fabrium docker compose -p fabrium-vm-sim -f deploy/agent-vm/sim/compose.yml up -d --build
+services:
+  agent-vm:
+    image: fabrium-vm-sim:dev
+    build:
+      context: ../../..
+      dockerfile: deploy/Dockerfile
+      # The build stage keeps the dev dependencies and the echo agent fixture.
+      target: build
+    # zooid reads zooid.yaml from its working directory: the file next to this one.
+    working_dir: /etc/fabrium-vm
+    command: ["sh", "-c", "mkdir -p /vm/agents/echo && exec node /src/packages/cli/dist/bin.js start --data /vm/data"]
+    # The bundle that deploy/add-workstation.sh wrote: the VM tokens.
+    env_file:
+      - ${ZOOID_HOME:?set ZOOID_HOME}/workstations/vm1/.env
+    environment:
+      HOMESERVER_URL: http://tuwunel:8448
+      HOME: /vm/home
+    volumes:
+      - ${ZOOID_HOME}/vm-sim:/vm
+      # SIM_ZOOID_YAML runs another config, for example the bundle from add-workstation.sh.
+      - ${SIM_ZOOID_YAML:-./zooid.yaml}:/etc/fabrium-vm/zooid.yaml:ro
+    networks: [stack]
+    restart: unless-stopped
+
+networks:
+  stack:
+    name: ${STACK_PROJECT:-fabrium}_default
+    external: true
