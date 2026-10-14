@@ -45,6 +45,10 @@ function fakeClient() {
     sendCustomEvent: vi.fn(async () => ({ event_id: '$x' })),
     setTyping: vi.fn(async () => {}),
     setPresence: vi.fn(async () => {}),
+    // A bot with a pending invite cannot read the member list.
+    getJoinedMembers: vi.fn(async (roomId: string) => {
+      throw Object.assign(new Error(`getJoinedMembers(${roomId}) failed: 403`), { status: 403 })
+    }),
   }
 }
 
@@ -57,7 +61,7 @@ const baseAgents = [
   },
 ]
 
-function makeTransport(drain?: { drainQuietMs?: number; drainMaxMs?: number }) {
+function makeTransport(o?: { drainQuietMs?: number; drainMaxMs?: number; workstation?: string }) {
   const { reg, finishPrompt } = fakeRegistry()
   const approvals = fakeApprovals()
   const client = fakeClient()
@@ -70,10 +74,29 @@ function makeTransport(drain?: { drainQuietMs?: number; drainMaxMs?: number }) {
     botUserId: '@zooid:example.com',
     // Disable post-turn drain by default so settleTurn (microtasks) suffices.
     // Tests covering trailing-chunk behavior pass an explicit window.
-    drainQuietMs: drain?.drainQuietMs ?? 0,
-    drainMaxMs: drain?.drainMaxMs,
+    drainQuietMs: o?.drainQuietMs ?? 0,
+    drainMaxMs: o?.drainMaxMs,
+    workstation: o?.workstation,
   })
   return { transport, agents: reg, approvals, client, finishPrompt }
+}
+
+// The space roster lists workstation vm1's agent @vm1.coder only. vm1's agent
+// can still act as its daemon's sender @vm1 or as any other @vm1.* user.
+async function bootstrapWithVm1Roster(t: ReturnType<typeof makeTransport>) {
+  Object.assign(t.client, {
+    setDisplayName: vi.fn(async () => {}),
+    invite: vi.fn(async () => {}),
+    sendStateEvent: vi.fn(async () => ({ event_id: '$s' })),
+    fetchRoomState: vi.fn(async () => [
+      {
+        type: 'dev.zooid.workforce',
+        state_key: 'vm1',
+        content: { version: 1, agents: [{ user_id: '@vm1.coder:example.com' }] },
+      },
+    ]),
+  })
+  await t.transport.bootstrap({ spaceRoomId: '!space:example.com', asUserId: '@zooid:example.com' })
 }
 
 let txnCounter = 0
@@ -461,6 +484,30 @@ describe('dev.zooid.approval_response from an agent', () => {
       ],
     })
     expect(approvals.resolve).not.toHaveBeenCalled()
+  })
+})
+
+describe('dev.zooid.approval_response from a rostered workstation', () => {
+  const response = (sender: string) => ({
+    type: 'dev.zooid.approval_response',
+    event_id: '$resp',
+    room_id: '!r:example.com',
+    sender,
+    content: { approval_id: 'a1', session_id: 'sess-$root', decision: 'allow' },
+  })
+
+  it.each(['@vm1:example.com', '@vm1.other:example.com'])('is ignored from %s', async (sender) => {
+    const t = makeTransport()
+    await bootstrapWithVm1Roster(t)
+    await postTxn(t.transport.app, { events: [response(sender)] })
+    expect(t.approvals.resolve).not.toHaveBeenCalled()
+  })
+
+  it.each(['@alice:example.com', '@vm10:example.com'])('still resolves from the human %s', async (sender) => {
+    const t = makeTransport()
+    await bootstrapWithVm1Roster(t)
+    await postTxn(t.transport.app, { events: [response(sender)] })
+    expect(t.approvals.resolve).toHaveBeenCalledWith('sess-$root', 'a1', { decision: 'allow' })
   })
 })
 
@@ -1992,6 +2039,18 @@ describe('ad-hoc bot invite declines', () => {
     )
   })
 
+  it.each([
+    ['a 500', Object.assign(new Error('getJoinedMembers(!r:example.com) failed: 500'), { status: 500 })],
+    ['a network error', new TypeError('fetch failed')],
+  ])('does NOT decline an invite when the membership check fails with %s', async (_label, err) => {
+    const { transport, client } = makeTransport()
+    Object.assign(client, { getJoinedMembers: vi.fn(async () => Promise.reject(err)) })
+    await postTxn(transport.app, {
+      events: [invite('@architect:example.com', '@zongshan:example.com')],
+    })
+    expect(client.leaveRoom).not.toHaveBeenCalled()
+  })
+
   it('ignores an invite to a human (not one of our bots)', async () => {
     const { transport, client } = makeTransport()
     await postTxn(transport.app, {
@@ -2778,5 +2837,91 @@ describe('agents on other workstations ([[ZOD039]] directional continuation)', (
     await postTxn(t.transport.app, { events: [remoteReply('$p2', 'm.text')] })
     await settleTurn()
     expect(t.agents.ensureSession).not.toHaveBeenCalled()
+  })
+
+  it('a rostered workstation’s sender is not a human: its bare reply wakes no local agent', async () => {
+    const t = makeTransport()
+    await bootstrapWithVm1Roster(t)
+    await threadWithArchitect(t)
+    await postTxn(t.transport.app, { events: [{ ...humanReply('$v1'), sender: '@vm1:example.com' }] })
+    await settleTurn()
+    expect(t.agents.ensureSession).not.toHaveBeenCalled()
+  })
+
+  it('a rostered workstation’s sender cannot call a local agent with an @mention', async () => {
+    const t = makeTransport()
+    await bootstrapWithVm1Roster(t)
+    await postTxn(t.transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$v2',
+          room_id: '!r:example.com',
+          sender: '@vm1:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+    expect(t.agents.ensureSession).not.toHaveBeenCalled()
+  })
+})
+
+describe('users of this daemon’s own workstation', () => {
+  // A workstation's trigger bot lives in its namespace (`as: vm1.cron`). Its
+  // own daemon still routes it like a human, so local triggers keep working.
+  const cronMention = {
+    type: 'm.room.message',
+    event_id: '$cron',
+    room_id: '!r:example.com',
+    sender: '@vm1.cron:example.com',
+    content: {
+      msgtype: 'm.text',
+      body: 'Daily report, please.',
+      'm.mentions': { user_ids: ['@architect:example.com'] },
+    },
+  }
+
+  it('on workstation vm1, a mention from its trigger bot @vm1.cron wakes the agent', async () => {
+    const t = makeTransport({ workstation: 'vm1' })
+    await bootstrapWithVm1Roster(t)
+    await postTxn(t.transport.app, { events: [cronMention] })
+    await settleTurn()
+    expect(t.agents.ensureSession).toHaveBeenCalled()
+  })
+
+  it.each([
+    ['no workstation', undefined],
+    ['workstation vm2', 'vm2'],
+  ])('on a daemon with %s, a mention from @vm1.cron wakes no agent', async (_label, workstation) => {
+    const t = makeTransport({ workstation })
+    await bootstrapWithVm1Roster(t)
+    await postTxn(t.transport.app, { events: [cronMention] })
+    await settleTurn()
+    expect(t.agents.ensureSession).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['without', false],
+    ['with', true],
+  ])('on workstation vm1, an approval response from @vm1.cron is ignored, %s the vm1 roster', async (_label, withRoster) => {
+    const t = makeTransport({ workstation: 'vm1' })
+    if (withRoster) await bootstrapWithVm1Roster(t)
+    await postTxn(t.transport.app, {
+      events: [
+        {
+          type: 'dev.zooid.approval_response',
+          event_id: '$resp',
+          room_id: '!r:example.com',
+          sender: '@vm1.cron:example.com',
+          content: { approval_id: 'a1', session_id: 'sess-$root', decision: 'allow' },
+        },
+      ],
+    })
+    expect(t.approvals.resolve).not.toHaveBeenCalled()
   })
 })

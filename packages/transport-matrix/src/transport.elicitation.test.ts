@@ -17,7 +17,7 @@ const schema = {
 
 type Asker = (name: string, req: unknown, signal: AbortSignal) => Promise<ElicitationResponse>
 
-function setup(o: { members?: string[]; failPublish?: number } = {}) {
+function setup(o: { members?: string[]; failPublish?: number; workstation?: string } = {}) {
   let release!: () => void
   const turnGate = new Promise<void>((r) => (release = r))
   const reg = {
@@ -75,6 +75,7 @@ function setup(o: { members?: string[]; failPublish?: number } = {}) {
     drainQuietMs: 0,
     elicitations,
     elicitationRetryDelayMs: 0,
+    workstation: o.workstation,
   })
   return { transport, reg, client, elicitations, finishTurn: () => release() }
 }
@@ -132,6 +133,20 @@ const sent = (s: Setup, type: string) =>
     .map((c) => c[0] as { eventType: string; content: Record<string, unknown>; txnId?: string; asUserId: string })
     .filter((i) => i.eventType === type)
 const requestIdOf = (s: Setup, i = 0) => sent(s, 'dev.zooid.elicitation_request')[i]!.content.request_id as string
+// The space roster lists workstation vm1's agent @vm1.coder only. vm1's agent
+// can still act as its daemon's sender @vm1 or as any other @vm1.* user.
+async function bootstrapWithVm1Roster(s: Setup) {
+  Object.assign(s.client, {
+    setDisplayName: vi.fn(async () => {}),
+    invite: vi.fn(async () => {}),
+    sendStateEvent: vi.fn(async () => ({ event_id: '$s' })),
+    fetchRoomState: vi.fn(async () => [{
+      type: 'dev.zooid.workforce', state_key: 'vm1',
+      content: { version: 1, agents: [{ user_id: '@vm1.coder:example.com' }] },
+    }]),
+  })
+  await s.transport.bootstrap({ spaceRoomId: '!space:example.com', asUserId: '@zooid:example.com' })
+}
 
 describe('Matrix transport — elicitation loop', () => {
   it('installs the handler on the registry at construction', () => {
@@ -260,6 +275,44 @@ describe('Matrix transport — elicitation loop', () => {
     expect(s.elicitations.get(id)?.state).toBe('pending')
     expect(sent(s, 'dev.zooid.elicitation_resolved')).toHaveLength(0)
     expect(sent(s, 'dev.zooid.elicitation_rejected')).toHaveLength(0)
+  })
+
+  it.each(['@vm1:example.com', '@vm1.other:example.com'])(
+    'ignores a response from %s, a member in a rostered workstation’s namespace',
+    async (sender) => {
+      const s = setup({ members: [AGENT, CODER, ALICE, BOB, sender] })
+      await bootstrapWithVm1Roster(s)
+      await startTurn(s)
+      ask(s)
+      await settle()
+      const id = requestIdOf(s)
+      await respond(s, { requestId: id, content: { env: 'prod' }, sender }).p
+      await settle()
+      expect(s.elicitations.get(id)?.state).toBe('pending')
+      expect(sent(s, 'dev.zooid.elicitation_resolved')).toHaveLength(0)
+    },
+  )
+
+  it('on workstation vm1, ignores a response from @vm1.cron, even without a roster', async () => {
+    const s = setup({ members: [AGENT, CODER, ALICE, BOB, '@vm1.cron:example.com'], workstation: 'vm1' })
+    await startTurn(s)
+    ask(s)
+    await settle()
+    const id = requestIdOf(s)
+    await respond(s, { requestId: id, content: { env: 'prod' }, sender: '@vm1.cron:example.com' }).p
+    await settle()
+    expect(s.elicitations.get(id)?.state).toBe('pending')
+    expect(sent(s, 'dev.zooid.elicitation_resolved')).toHaveLength(0)
+  })
+
+  it('still accepts a human whose localpart only starts with a workstation name', async () => {
+    const s = setup({ members: [AGENT, '@vm10:example.com'] })
+    await bootstrapWithVm1Roster(s)
+    await startTurn(s)
+    const { response } = ask(s)
+    await settle()
+    await respond(s, { requestId: requestIdOf(s), content: { env: 'prod' }, sender: '@vm10:example.com' }).p
+    await expect(response).resolves.toEqual({ action: 'accept', content: { env: 'prod' } })
   })
 
   it('first valid response wins; a later one gets stale feedback', async () => {

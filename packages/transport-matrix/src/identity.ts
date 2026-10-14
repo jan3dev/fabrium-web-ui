@@ -20,6 +20,11 @@ export function splitAgentLocalpart(localpart: string): { workstation: string; a
   return { workstation: localpart.slice(0, i), agent: localpart.slice(i + 1) }
 }
 
+/** The localpart up to its first dot: `vm1` for both `@vm1:hs` and `@vm1.coder:hs`. */
+export function workstationOf(userId: string): string | undefined {
+  return /^@([^.:]+)[.:]/.exec(userId)?.[1]
+}
+
 export function workstationUserNamespace(workstation: string, serverName: string): string {
   if (!isValidWorkstation(workstation))
     throw new Error(`invalid workstation: ${JSON.stringify(workstation)}`)

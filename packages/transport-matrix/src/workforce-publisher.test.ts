@@ -147,6 +147,22 @@ describe('WorkforceDirectory', () => {
     dir.apply('laptop', {})
     expect([...dir.agentIds]).toEqual(['@cloud.scout:hs'])
   })
+
+  it('treats every user in a rostered workstation’s namespace as a workforce identity', () => {
+    const dir = new WorkforceDirectory()
+    dir.apply('vm1', roster('@vm1.coder:hs'))
+    dir.apply('', roster('@central:hs'))
+    expect(dir.isWorkforceIdentity('@vm1.coder:hs')).toBe(true)
+    expect(dir.isWorkforceIdentity('@vm1:hs')).toBe(true)
+    expect(dir.isWorkforceIdentity('@vm1.other:example.com')).toBe(true)
+    expect(dir.isWorkforceIdentity('@central:hs')).toBe(true)
+    // The central key '' adds no namespace; only exact workstation names match.
+    expect(dir.isWorkforceIdentity('@alice:hs')).toBe(false)
+    expect(dir.isWorkforceIdentity('@central.other:hs')).toBe(false)
+    expect(dir.isWorkforceIdentity('@vm10:hs')).toBe(false)
+    dir.apply('vm1', {})
+    expect(dir.isWorkforceIdentity('@vm1:hs')).toBe(false)
+  })
 })
 
 describe('WorkforceDirectory entries ([[ZOD092]])', () => {

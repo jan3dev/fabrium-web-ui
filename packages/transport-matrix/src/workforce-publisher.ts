@@ -1,4 +1,5 @@
 import { MatrixClient } from './matrix-client.js'
+import { workstationOf } from './identity.js'
 import type { AgentBinding } from './router.js'
 
 export interface WorkforceRoster {
@@ -117,5 +118,16 @@ export class WorkforceDirectory {
 
   nameOf(userId: string): string | undefined {
     return this.entries().find((e) => e.userId === userId)?.name
+  }
+
+  /**
+   * True for a rostered agent and for any user in a rostered workstation's
+   * exclusive namespace: its daemon's sender `@ws` and every `@ws.*`. None of
+   * them is a human. The central roster (key `''`) adds only its agents.
+   */
+  isWorkforceIdentity(userId: string): boolean {
+    if (this.agentIds.has(userId)) return true
+    const workstation = workstationOf(userId)
+    return workstation !== undefined && this.rosters.has(workstation)
   }
 }
