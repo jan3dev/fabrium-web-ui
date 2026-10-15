@@ -271,8 +271,8 @@ first (`systemctl --user stop fabrium-agent`).
    before it stops or starts the agent: the zooid log cannot prove the token (the sync loop starts before the
    first `/sync`, and a rejected token only warns). On an update, it stops the agent before it changes the code.
    `--ref` takes a branch or a commit SHA; a commit that no branch head contains needs its full SHA. It stops
-   when another Node comes first in PATH or in the PATH of the systemd user instance: the agent would run on
-   that Node.
+   when another Node comes first in PATH or in the PATH of the systemd user instance. The agent starts `node`
+   and `opencode` from that PATH, where `/usr/local/bin` comes before `/usr/bin`, so it would run on that Node.
    If the SSH session can drop, run it detached, for example
    `nohup setsid bash ~/fabrium-web-ui/deploy/agent-vm/provision.sh --ref <sha> >provision.log 2>&1 </dev/null &`.
    It is idempotent: run it again after an interruption.

@@ -114,8 +114,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 1
 done
 
-# The agent starts `node` and `opencode` from the service PATH, where /usr/local/bin comes
-# before /usr/bin: another Node there would run the agent.
+# The agent starts node and opencode from the service PATH (/usr/local/bin before /usr/bin): check it too.
 SERVICE_PATH="$(systemctl --user show-environment | sed -n 's/^PATH=//p')"
 [ -n "$SERVICE_PATH" ] || die "cannot read PATH from the systemd user instance"
 for path in "$PATH" "$SERVICE_PATH"; do
