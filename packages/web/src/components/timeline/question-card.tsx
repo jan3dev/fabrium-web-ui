@@ -8,7 +8,7 @@ import { useUserName } from "../../hooks/use-user-name";
 import type { ActorSummary } from "@/model/types";
 import { QuestionCardView } from "./question-card-view";
 
-/** `agent` is the timeline author, labelled "Persona · Project" when the roster knows it. */
+/** `agent` is the timeline author, labelled "Name · Project" when the roster knows it. */
 export function QuestionCard({ event, agent }: { event: MatrixEvent; agent?: ActorSummary }) {
   const roomId = event.getRoomId() ?? "";
   const { decoded, state, resolution, rejection, error, send } = useElicitation(event);

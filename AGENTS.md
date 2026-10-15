@@ -40,7 +40,7 @@
 
 ### Fabrium UI rules
 
-- Actors are `human`, `agent` or `system`. An agent is a user in the workforce space's `dev.zooid.workforce` roster; nothing else marks a user as an agent. Agent label: `Persona · Project` (persona falls back to the agent's name, project to the workforce space name). Agent messages carry an `agent` badge, system users a `system` badge, humans none. Lists group agents by persona.
+- Actors are `human`, `agent` or `system`. An agent is a user in the workforce space's `dev.zooid.workforce` roster; nothing else marks a user as an agent. Agent label: `Name · Project`: the agent's display name, which zooid ends with 🤖, and its project (falling back to the workforce space name). The persona shows in the agent's profile. Agent messages carry an `agent` badge, system users a `system` badge, humans none. Lists group agents by persona.
 - Only humans can resolve approvals: hide approval buttons for agents. A resolved approval shows responder, decision and time; a timeout reads as denied.
 - Media only through authenticated media blob URLs. Never render agent HTML unsanitized, never embed previews in the client origin, never display secret values.
 - UI copy says workspace, project, channel, room, thread, agent, persona, approval; never space, bot, server or guild. Roles: owner, admin, manager, member, guest. Plain technical English, short sentences, active voice.

@@ -4,7 +4,7 @@ import type { ActorSummary } from "../model/types";
 import { useUserName } from "./use-user-name";
 import { useKnownAgent } from "./use-workforce";
 
-/** `userId` as an actor: agents labelled "Persona · Project" from the workforce roster, people by display name. */
+/** `userId` as an actor: agents labelled "Name · Project" (project from the workforce roster), people by display name. */
 export function useActor(userId: string, roomId?: string): ActorSummary {
   const known = useKnownAgent(userId);
   const name = useUserName(userId, roomId);

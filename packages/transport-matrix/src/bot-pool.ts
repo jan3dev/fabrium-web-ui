@@ -17,6 +17,14 @@ export interface BootstrapOpts {
   adminUserIds?: string[]
 }
 
+/** Ends every agent's display name, so people and other clients tell agents apart. */
+export const AGENT_DISPLAY_NAME_SUFFIX = '🤖'
+
+/** `name` ending with AGENT_DISPLAY_NAME_SUFFIX once. */
+export function agentDisplayName(name: string): string {
+  return name.endsWith(AGENT_DISPLAY_NAME_SUFFIX) ? name : `${name} ${AGENT_DISPLAY_NAME_SUFFIX}`
+}
+
 export class BotPool {
   constructor(
     private readonly client: Pick<
@@ -43,7 +51,7 @@ export class BotPool {
         console.warn(`[matrix] register failed for ${a.userId}: ${(err as Error).message}`)
       }
       try {
-        await this.client.setDisplayName(a.userId, a.displayName ?? lp)
+        await this.client.setDisplayName(a.userId, agentDisplayName(a.displayName ?? lp))
       } catch (err) {
         console.warn(`[matrix] setDisplayName(${a.userId}) failed: ${(err as Error).message}`)
       }

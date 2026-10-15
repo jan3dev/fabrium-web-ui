@@ -43,7 +43,8 @@ describe("<UserProfilePopover>", () => {
   it("shows an agent's persona, project and rooms, and no new-DM button", async () => {
     seedPeopleClient();
     await renderPopover(CODER);
-    expect(screen.getByText("Coder · Payments")).toBeInTheDocument();
+    expect(screen.getByText("coder · Payments")).toBeInTheDocument();
+    expect(screen.getByText("Coder")).toBeInTheDocument();
     expect(screen.getByText("Agent")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "payments" })).toHaveAttribute(
       "href",
