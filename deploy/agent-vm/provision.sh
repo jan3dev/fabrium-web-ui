@@ -54,8 +54,7 @@ OS_VERSION="$(. /etc/os-release && echo "${VERSION_ID:-}")"
 [ "$OS_ID" = "ubuntu" ] || die "unsupported OS '$OS_ID'. This script supports Ubuntu only."
 [ "$OS_VERSION" = "24.04" ] || warn "Ubuntu $OS_VERSION found; 24.04 is the tested version."
 command -v sudo >/dev/null 2>&1 || die "sudo is required."
-# `sudo -v` asks for a password even with NOPASSWD when another sudoers rule
-# matches without it (the %sudo group on Ubuntu cloud images); try -n first.
+# Try sudo -n first: `sudo -v` prompts when another sudoers rule (%sudo on Ubuntu images) matches.
 sudo -n true 2>/dev/null || sudo -v || die "sudo authentication failed."
 
 # --- Bundle from the central instance -------------------------------------
@@ -90,9 +89,7 @@ $APT update
 $APT install -y ca-certificates curl git gnupg jq
 
 # --- VM token -------------------------------------------------------------
-# zooid logs "sync loop(s) running" before its first /sync and only warns when
-# the homeserver rejects its token, so its log cannot prove the token. Check it
-# here, before an update stops the running agent. curl reads the token on stdin.
+# The zooid log cannot prove the token (deploy/README.md): check it before an update stops the agent.
 log "Checking the VM token with $HOMESERVER_URL"
 rc=0
 WHOAMI="$(printf 'header = "Authorization: Bearer %s"\n' "$MATRIX_AS_TOKEN" |
@@ -172,16 +169,14 @@ fi
 git -C "$REPO_DIR" fetch --quiet --prune origin
 [ -z "$(git -C "$REPO_DIR" status --porcelain --untracked-files=no)" ] ||
   die "working tree in $REPO_DIR has uncommitted changes"
-# The fetch above gets branch heads only. A commit that no branch holds (its
-# branch was squash-merged and deleted) is fetched by its full SHA.
+# The fetch above gets branch heads only; a commit no branch holds (squash-merged) needs its full SHA.
 COMMIT="$(git -C "$REPO_DIR" rev-parse --verify -q "origin/$REF^{commit}" ||
   git -C "$REPO_DIR" rev-parse --verify -q "$REF^{commit}" ||
   { git -C "$REPO_DIR" fetch --quiet origin -- "$REF" &&
     git -C "$REPO_DIR" rev-parse --verify -q "FETCH_HEAD^{commit}"; })" ||
   die "unknown ref: $REF (a commit that is on no branch needs its full SHA)"
 
-# The agent runs from this tree: stop it before the checkout and the build
-# change it. Until the restart below, a failure leaves it stopped.
+# The agent runs from this tree: stop it first; a failure leaves it stopped until the restart below.
 if [ -f "$UNIT_FILE" ]; then
   log "Stopping fabrium-agent for the update"
   systemctl --user stop fabrium-agent.service
@@ -217,8 +212,7 @@ systemctl --user restart fabrium-agent.service
 # systemd runs the new commit now, or restarts it in a loop: the agent is not stopped.
 trap - EXIT
 
-# The VM token check above is the proof that the bundle works. This wait only
-# shows that the service got as far as its sync loop.
+# The token check above proves the bundle; this wait only shows the sync loop started.
 log "Waiting for fabrium-agent to start its sync loop (up to 120 s)"
 ok=0
 for _ in $(seq 1 60); do

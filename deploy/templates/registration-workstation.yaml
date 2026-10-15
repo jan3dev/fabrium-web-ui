@@ -1,10 +1,6 @@
-# Rendered by deploy/add-workstation.sh into
-# ${ZOOID_HOME}/data/matrix/config/registrations/<workstation>.yaml (mode 600).
-# One agent VM: a zooid workstation in client (pull) mode. Same shape as the
-# registration zooid writes for a workstation (packages/cli/src/bootstrap/configs.ts),
-# without its alias namespace.
-# Placeholders: WORKSTATION, WS_AS_TOKEN, WS_HS_TOKEN, SERVER_NAME_RE.
-# Quoted names stay strings in YAML, also for a workstation such as 123 or null.
+# Rendered by deploy/add-workstation.sh into ${ZOOID_HOME}/data/matrix/config/registrations/<workstation>.yaml (mode 600).
+# One agent VM in client (pull) mode, shaped like packages/cli/src/bootstrap/configs.ts but without aliases.
+# Placeholders: WORKSTATION, WS_AS_TOKEN, WS_HS_TOKEN, SERVER_NAME_RE. Quoted names stay strings in YAML.
 id: '${WORKSTATION}'
 # Pull mode: the VM reads with /sync, so tuwunel has nothing to push.
 url: null
@@ -16,8 +12,6 @@ namespaces:
   users:
     - exclusive: true
       regex: '@${WORKSTATION}\..*:${SERVER_NAME_RE}'
-  # No aliases. The rooms exist before admission, and a lookup of an alias needs
-  # no namespace. A namespace would let the agent, which can read the VM token,
-  # create any free #alias.
+  # No aliases: see "Security" in deploy/README.md.
   aliases: []
   rooms: []

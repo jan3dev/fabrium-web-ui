@@ -81,8 +81,7 @@ function makeTransport(o?: { drainQuietMs?: number; drainMaxMs?: number; worksta
   return { transport, agents: reg, approvals, client, finishPrompt }
 }
 
-// The space roster lists workstation vm1's agent @vm1.coder only. vm1's agent
-// can still act as its daemon's sender @vm1 or as any other @vm1.* user.
+// The roster lists only @vm1.coder, but that agent can act as @vm1 or any other @vm1.* user.
 async function bootstrapWithVm1Roster(t: ReturnType<typeof makeTransport>) {
   Object.assign(t.client, {
     setDisplayName: vi.fn(async () => {}),
@@ -2872,8 +2871,7 @@ describe('agents on other workstations ([[ZOD039]] directional continuation)', (
 })
 
 describe('users of this daemon’s own workstation', () => {
-  // A workstation's trigger bot lives in its namespace (`as: vm1.cron`). Its
-  // own daemon still routes it like a human, so local triggers keep working.
+  // A trigger bot (`as: vm1.cron`) is in the namespace; its own daemon still routes it like a human.
   const cronMention = {
     type: 'm.room.message',
     event_id: '$cron',

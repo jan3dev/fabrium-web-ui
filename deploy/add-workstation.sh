@@ -53,8 +53,7 @@ while [ $# -gt 0 ]; do
 done
 
 # --- 1. checks -------------------------------------------------------------
-# Whole-string checks with explicit letter lists: grep checks line by line, and
-# under a UTF-8 locale bash 3.2 lets [a-z] match B or é.
+# Whole-string checks with letter lists: grep is line-based, and bash 3.2 [a-z] can match B or é in UTF-8.
 LOWER=abcdefghijklmnopqrstuvwxyz
 DIGITS=0123456789
 case "$WS" in
@@ -260,8 +259,7 @@ else
   BUNDLE_NEW=1
   export WORKSTATION="$WS" AGENT_NAME="$AGENT"
   if [ "$PRESET" = echo ]; then
-    # Test agent: replies once and asks for one approval per turn. Needs the repo
-    # clone that provision.sh makes at its default --repo-dir.
+    # Echo fixture; needs the repo clone that provision.sh makes at its default --repo-dir.
     AGENT_ACP="{ command: sh, args: ['-c', 'exec node \"\$HOME/fabrium-web-ui/packages/acp-client/test/fixtures/echo-agent.ts\"'] }"
   else
     # shellcheck disable=SC2089
@@ -283,8 +281,7 @@ fi
 
 # --- 4. registration -------------------------------------------------------
 NEXT="$BUNDLE/registration.next"
-# The registration that tuwunel ran with before a change. It exists only while
-# the change is not loaded, for example after an interrupted run.
+# The registration tuwunel ran with before a change; it exists only until the change loads.
 PREV="$BUNDLE/registration.prev"
 export WORKSTATION="$WS" WS_AS_TOKEN WS_HS_TOKEN
 # The registration namespaces are regexes: escape the dots of the server name.
@@ -293,10 +290,9 @@ export SERVER_NAME_RE
 render_template -m 600 "$REPO_DIR/deploy/templates/registration-workstation.yaml" "$NEXT" \
   WORKSTATION WS_AS_TOKEN WS_HS_TOKEN SERVER_NAME_RE
 
-# load_registration: restart tuwunel so that it reads $REG, then check both
-# tokens. If a step fails, put $PREV back (or remove $REG), restart tuwunel
-# again and die with the name of the step. Call it as a plain statement: in a
-# condition, set -e would not stop on a failed mv or rm.
+# load_registration: restart tuwunel to read $REG, check both tokens; on failure restore $PREV (or
+# remove $REG), restart again and die naming the step. Call it as a plain statement: in a
+# condition, set -e ignores a failed mv or rm.
 load_registration() {
   local step
   if ! restart_tuwunel; then
@@ -331,8 +327,7 @@ if [ -f "$REG" ] && cmp -s "$NEXT" "$REG"; then
     log "registration $REG unchanged"
   fi
 else
-  # Every workstation needs its own tokens. printf is a builtin: the tokens
-  # reach grep through a pipe, not its arguments.
+  # Every workstation needs its own tokens; printf keeps them out of grep's arguments.
   for f in "$REG_DIR"/*.yaml; do
     if [ "$f" = "$REG" ] || [ ! -f "$f" ]; then continue; fi
     if grep -qF -f <(printf '%s\n' "$WS_AS_TOKEN" "$WS_HS_TOKEN") -- "$f"; then

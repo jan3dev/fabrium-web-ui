@@ -133,8 +133,7 @@ const sent = (s: Setup, type: string) =>
     .map((c) => c[0] as { eventType: string; content: Record<string, unknown>; txnId?: string; asUserId: string })
     .filter((i) => i.eventType === type)
 const requestIdOf = (s: Setup, i = 0) => sent(s, 'dev.zooid.elicitation_request')[i]!.content.request_id as string
-// The space roster lists workstation vm1's agent @vm1.coder only. vm1's agent
-// can still act as its daemon's sender @vm1 or as any other @vm1.* user.
+// The roster lists only @vm1.coder, but that agent can act as @vm1 or any other @vm1.* user.
 async function bootstrapWithVm1Roster(s: Setup) {
   Object.assign(s.client, {
     setDisplayName: vi.fn(async () => {}),

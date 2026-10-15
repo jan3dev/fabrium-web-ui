@@ -264,8 +264,9 @@ first (`systemctl --user stop fabrium-agent`).
    curl -fsSL https://raw.githubusercontent.com/jan3dev/fabrium-web-ui/<sha>/deploy/agent-vm/provision.sh -o provision.sh
    bash provision.sh --ref <sha>
    ```
-   `provision.sh` checks the VM token with `whoami` before it stops or starts the agent. On an update, it
-   stops the agent before it changes the code. `--ref` takes a branch or a commit SHA; a commit that no
+   `provision.sh` checks the VM token with `whoami` before it stops or starts the agent: the zooid log cannot
+   prove the token (the sync loop starts before the first `/sync`, and a rejected token only warns). On an
+   update, it stops the agent before it changes the code. `--ref` takes a branch or a commit SHA; a commit that no
    branch head contains needs its full SHA.
    If the SSH session can drop, run it detached, for example
    `nohup setsid bash provision.sh --ref <sha> >provision.log 2>&1 </dev/null &`. It is idempotent: run it
@@ -325,6 +326,8 @@ Do not add `triggers:` to the VM's `zooid.yaml`. At power level 0 the VM cannot 
   ignore the approval and elicitation responses of these users, and their messages never count as a
   human's.
 - At power level 0 the VM cannot change the roster or the space.
+- The registration has no alias namespace: with one, the agent (which can read the VM token) could create any
+  free `#alias`. The rooms must exist before admission.
 - One agent per VM.
 
 ### Remove a VM

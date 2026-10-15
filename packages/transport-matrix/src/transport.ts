@@ -115,10 +115,8 @@ export interface CreateMatrixTransportOptions {
    *  declined. */
   botUserId?: string
   /**
-   * This daemon's workstation (`workstation:` in zooid.yaml). Every user in
-   * its namespace (`@<ws>`, `@<ws>.*`) is this daemon's: none answers an
-   * approval or a question, and here the unrostered ones (trigger bots) still
-   * route like humans. Other daemons route them all as agents.
+   * This daemon's workstation (`workstation:` in zooid.yaml). No user in its namespace answers an approval
+   * or a question; its unrostered users (trigger bots) still route like humans here, as agents elsewhere.
    */
   workstation?: string
   /**
@@ -366,11 +364,8 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const DECLINE_REASON =
     'Bots are placed in rooms only by the zooid daemon (workforce-as-code). ' +
     'Ad-hoc invites are declined — add the bot to the room in zooid.yaml.'
-  // Pull mode's first /sync replays invites the bot has since accepted (an
-  // operator admitting another workstation's bots, for example). Only a pending
-  // invite is ad hoc: leaving on a replay would take the bot out of its rooms.
-  // An invited user cannot read the member list (403/404). Any other failure
-  // proves nothing, so the bot stays.
+  // Pull mode's first /sync replays invites already accepted: only a pending invite is ad hoc.
+  // An invited user gets 403/404 on the member list; any other failure proves nothing (see changeset).
   async function isPendingInvite(roomId: string, userId: string): Promise<boolean> {
     try {
       const { joined } = await client.getJoinedMembers(roomId, userId)

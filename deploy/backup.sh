@@ -63,8 +63,7 @@ else
   warn "--no-stop: the backup may be inconsistent while the stack runs"
 fi
 
-# Include list: skip entries that do not exist. workstations/ holds the agent VM
-# bundles (VM tokens); only an instance with agent VMs has it.
+# Skip missing entries; workstations/ (agent VM tokens) exists only with agent VMs.
 INCLUDES=()
 for p in .env data/matrix/db data/matrix/media data/matrix/config \
          workforce/zooid.yaml workforce/data home workforce/agents workstations; do

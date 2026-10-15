@@ -1,7 +1,6 @@
-# Agent VM simulation (compose.yml next to this file). Same shape as
-# deploy/agent-vm/zooid.yaml.example for `deploy/add-workstation.sh vm1 --agent echo
-# --room '#zooid'` on the local test stack (SERVER_NAME=localhost), with the
-# echo fixture as the agent.
+# Agent VM simulation (compose.yml next to this file): the shape of zooid.yaml.example for
+# `deploy/add-workstation.sh vm1 --agent echo --room '#zooid'` on the local stack
+# (SERVER_NAME=localhost), with the echo fixture as the agent.
 workstation: vm1
 runtime: local
 transports:

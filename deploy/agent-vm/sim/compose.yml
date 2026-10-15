@@ -1,8 +1,6 @@
-# Local simulation of an agent VM: one container that runs a zooid workstation in
-# client mode against the local test stack. See "Local simulation" in deploy/README.md.
-# Start it as its own project, so deploy.sh's `up --remove-orphans` leaves it alone.
-# STACK_PROJECT is the project name of the test stack (its COMPOSE_PROJECT_NAME):
-#   STACK_PROJECT=fabrium docker compose -p fabrium-vm-sim -f deploy/agent-vm/sim/compose.yml up -d --build
+# Local simulation of an agent VM against the local test stack (deploy/README.md, "Local simulation").
+# Run it as its own project, so deploy.sh's `up --remove-orphans` leaves it alone.
+# STACK_PROJECT is the test stack's COMPOSE_PROJECT_NAME.
 services:
   agent-vm:
     image: fabrium-vm-sim:dev

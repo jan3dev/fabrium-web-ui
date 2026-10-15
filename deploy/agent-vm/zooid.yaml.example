@@ -1,9 +1,6 @@
-# Agent VM config. deploy/add-workstation.sh renders it on the central instance into
-# ${ZOOID_HOME}/workstations/<workstation>/workforce/zooid.yaml; copy that bundle to the VM.
-# See "Agent VM (workstation)" in deploy/README.md.
-# add-workstation.sh fills in the names; the quotes keep them strings in YAML.
-# zooid reads "${HOMESERVER_URL}" from the daemon environment (~/zooid/.env and
-# ~/zooid/secrets.env on the VM).
+# Agent VM config, rendered by deploy/add-workstation.sh into ${ZOOID_HOME}/workstations/<workstation>/workforce/zooid.yaml
+# (copy that bundle to the VM; see deploy/README.md). The quotes keep the names strings in YAML.
+# zooid reads "${HOMESERVER_URL}" from the daemon environment (~/zooid/.env, ~/zooid/secrets.env).
 workstation: '${WORKSTATION}'
 # The agent is a process of the VM, with the access of the VM user (Docker, sudo).
 runtime: local
