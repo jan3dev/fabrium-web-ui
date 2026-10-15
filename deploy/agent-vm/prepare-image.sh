@@ -159,12 +159,16 @@ printf '%s\n' "$COMMIT" >"$REPO_DIR/packages/cli/dist/.commit"
 # The opencode preset starts `opencode` from the service PATH. Same version as the agent-opencode image.
 OPENCODE_VERSION="$(sed -n 's/^ARG OPENCODE_VERSION=//p' "$REPO_DIR/$OPENCODE_DOCKERFILE")"
 [ -n "$OPENCODE_VERSION" ] || die "no OPENCODE_VERSION pin in $OPENCODE_DOCKERFILE"
-if [ "$(PATH="$SERVICE_PATH" opencode --version 2>/dev/null || true)" = "$OPENCODE_VERSION" ]; then
+# The first x.y.z in `opencode --version`: some versions print "opencode vX.Y.Z".
+service_opencode_version() {
+  { PATH="$SERVICE_PATH" opencode --version 2>/dev/null || true; } | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true
+}
+if [ "$(service_opencode_version)" = "$OPENCODE_VERSION" ]; then
   log "opencode $OPENCODE_VERSION already installed; skipping"
 else
   log "Installing opencode $OPENCODE_VERSION"
   sudo npm install -g "opencode-ai@$OPENCODE_VERSION"
-  [ "$(PATH="$SERVICE_PATH" opencode --version 2>/dev/null || true)" = "$OPENCODE_VERSION" ] ||
+  [ "$(service_opencode_version)" = "$OPENCODE_VERSION" ] ||
     die "opencode $OPENCODE_VERSION is not the first opencode in the service PATH ($SERVICE_PATH)"
 fi
 
