@@ -252,7 +252,8 @@ first (`systemctl --user stop fabrium-agent`).
 
 ### Prepare the VM
 
-1. Create an Ubuntu 24.04 VM. Inbound: SSH for the operator only. Outbound: HTTPS to `SITE_ADDRESS`.
+1. Create an Ubuntu 24.04 VM, or a VM from an image (see [Build a VM image](#build-a-vm-image)). Inbound: SSH
+   for the operator only. Outbound: HTTPS to `SITE_ADDRESS`.
 2. Copy the bundle. It holds the VM tokens:
    ```bash
    tar -C ~/zooid/workstations/vm1 -cf - .env workforce | ssh <vm> 'mkdir -p ~/zooid && tar -C ~/zooid -xf -'
@@ -267,7 +268,9 @@ first (`systemctl --user stop fabrium-agent`).
    `provision.sh` checks the VM token with `whoami` before it stops or starts the agent: the zooid log cannot
    prove the token (the sync loop starts before the first `/sync`, and a rejected token only warns). On an
    update, it stops the agent before it changes the code. `--ref` takes a branch or a commit SHA; a commit that no
-   branch head contains needs its full SHA.
+   branch head contains needs its full SHA. It installs Node 22, pnpm, opencode (the version that the
+   `agent-opencode` image pins) and Docker CE when they are missing. It stops when another Node comes first in
+   PATH or in the PATH of the systemd user instance: the agent would run on that Node.
    If the SSH session can drop, run it detached, for example
    `nohup setsid bash provision.sh --ref <sha> >provision.log 2>&1 </dev/null &`. It is idempotent: run it
    again after an interruption.
@@ -285,6 +288,36 @@ Update the VM every time this box deploys a new commit: `bash ~/fabrium-web-ui/d
 To pin the harness version with an image, replace `runtime: local` with `runtime: docker` and add a
 `container.image` in the VM's `zooid.yaml`. This is optional and not recommended: in a container the
 agent cannot use the VM directly or start other containers.
+
+### Build a VM image
+
+With an image, a new VM needs only the bundle and a short build. `provision.sh --image` installs Node 22,
+pnpm, opencode and Docker CE, and builds the CLI at `--ref`. It reads no bundle, checks no token and installs no
+service. It stops when `~/zooid` exists: every VM made from the image would act as this VM.
+
+1. Start a VM from the base image. Remove every Node that is not Node 22 (`which -a node`).
+2. On the VM, with the commit this box runs:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/jan3dev/fabrium-web-ui/<sha>/deploy/agent-vm/provision.sh -o provision.sh
+   nohup setsid bash provision.sh --image --ref <sha> >provision.log 2>&1 </dev/null &
+   ```
+3. Check that the disk holds no credential: for example `~/.aws`, `~/.claude`, `~/.config/gh`,
+   `~/.local/share/opencode/auth.json` and tokens in `~/.npmrc`. Then clean the VM and stop it:
+   ```bash
+   unset HISTFILE
+   rm -f ~/provision.sh ~/provision.log ~/.bash_history ~/.zsh_history
+   sudo journalctl --rotate && sudo journalctl --vacuum-time=1s
+   sudo cloud-init clean --logs --machine-id
+   sudo rm -f /etc/ssh/ssh_host_*
+   sudo poweroff
+   ```
+   cloud-init makes new SSH host keys and a new machine ID at the first start of each VM.
+4. Create the image from the stopped VM, with the commit in its name. On AWS:
+   `aws ec2 create-image --instance-id <id> --name fabrium-agent-<sha>`.
+
+On a VM made from the image, follow [Prepare the VM](#prepare-the-vm) from step 2. Step 3 skips the installs;
+with the commit of the image, it only runs `pnpm install` and the build again. An image holds one commit: after
+this box deploys a new commit, run step 3 with the new `--ref`, or build a new image.
 
 ### Test without a model
 
