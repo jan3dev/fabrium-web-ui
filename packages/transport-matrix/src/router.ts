@@ -90,10 +90,10 @@ export function route(
   task?: TaskThreadContext,
   /**
    * MXIDs of every agent in the workforce, including other workstations'
-   * (from their `dev.zooid.workforce` rosters). `agents` holds only this
-   * daemon's bindings.
+   * (from their `dev.zooid.workforce` rosters) and the other users in their
+   * namespaces. `agents` holds only this daemon's bindings.
    */
-  knownAgentIds?: ReadonlySet<string>,
+  knownAgentIds?: Pick<ReadonlySet<string>, 'has'>,
 ): RouteMatch[] {
   if (event.type !== 'm.room.message') return []
   if (!event.content?.msgtype) return []

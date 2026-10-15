@@ -63,13 +63,13 @@ else
   warn "--no-stop: the backup may be inconsistent while the stack runs"
 fi
 
-# Include list: skip entries that do not exist.
+# Skip missing entries; workstations/ (agent VM tokens) exists only with agent VMs.
 INCLUDES=()
 for p in .env data/matrix/db data/matrix/media data/matrix/config \
-         workforce/zooid.yaml workforce/data home workforce/agents; do
+         workforce/zooid.yaml workforce/data home workforce/agents workstations; do
   if [ -e "$ZOOID_HOME/$p" ]; then
     INCLUDES+=("$p")
-  else
+  elif [ "$p" != workstations ]; then
     warn "not found, skipped: $p"
   fi
 done

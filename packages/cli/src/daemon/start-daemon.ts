@@ -265,6 +265,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       hsToken: matrix.transport.hs_token,
       adminUserId: opts.adminUserId,
       botUserId: asUserId,
+      workstation: matrix.transport.workstation,
       media: mediaClient,
       taskJournal: dataDir ? makeTaskJournal(dataDir) : undefined,
       mode,

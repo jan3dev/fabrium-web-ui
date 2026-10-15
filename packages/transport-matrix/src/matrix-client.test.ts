@@ -521,6 +521,23 @@ describe('MatrixClient.leaveRoom', () => {
   })
 })
 
+describe('MatrixClient.getJoinedMembers', () => {
+  it('puts the HTTP status on the error (an invited user gets 403)', async () => {
+    const fetch = fakeFetch(async () =>
+      new Response(JSON.stringify({ errcode: 'M_FORBIDDEN' }), { status: 403 }),
+    )
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as-secret',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await expect(client.getJoinedMembers('!r:example.com', '@zooid:example.com')).rejects.toMatchObject({
+      message: 'getJoinedMembers(!r:example.com) failed: 403',
+      status: 403,
+    })
+  })
+})
+
 describe('MatrixClient.sync (impersonated)', () => {
   it('GETs /sync with ?user_id=, as_token bearer, since + timeout', async () => {
     const fetch = vi.fn(async () =>

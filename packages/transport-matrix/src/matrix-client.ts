@@ -461,7 +461,8 @@ export class MatrixClient {
       method: 'GET',
       headers: { Authorization: `Bearer ${this.asToken}` },
     })
-    if (!r.ok) throw new Error(`getJoinedMembers(${roomId}) failed: ${r.status}`)
+    if (!r.ok)
+      throw Object.assign(new Error(`getJoinedMembers(${roomId}) failed: ${r.status}`), { status: r.status })
     return (await r.json()) as {
       joined: Record<string, { display_name?: string }>
     }

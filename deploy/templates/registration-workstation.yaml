@@ -1,0 +1,17 @@
+# Rendered by deploy/add-workstation.sh into ${ZOOID_HOME}/data/matrix/config/registrations/<workstation>.yaml (mode 600).
+# One agent VM in client (pull) mode, shaped like packages/cli/src/bootstrap/configs.ts but without aliases.
+# Placeholders: WORKSTATION, WS_AS_TOKEN, WS_HS_TOKEN, SERVER_NAME_RE. Quoted names stay strings in YAML.
+id: '${WORKSTATION}'
+# Pull mode: the VM reads with /sync, so tuwunel has nothing to push.
+url: null
+as_token: ${WS_AS_TOKEN}
+hs_token: ${WS_HS_TOKEN}
+sender_localpart: '${WORKSTATION}'
+rate_limited: false
+namespaces:
+  users:
+    - exclusive: true
+      regex: '@${WORKSTATION}\..*:${SERVER_NAME_RE}'
+  # No aliases: see "Security" in deploy/README.md.
+  aliases: []
+  rooms: []

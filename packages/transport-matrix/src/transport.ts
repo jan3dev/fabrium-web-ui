@@ -47,6 +47,7 @@ import { sessionKeyFor, composeHandoffKey } from './session-keys.js'
 import { PendingReturns, type ReleasedReturn } from './pending-returns.js'
 import { stripMention, extractMentions } from './mentions.js'
 import { WorkforceDirectory } from './workforce-publisher.js'
+import { workstationOf } from './identity.js'
 import { buildHandoffContent, readHandoff, resolveHandoffTarget, type HandoffCandidate } from './handoff.js'
 import {
   toToolCallBody,
@@ -113,6 +114,11 @@ export interface CreateMatrixTransportOptions {
    *  bindings this forms the set of "our bot users" whose ad-hoc invites are
    *  declined. */
   botUserId?: string
+  /**
+   * This daemon's workstation (`workstation:` in zooid.yaml). No user in its namespace answers an approval
+   * or a question; its unrostered users (trigger bots) still route like humans here, as agents elsewhere.
+   */
+  workstation?: string
   /**
    * Transport ingestion mode.
    * - `'appservice'` (default): Tuwunel pushes events to the HTTP transaction endpoint.
@@ -358,6 +364,19 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const DECLINE_REASON =
     'Bots are placed in rooms only by the zooid daemon (workforce-as-code). ' +
     'Ad-hoc invites are declined — add the bot to the room in zooid.yaml.'
+  // Pull mode's first /sync replays invites already accepted: only a pending invite is ad hoc.
+  // An invited user gets 403/404 on the member list; any other failure proves nothing (see changeset).
+  async function isPendingInvite(roomId: string, userId: string): Promise<boolean> {
+    try {
+      const { joined } = await client.getJoinedMembers(roomId, userId)
+      return !Object.hasOwn(joined, userId)
+    } catch (err) {
+      const status = (err as { status?: number }).status
+      if (status === 403 || status === 404) return true
+      console.warn(`[matrix] membership check for ${userId} in ${roomId} failed; invite not declined:`, err)
+      return false
+    }
+  }
   const sessions = new Map<string, SessionContext>()
   const buffers = new Map<string, string>()
   // Last messageId seen per session's buffer. opencode streams each assistant
@@ -378,6 +397,17 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   // Every workstation's agents, from the space's roster state events; the
   // router uses it to tell another daemon's agent from a human.
   const workforce = new WorkforceDirectory()
+  const inOwnNamespace = (userId: string) =>
+    opts.workstation !== undefined && workstationOf(userId) === opts.workstation
+  // Never a human, so never the one who answers an approval or a question.
+  const isNotHuman = (userId: string) =>
+    ourBotUserIds.has(userId) || inOwnNamespace(userId) || workforce.isWorkforceIdentity(userId)
+  // Routing: rostered agents and every user of another rostered workstation.
+  // Our own workstation's unrostered users (trigger bots) still route like humans.
+  const workforceIds = {
+    has: (userId: string) =>
+      workforce.agentIds.has(userId) || (!inOwnNamespace(userId) && workforce.isWorkforceIdentity(userId)),
+  }
   /**
    * Ordinary-thread handoff returns, held until the callee's turn ends
    * leaving no open call ([[ZOD088]]). Delegated task threads never reach
@@ -755,7 +785,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     const sender = evt.sender
     if (!parsed || !sender || !evt.event_id || !evt.room_id) return
     // Agents and service identities never answer on a human's behalf.
-    if (ourBotUserIds.has(sender) || workforce.agentIds.has(sender)) {
+    if (isNotHuman(sender)) {
       console.warn(`[matrix] ignoring elicitation response from agent ${sender}`)
       return
     }
@@ -925,7 +955,8 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         target &&
         evt.room_id &&
         ourBotUserIds.has(target) &&
-        (!inviter || !ourBotUserIds.has(inviter))
+        (!inviter || !ourBotUserIds.has(inviter)) &&
+        (await isPendingInvite(evt.room_id, target))
       ) {
         console.log(
           `[matrix] declining ad-hoc invite for ${target} in ${evt.room_id} ` +
@@ -977,7 +1008,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         try {
           threadStates.set(
             threadRoot,
-            await rebuildThreadState(client, evt.room_id, threadRoot, bindings, workforce.agentIds),
+            await rebuildThreadState(client, evt.room_id, threadRoot, bindings, workforceIds),
           )
         } catch (err) {
           console.warn(`[matrix] failed to rebuild threadState for reset ${threadRoot}:`, err)
@@ -1101,7 +1132,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       }
       if (!content.session_id || !content.approval_id || !content.decision) return
       // Agents never approve, not even their own tool calls (Fabrium trust rule).
-      if (!evt.sender || ourBotUserIds.has(evt.sender) || workforce.agentIds.has(evt.sender)) {
+      if (!evt.sender || isNotHuman(evt.sender)) {
         console.warn(`[matrix] ignoring approval response from agent ${evt.sender}`)
         return
       }
@@ -1175,7 +1206,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           evt.room_id,
           inboundRel,
           bindings,
-          workforce.agentIds,
+          workforceIds,
         )
         threadStates.set(inboundRel, rebuilt)
         console.log(
@@ -1205,11 +1236,11 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       inboundState &&
       evt.type === 'm.room.message' &&
       evt.sender &&
-      isRemoteAgent(evt.sender, evt.content?.msgtype, bindings, workforce.agentIds) &&
+      isRemoteAgent(evt.sender, evt.content?.msgtype, bindings, workforceIds) &&
       inboundState.participants.at(-1) !== evt.sender
     )
       inboundState.participants.push(evt.sender)
-    let matches = route(evt, bindings, threadStates, taskCtx, workforce.agentIds)
+    let matches = route(evt, bindings, threadStates, taskCtx, workforceIds)
     // In a delegated task, agent-to-agent messages dispatch only when the
     // outgoing flush registered a matching invocation. This prevents a
     // circular handoff that was visibly refused from still waking its target.
@@ -1244,7 +1275,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     // chunk and the pair read as re-triggering each other. Hold them and let
     // the sender's `dev.zooid.turn.end` release the lot as a single wake.
     if (evt.type === 'm.room.message' && promotedRoot && evt.room_id && evt.sender) {
-      const senderIsAgentId = isLocal(evt.sender) || workforce.agentIds.has(evt.sender)
+      const senderIsAgentId = isLocal(evt.sender) || workforceIds.has(evt.sender)
       if (senderIsAgentId) {
         const st = threadStates.get(promotedRoot)
         const held = matches.filter((m) => isReturnRoute(evt, m, st))
@@ -1288,7 +1319,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         if (!st.rootMentions.includes(taskRec!.assignee)) st.rootMentions.push(taskRec!.assignee)
       } else {
         const senderIsAgentId =
-          !!evt.sender && (isLocal(evt.sender) || workforce.agentIds.has(evt.sender))
+          !!evt.sender && (isLocal(evt.sender) || workforceIds.has(evt.sender))
         if (!senderIsAgentId) {
           const msgMentions = new Set(extractMentions(evt as never))
           for (const a of bindings)
@@ -1967,7 +1998,7 @@ export async function rebuildThreadState(
   roomId: string,
   rootEventId: string,
   bindings: AgentBinding[],
-  knownAgentIds?: ReadonlySet<string>,
+  knownAgentIds?: Pick<ReadonlySet<string>, 'has'>,
 ): Promise<ThreadState> {
   const state: ThreadState = {
     participants: [],
@@ -2032,14 +2063,15 @@ export async function rebuildThreadState(
 }
 
 /**
- * Another workstation's agent: not ours, but in the space's merged roster —
- * or posting an m.notice, which Matrix bots do and clients never do.
+ * Another workstation's agent: not ours, but in the space's merged roster or
+ * its workstation's namespace — or posting an m.notice, which Matrix bots do
+ * and clients never do.
  */
 function isRemoteAgent(
   sender: string,
   msgtype: string | undefined,
   bindings: AgentBinding[],
-  knownAgentIds: ReadonlySet<string> | undefined,
+  knownAgentIds: Pick<ReadonlySet<string>, 'has'> | undefined,
 ): boolean {
   if (bindings.some((b) => b.userId === sender)) return false
   return knownAgentIds?.has(sender) === true || msgtype === 'm.notice'
