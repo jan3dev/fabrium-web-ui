@@ -19,6 +19,10 @@ appservice_dir = "/var/lib/tuwunel/registrations"
 allow_registration = false
 yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse = true
 
+# Tuwunel adds this text, after a space, to the display name of each new account
+# (its default is "💕"). Existing display names do not change.
+new_user_displayname_suffix = "🐬"
+
 allow_local_presence = true
 # The workforce space (matrix.space in zooid.yaml, WORKFORCE_SPACE here) and
 # the default channel the daemon creates.
