@@ -29,7 +29,8 @@ Admits one agent VM. Idempotent: run it again to update the roster entry.
   --room ALIAS     a room that exists, for example '#zooid'; repeat for more rooms
   --persona TEXT   roster persona (UI label: Persona · Project)
   --project TEXT   roster project
-  --preset NAME    ACP preset written to a new zooid.yaml (default: claude)
+  --preset NAME    ACP preset written to a new zooid.yaml (default: claude).
+                   'echo' is for tests: the repo's echo fixture, no model
   -h, --help       show this help
 
 Never prints secret values.
@@ -257,7 +258,17 @@ if [ -f "$WS_YAML" ]; then
 else
   log "writing $WS_YAML"
   BUNDLE_NEW=1
-  export WORKSTATION="$WS" AGENT_NAME="$AGENT" AGENT_PRESET="$PRESET"
+  export WORKSTATION="$WS" AGENT_NAME="$AGENT"
+  if [ "$PRESET" = echo ]; then
+    # Test agent: replies once and asks for one approval per turn. Needs the repo
+    # clone that provision.sh makes at its default --repo-dir.
+    AGENT_ACP="{ command: sh, args: ['-c', 'exec node \"\$HOME/fabrium-web-ui/packages/acp-client/test/fixtures/echo-agent.ts\"'] }"
+  else
+    # shellcheck disable=SC2089
+    AGENT_ACP="{ preset: '$PRESET' }"
+  fi
+  # shellcheck disable=SC2090
+  export AGENT_ACP
   AGENT_ROOMS=""
   # The quotes are YAML text for the rooms list, not shell quoting.
   for a in "${ROOM_ALIASES[@]}"; do
@@ -267,7 +278,7 @@ else
   # shellcheck disable=SC2090
   export AGENT_ROOMS
   render_template "$REPO_DIR/deploy/agent-vm/zooid.yaml.example" "$WS_YAML" \
-    WORKSTATION SERVER_NAME WORKFORCE_SPACE AGENT_NAME AGENT_PRESET AGENT_ROOMS
+    WORKSTATION SERVER_NAME WORKFORCE_SPACE AGENT_NAME AGENT_ACP AGENT_ROOMS
 fi
 
 # --- 4. registration -------------------------------------------------------

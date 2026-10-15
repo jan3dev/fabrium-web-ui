@@ -19,7 +19,7 @@ agents:
   # Persona and project are in the roster that add-workstation.sh publishes.
   # The rooms must stay equal to its --room values.
   '${AGENT_NAME}':
-    acp: { preset: '${AGENT_PRESET}' }
+    acp: ${AGENT_ACP}
     matrix: { display_name: '${AGENT_NAME}', rooms: [${AGENT_ROOMS}], trigger: mention }
 
 # Optional, not recommended: run the harness in a container to pin its version.

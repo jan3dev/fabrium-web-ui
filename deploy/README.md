@@ -267,6 +267,9 @@ first (`systemctl --user stop fabrium-agent`).
    `provision.sh` checks the VM token with `whoami` before it stops or starts the agent. On an update, it
    stops the agent before it changes the code. `--ref` takes a branch or a commit SHA; a commit that no
    branch head contains needs its full SHA.
+   If the SSH session can drop, run it detached, for example
+   `nohup setsid bash provision.sh --ref <sha> >provision.log 2>&1 </dev/null &`. It is idempotent: run it
+   again after an interruption.
 4. Give the agent its credentials (for example `~/.claude` or `~/.config/opencode`), its secrets in
    `~/zooid/secrets.env` (`KEY=value` lines, mode 600; `provision.sh` creates the file empty), and its
    instructions in `~/zooid/workforce/agents/<agent>/`. Then run `systemctl --user restart fabrium-agent`.
@@ -281,6 +284,19 @@ Update the VM every time this box deploys a new commit: `bash ~/fabrium-web-ui/d
 To pin the harness version with an image, replace `runtime: local` with `runtime: docker` and add a
 `container.image` in the VM's `zooid.yaml`. This is optional and not recommended: in a container the
 agent cannot use the VM directly or start other containers.
+
+### Test without a model
+
+`--preset echo` writes the repo's echo fixture as the agent: it replies `echo: <text>` and asks for one
+approval per turn. It needs no credentials. Use it on staging to check admission, `/sync`, mentions and
+approvals:
+
+```bash
+deploy/add-workstation.sh vm1 --agent echo --room '#general' --preset echo
+```
+
+To change the preset later, delete the bundle's `workforce/zooid.yaml`, run the script again with the new
+`--preset`, and copy the bundle again. The agent name stays.
 
 ### Cron for a VM agent
 
