@@ -403,4 +403,6 @@ NEXT STEPS
   2. On the VM (made from the agent VM image), as the user that runs the agent
      (same commit as this instance):
        bash ~/fabrium-web-ui/deploy/agent-vm/provision.sh --ref $SHA
+  3. For preset opencode, configure the agent on the VM with
+     deploy/agent-vm/configure-agent.sh (see "Configure an opencode agent" in deploy/README.md).
 EOF_NEXT
