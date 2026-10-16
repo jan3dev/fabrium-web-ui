@@ -39,7 +39,7 @@ deploy.log                    one line per successful deploy
 | `deploy/restore.sh` | Extracts a backup into an empty `ZOOID_HOME`. |
 | `deploy/compose.sh` | `docker compose` bound to this instance, for `logs`, `ps`, `stop`, `start`, `down`. |
 | `deploy/add-workstation.sh` | Admits an agent VM: writes its tokens and tuwunel registration, adds its users to the workforce space and its rooms, publishes its roster entry. See [Agent VM](#agent-vm-workstation). |
-| `deploy/agent-vm/prepare-image.sh` | Prepares a VM to become the agent VM image: installs Node 22, pnpm, opencode and Docker CE, builds the zooid CLI at a commit. No bundle, no service. See [Build a VM image](#build-a-vm-image). |
+| `deploy/agent-vm/prepare-image.sh` | Prepares a VM to become the agent VM image: installs Node 22, pnpm, opencode, gh and Docker CE, builds the zooid CLI at a commit. No bundle, no service. See [Build a VM image](#build-a-vm-image). |
 | `deploy/agent-vm/provision.sh` | Runs on an agent VM made from the image: checks the bundle and the VM token, builds the zooid CLI only when `--ref` is not the image's commit, runs it as a systemd user service. Installs nothing. Idempotent; also the update path. |
 
 All scripts take `-h`. They never print secret values.
@@ -295,12 +295,14 @@ agent cannot use the VM directly or start other containers.
 ### Build a VM image
 
 An image holds everything an agent VM needs except the bundle: Node 22, pnpm, opencode (the version that the
-`agent-opencode` image pins), Docker CE, linger, and the repo with the CLI built at one commit. The build reads
+`agent-opencode` image pins), gh, Docker CE, linger, and the repo with the CLI built at one commit. The build reads
 no bundle, so the image holds no token. `deploy/agent-vm/prepare-image.sh` prepares a VM for the image. It
 stops when `~/zooid` or the `fabrium-agent` unit exists: every VM made from the image would act as that VM.
 
 1. Start a fresh VM from Ubuntu 24.04 or from your base image. Remove every Node that is not Node 22
-   (`which -a node`): the script stops when another Node comes first in PATH.
+   (`which -a node`): the script stops when another Node comes first in PATH. Remove every opencode that npm
+   did not install (`which -a opencode`; the opencode installer puts one in `~/.opencode/bin`): a shell on the
+   VM would run it instead of the agent's opencode, so the script stops when it finds one.
 2. On the VM, with the commit this box runs:
    ```bash
    curl -fsSL https://raw.githubusercontent.com/jan3dev/fabrium-web-ui/<sha>/deploy/agent-vm/prepare-image.sh -o prepare-image.sh

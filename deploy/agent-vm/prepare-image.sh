@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prepare an Ubuntu 24.04 VM to become an agent VM image: install Node 22, pnpm,
-# opencode and Docker CE, and build the zooid CLI at --ref. It reads no bundle and
+# opencode, gh and Docker CE, and build the zooid CLI at --ref. It reads no bundle and
 # installs no service: provision.sh adds them on each VM made from the image.
 # See "Build a VM image" in deploy/README.md.
 set -euo pipefail
@@ -18,9 +18,10 @@ usage() {
 Usage: prepare-image.sh --ref <commit|branch> [--repo-dir DIR] [--repo-url URL] [--no-docker]
 
 Prepares this VM to become an agent VM image. Installs Node 22, pnpm, opencode
-(the version that the agent-opencode image pins) and Docker CE, enables linger,
+(the version that the agent-opencode image pins), gh and Docker CE, enables linger,
 and builds the zooid CLI at --ref. Reads no bundle and installs no service: run
 provision.sh with the bundle on each VM made from the image. Ubuntu only. Needs sudo.
+Stops when another opencode comes first in PATH, for example ~/.opencode/bin.
 
   --ref REF          commit or branch to build (required); use the commit of the central instance
   --repo-dir DIR     repo clone path       (default: \$HOME/fabrium-web-ui)
@@ -86,6 +87,19 @@ else
   sudo npm install -g "pnpm@$PNPM_VERSION"
 fi
 
+# The agent pushes branches and opens pull requests with gh.
+if command -v gh >/dev/null 2>&1; then
+  log "gh already installed; skipping"
+else
+  log "Installing gh from GitHub's apt repository"
+  sudo curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  sudo chmod a+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" |
+    sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+  $APT update
+  $APT install -y gh
+fi
+
 if [ "$INSTALL_DOCKER" -eq 1 ]; then
   if command -v dockerd >/dev/null 2>&1; then
     log "Docker CE already installed; skipping"
@@ -123,6 +137,12 @@ for path in "$PATH" "$SERVICE_PATH"; do
 done
 [ "$(pnpm -v 2>/dev/null || true)" = "$PNPM_VERSION" ] ||
   die "the first pnpm in PATH is not $PNPM_VERSION: $(which -a pnpm | tr '\n' ' ')"
+# Shells on the VM must find the agent's opencode: the one that sudo npm installs below.
+AGENT_OPENCODE="$(sudo npm prefix -g)/bin/opencode"
+OTHER_OPENCODE="$({ which -a opencode || true; echo "$HOME/.opencode/bin/opencode"; } | while read -r p; do
+  [ ! -e "$p" ] || [ "$(readlink -f "$p")" = "$(readlink -f "$AGENT_OPENCODE")" ] || echo "$p"
+done | sort -u | tr '\n' ' ' || true)"
+[ -z "$OTHER_OPENCODE" ] || die "remove the other opencode before the image: $OTHER_OPENCODE(the agent runs $AGENT_OPENCODE)"
 
 # --- Repo at --ref --------------------------------------------------------
 if [ ! -d "$REPO_DIR/.git" ]; then
