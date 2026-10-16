@@ -24,3 +24,5 @@ packages/cli/*.tgz
 # oh-my-claudecode state
 .omc/
 **/.omc/
+# Vendored artifact preview runtimes (packages/web/scripts/build-artifact-runtime.mjs)
+packages/web/public/artifact-runtime/

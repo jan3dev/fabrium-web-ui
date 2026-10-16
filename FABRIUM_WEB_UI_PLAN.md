@@ -57,6 +57,7 @@ Deferred during W0–W7. No backend dependency; build when requested:
 - Focus-mode thread drawer and thread view toggle (Buzz `FocusThreadDrawer.tsx`, `ThreadViewModeToggle.tsx`). Mobile uses the full-screen pane.
 - Appearance settings beyond theme: density, font size.
 - Inbox `agent_activity` category.
+- Artifacts: Mermaid diagrams, screenshot annotation (Haven's snapdom capture and drawing), fullscreen preview, keyboard-only annotation, highlighting an annotated element when a reference is opened.
 - Marking agent-authored pending content (suggestions, notes, task bodies) as `pending`/`unreviewed` until a human acts (§16.4, §9.6): chip tone `warning` + dashed border. Lands with the first such content type.
 
 ## 5. Matrix mapping for backlog items
@@ -78,6 +79,7 @@ Deferred during W0–W7. No backend dependency; build when requested:
 | task                                                                                                               | `dev.fabrium.task` state in the task room (status, assignee, parent, branch)                                                                                              | ext    |
 | canvas                                                                                                             | `dev.fabrium.canvas` state = head (version, sha256, body or `mxc` if > 48 KB); `dev.fabrium.canvas.edit` / `.suggestion` message events; accept/reject with `m.reference` | ext    |
 | release                                                                                                            | `dev.fabrium.release` state in the release room                                                                                                                           | ext    |
+| artifact (agent-made page, component, document, code; versions; user annotations)                                 | `dev.fabrium.artifact.version` message event in the agent's thread (body inline, or `url` + `sha256` over 48 KB), sent by the daemon's `zooid_artifact` tool; annotations ride in the reply as `dev.fabrium.artifact_refs` plus a plain-text fallback in `body` | built  |
 | GitHub, CI, preview, notes-in-room events                                                                          | `dev.fabrium.github.*`, `dev.fabrium.ci.*`, `dev.fabrium.preview` message events sent by the service user                                                                 | ext    |
 | huddle                                                                                                             | MatrixRTC (`m.call.member` state, LiveKit via `.well-known` `rtc_foci`)                                                                                                   | ext    |
 | agent directory, directives, budgets, usage, Haven accounts, catalog, notes review feed, audit export, attestation | service API                                                                                                                                                               | api    |

@@ -35,6 +35,8 @@ import { RoomHeader } from "./room-header";
 import { SidebarProfileCard } from "./sidebar/profile-card";
 import type { Scope } from "./sidebar/scope";
 import { ThreadPane } from "./thread-pane";
+import { ArtifactPanel } from "../artifacts/artifact-panel";
+import { cn } from "@/lib/utils";
 import { TopBar } from "./top-bar";
 import { WorkspaceRail } from "./workspace-rail";
 
@@ -104,6 +106,8 @@ export function LoggedInView({
   const threadId = roomId ? searchParams.get("thread") : null;
   const pane =
     roomId && !threadId ? parsePaneView(searchParams.get("pane")) : null;
+  // Artifacts live in threads; the panel takes the room column while open.
+  const artifactId = threadId ? searchParams.get("artifact") : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -163,6 +167,8 @@ export function LoggedInView({
       else next.delete("pane");
       next.delete("thread");
       next.delete("event");
+      next.delete("artifact");
+      next.delete("version");
       return next;
     });
   const togglePane = (view: PaneView) => setPane(pane === view ? null : view);
@@ -222,7 +228,8 @@ export function LoggedInView({
                 />
               ) : null}
               <div className="relative flex min-h-0 flex-1">
-                <div className="min-w-0 flex-1 overflow-hidden">
+                {/* Hidden, not unmounted: the timeline keeps its scroll position. */}
+                <div className={cn("min-w-0 flex-1 overflow-hidden", artifactId && "hidden")}>
                   <Outlet
                     context={
                       {
@@ -233,6 +240,14 @@ export function LoggedInView({
                     }
                   />
                 </div>
+                {roomId && threadId && artifactId ? (
+                  <ArtifactPanel
+                    key={`${roomId}:${threadId}:${artifactId}`}
+                    roomId={roomId}
+                    threadRootId={threadId}
+                    workforceSpaceId={spaceId}
+                  />
+                ) : null}
                 {roomId && threadId ? (
                   <ThreadPane
                     key={`${roomId}:${threadId}`}

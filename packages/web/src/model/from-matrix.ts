@@ -7,6 +7,8 @@ import {
 } from "matrix-js-sdk";
 import { ApprovalEventType, decodeApprovalRequest, decodeApprovalResponse } from "@/events/approval";
 import { ElicitationEventType } from "@/events/elicitation";
+import { ArtifactEventType, decodeArtifactVersion, type DecodedArtifact } from "@/events/fabrium-artifact";
+import { readArtifactRefs, stripArtifactRefs } from "@/lib/artifacts/refs";
 import { decodeZooidEvent, isZooidLifecycle, ZooidEventType } from "@/events/zooid-events";
 import { allRoomEvents } from "@/hooks/use-timeline";
 import { describeMembershipTransition } from "@/lib/matrix/membership-transition";
@@ -18,6 +20,7 @@ import type { AgentTurn, ApprovalView } from "./agent-activity";
 import { type TimedZooidEvent, toTranscriptItems } from "./from-zooid";
 import type {
   ActorSummary,
+  ArtifactVersion,
   ThreadSummary,
   TimelineEntry,
   TimelineMessage,
@@ -83,6 +86,8 @@ interface RelationIndex {
   edits: Map<string, MatrixEvent[]>;
   threads: Map<string, MatrixEvent[]>;
   turns: TurnIndex;
+  /** Each trusted artifact event, decoded, with its version counted per thread + identifier. */
+  artifacts: Map<string, { decoded: DecodedArtifact; version: number }>;
 }
 
 interface TurnIndex {
@@ -184,7 +189,28 @@ function isRedacted(ev: MatrixEvent, redactions: RelationIndex["redactions"], ro
   });
 }
 
-function indexRelations(events: readonly MatrixEvent[], room: Room | null): RelationIndex {
+function indexArtifacts(events: readonly MatrixEvent[], roster: Roster | null): RelationIndex["artifacts"] {
+  const counts = new Map<string, number>();
+  const out: RelationIndex["artifacts"] = new Map();
+  for (const ev of events) {
+    // Only an agent's artifact counts (plan §5 trust rule); a human could send the same event type.
+    if (ev.getType() !== ArtifactEventType || !roster?.isAgent(ev.getSender() ?? "")) continue;
+    const decoded = decodeArtifactVersion(ev);
+    const id = ev.getId();
+    if (!decoded || !id) continue;
+    const key = `${ev.getRelation()?.event_id ?? ""}|${decoded.identifier}`;
+    const version = (counts.get(key) ?? 0) + 1;
+    counts.set(key, version);
+    out.set(id, { decoded, version });
+  }
+  return out;
+}
+
+function indexRelations(
+  events: readonly MatrixEvent[],
+  room: Room | null,
+  roster: Roster | null,
+): RelationIndex {
   const redactions = new Map<string, MatrixEvent[]>();
   for (const ev of events) {
     if (ev.getType() !== "m.room.redaction" || ev.status === EventStatus.CANCELLED) continue;
@@ -214,7 +240,14 @@ function indexRelations(events: readonly MatrixEvent[], room: Room | null): Rela
       push(threads, rel.event_id, ev);
     }
   }
-  return { redactions, reactions, edits, threads, turns: indexTurns(events) };
+  return {
+    redactions,
+    reactions,
+    edits,
+    threads,
+    turns: indexTurns(events),
+    artifacts: indexArtifacts(events, roster),
+  };
 }
 
 function push<K, V>(map: Map<K, V[]>, key: K, value: V) {
@@ -266,7 +299,7 @@ function classify(
   ev: MatrixEvent,
   room: Room | null,
   roster: Roster | null,
-  { redactions, turns }: RelationIndex,
+  { redactions, turns, artifacts }: RelationIndex,
 ): Pick<TimelineMessage, "kind" | "body" | "raw"> | null {
   const type = ev.getType();
   if (type === "m.room.message") {
@@ -315,6 +348,19 @@ function classify(
   if (type === ApprovalEventType.Request) {
     const raw = toApprovalView(ev, turns, room, roster);
     return raw ? { kind: "approval", body: "", raw } : null;
+  }
+  if (type === ArtifactEventType) {
+    const hit = artifacts.get(ev.getId() ?? "");
+    if (!hit || isRedacted(ev, redactions, room)) return null;
+    const raw: ArtifactVersion = {
+      ...hit.decoded,
+      eventId: ev.getId()!,
+      version: hit.version,
+      createdAt: ev.getTs(),
+      author: toActor(ev.getSender() ?? "", room, roster),
+      threadRootId: ev.getRelation()?.event_id ?? null,
+    };
+    return { kind: "artifact", body: "", raw };
   }
   if (type === ElicitationEventType.Request)
     return { kind: "question", body: "", raw: ev };
@@ -431,9 +477,12 @@ function toMessage(
   const content = (edit ?? original) as typeof original;
   message.edited = !!edit;
   const quote = readQuoteRef(original);
-  if (quote) {
-    message.quote = quote;
-    message.body = splitQuoteFallback(content.body ?? "").comment;
+  const artifactRefs = readArtifactRefs(original);
+  if (quote || artifactRefs.length > 0) {
+    const comment = quote ? splitQuoteFallback(content.body ?? "").comment : (content.body ?? "");
+    message.body = stripArtifactRefs(comment, artifactRefs);
+    if (quote) message.quote = quote;
+    if (artifactRefs.length > 0) message.artifactRefs = artifactRefs;
   } else {
     message.body = content.body ?? "";
     // An edit keeps the original format only if it carries its own HTML.
@@ -518,7 +567,7 @@ export function toTimelineEntries(
   room: Room | null,
   roster: Roster | null,
 ): TimelineEntry[] {
-  const index = indexRelations(room ? allRoomEvents(room) : events, room);
+  const index = indexRelations(room ? allRoomEvents(room) : events, room, roster);
   const me = room?.myUserId ?? null;
   const out: TimelineEntry[] = [];
   for (const ev of events) {

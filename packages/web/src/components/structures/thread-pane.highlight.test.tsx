@@ -1,4 +1,5 @@
 import { render } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MatrixClientPeg } from "@/client/peg";
 import { makeFakeClient, makeMatrixEvent, makeRoom, pushTimelineEvent } from "../../../test/factories";
@@ -32,6 +33,7 @@ describe("<ThreadPane highlightEventId />", () => {
     const spy = vi.spyOn(Element.prototype, "scrollIntoView");
     const { container } = render(
       <ThreadPane roomId={roomId} rootEventId="$root" onClose={() => {}} highlightEventId="$r1" />,
+      { wrapper: MemoryRouter },
     );
     const el = container.querySelector('[data-message-id="$r1"]');
     expect(el).toHaveAttribute("data-highlighted");
@@ -43,6 +45,7 @@ describe("<ThreadPane highlightEventId />", () => {
     seed();
     const { container } = render(
       <ThreadPane roomId={roomId} rootEventId="$root" onClose={() => {}} highlightEventId="$missing" />,
+      { wrapper: MemoryRouter },
     );
     expect(container.querySelector("[data-highlighted]")).toBeNull();
   });

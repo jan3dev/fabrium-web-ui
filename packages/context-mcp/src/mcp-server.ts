@@ -1,8 +1,10 @@
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import type { TaskActions, TaskCallerRef, TaskRole, TransportContextProvider } from '@zooid/core'
+import { ARTIFACT_KINDS, type TaskActions, type TaskCallerRef, type TaskRole, type TransportContextProvider } from '@zooid/core'
 import {
   AGENT_NOTIFY_INSTRUCTIONS,
+  ARTIFACT_DESCRIPTION,
+  ARTIFACT_INSTRUCTIONS,
   HANDOFF_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
 } from './tool-text.js'
@@ -38,7 +40,7 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
   const server = new McpServer(
     { name: 'zooid-context', version: '0.0.1' },
     {
-      instructions: AGENT_NOTIFY_INSTRUCTIONS,
+      instructions: `${AGENT_NOTIFY_INSTRUCTIONS}\n\n${ARTIFACT_INSTRUCTIONS}`,
     },
   )
 
@@ -187,6 +189,28 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
     async ({ room, thread_id, text }) => {
       const provider = await opts.resolve()
       const result = await provider.sendMessage({ room, thread_id, text })
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] }
+    },
+  )
+
+  server.tool(
+    'zooid_artifact',
+    ARTIFACT_DESCRIPTION,
+    {
+      identifier: z.string().describe('kebab-case id, stable across versions'),
+      type: z.enum(ARTIFACT_KINDS).optional().describe('required with content'),
+      title: z.string().optional(),
+      language: z.string().optional().describe('for type "code"'),
+      content: z.string().optional().describe('the complete new version'),
+      edits: z
+        .array(z.object({ old_str: z.string(), new_str: z.string() }))
+        .optional()
+        .describe('find/replace pairs against the latest version'),
+    },
+    async (input) => {
+      const provider = await opts.resolve()
+      if (!provider.sendArtifact) throw new Error('artifacts unavailable on this transport')
+      const result = await provider.sendArtifact('', '', input)
       return { content: [{ type: 'text', text: JSON.stringify(result) }] }
     },
   )

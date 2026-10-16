@@ -1,4 +1,5 @@
 import type { DiffBlock } from "@/events/zooid-events";
+import { useMemo } from "react";
 import { lineDiff } from "@/lib/line-diff";
 
 function shortPath(p: string): string {
@@ -7,7 +8,7 @@ function shortPath(p: string): string {
 }
 
 export function DiffView({ diff }: { diff: DiffBlock }) {
-  const rows = lineDiff(diff.oldText, diff.newText);
+  const rows = useMemo(() => lineDiff(diff.oldText, diff.newText), [diff.oldText, diff.newText]);
   return (
     <div className="mt-1 overflow-hidden rounded-md border border-border">
       <div className="bg-muted/50 px-2 py-1 font-mono text-xs text-foreground/80" title={diff.path}>

@@ -15,6 +15,7 @@ export interface DaemonRequest {
     | 'getRoomInfo'
     | 'getRooms'
     | 'sendMessage'
+    | 'sendArtifact'
     | 'startTasks'
     | 'completeTask'
     | 'describeRole'
@@ -163,6 +164,13 @@ async function handleLine(
     } else if (req.method === 'sendMessage') {
       result = await binding.provider.sendMessage(
         req.params as unknown as Parameters<typeof binding.provider.sendMessage>[0],
+      )
+    } else if (req.method === 'sendArtifact') {
+      if (!binding.provider.sendArtifact) throw new Error('artifacts unavailable on this transport')
+      result = await binding.provider.sendArtifact(
+        channelId,
+        binding.threadRef.threadId,
+        req.params as unknown as Parameters<NonNullable<typeof binding.provider.sendArtifact>>[2],
       )
     } else if (
       req.method === 'startTasks' ||

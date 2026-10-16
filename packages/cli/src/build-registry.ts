@@ -15,7 +15,7 @@ import {
   type ZooidConfig,
   type TransportContextProvider,
 } from '@zooid/core'
-import { MatrixClient, MatrixContextProvider } from '@zooid/transport-matrix'
+import { MatrixClient, MatrixContextProvider, MediaClient } from '@zooid/transport-matrix'
 import {
   CONTEXT_CONTAINER_SOCK,
   SpawnRegistry,
@@ -337,6 +337,7 @@ function buildContextSpawns(
   const registry = opts.contextSpawnRegistry
 
   const matrixClients = new Map<string, MatrixClient>()
+  const mediaClients = new Map<string, MediaClient>()
   const agentBots = new Map<string, string>()
   for (const [name, agent] of Object.entries(cfg.agents)) {
     if (agent.matrix?.user_id) agentBots.set(agent.matrix.user_id, name)
@@ -347,6 +348,7 @@ function buildContextSpawns(
       tname,
       new MatrixClient({ homeserver: tcfg.homeserver, asToken: tcfg.as_token }),
     )
+    mediaClients.set(tname, new MediaClient({ homeserver: tcfg.homeserver, asToken: tcfg.as_token }))
   }
 
   const result: Record<string, ContextSpawnFactory | undefined> = {}
@@ -361,6 +363,7 @@ function buildContextSpawns(
         // Same array BotPool.bootstrap rewrites `.alias` on in place — reads
         // through this after bootstrap see canonical room IDs.
         rooms: agent.matrix.rooms,
+        media: mediaClients.get(agent.matrix.transport),
       })
       result[name] = async (threadId: string, channelId?: string, sessionKey?: string) => {
         const spawnId = registry.register({

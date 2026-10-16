@@ -1,6 +1,7 @@
 import { DownloadIcon, FileTextIcon } from "@/components/icons";
 import { useEffect, useState } from "react";
 import { useMatrixClient } from "../../hooks/use-matrix-client";
+import { downloadBlob } from "@/lib/browser-actions";
 import { fetchAuthedMedia } from "../../lib/matrix/authed-media";
 import type { TimelineMessage } from "@/model/types";
 
@@ -67,11 +68,7 @@ function DownloadButton({ mxcUrl, filename }: { mxcUrl: string; filename: string
       console.warn("[media-message] download failed:", err);
       return;
     }
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    downloadBlob(blob, filename);
   }
 
   return (

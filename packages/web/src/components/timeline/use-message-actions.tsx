@@ -1,10 +1,10 @@
 import { useMemo, useState, type ReactNode } from "react";
 import type { MatrixEvent } from "matrix-js-sdk";
-import { toast } from "sonner";
 
 import { ShareMessageDialog } from "@/components/dialogs/share-message";
 import { MatrixClientPeg } from "@/client/peg";
 import { allRoomEvents } from "@/hooks/use-timeline";
+import { copyToClipboard } from "@/lib/browser-actions";
 import { resolveEditedContent } from "@/lib/matrix/edits";
 import {
   buildThreadLink,
@@ -27,12 +27,6 @@ type SendEvent = (
   content: Record<string, unknown>,
 ) => Promise<unknown>;
 
-function copy(text: string, message: string) {
-  navigator.clipboard.writeText(text).then(
-    () => toast.success(message),
-    () => toast.error("Couldn't copy: clipboard access denied"),
-  );
-}
 
 /**
  * Binds message row actions to Matrix for one room. Returns the actions and the
@@ -138,13 +132,13 @@ export function useMessageActions(
       copyLink(m) {
         const ev = find(m.id);
         if (ev)
-          copy(
+          copyToClipboard(
             buildThreadLink(window.location.origin, threadTargetForEvent(ev)),
             "Link copied",
           );
       },
       copyText(m) {
-        copy(m.body, "Text copied");
+        copyToClipboard(m.body, "Text copied");
       },
       quote(m) {
         const ev = find(m.id);
