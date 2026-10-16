@@ -5,6 +5,8 @@ import type { TaskActions, TransportContextProvider } from '@zooid/core'
 import { buildContextMcpServer } from './mcp-server.js'
 import {
   AGENT_NOTIFY_INSTRUCTIONS,
+  ARTIFACT_DESCRIPTION,
+  ARTIFACT_INSTRUCTIONS,
   HANDOFF_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
 } from './index.js'
@@ -47,6 +49,7 @@ describe('shared tool text ([[ZOD094]])', () => {
     const tools = (await client.listTools()).tools
     expect(tools.find((t) => t.name === 'zooid_handoff')?.description).toBe(HANDOFF_DESCRIPTION)
     expect(tools.find((t) => t.name === 'zooid_send_message')?.description).toBe(SEND_MESSAGE_DESCRIPTION)
-    expect(client.getInstructions()).toBe(AGENT_NOTIFY_INSTRUCTIONS)
+    expect(client.getInstructions()).toBe(`${AGENT_NOTIFY_INSTRUCTIONS}\n\n${ARTIFACT_INSTRUCTIONS}`)
+    expect(tools.find((t) => t.name === 'zooid_artifact')?.description).toBe(ARTIFACT_DESCRIPTION)
   })
 })

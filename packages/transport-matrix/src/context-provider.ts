@@ -1,4 +1,6 @@
 import type {
+  ArtifactInput,
+  ArtifactResult,
   TransportContextProvider,
   HistoryOptions,
   HistoryPage,
@@ -11,6 +13,17 @@ import type {
   ThreadOverviewPage,
 } from '@zooid/core'
 import type { MatrixClient } from './matrix-client.js'
+import type { MediaClient } from './media-client.js'
+import {
+  ARTIFACT_EVENT_TYPE,
+  MAX_ARTIFACT_BYTES,
+  MAX_INLINE_ARTIFACT_BYTES,
+  applyArtifactEdits,
+  readStoredArtifact,
+  sha256Hex,
+  validateArtifactInput,
+  type StoredArtifact,
+} from './artifacts.js'
 import type { RoomBinding } from '@zooid/core'
 
 interface MatrixMessageEvent {
@@ -59,7 +72,12 @@ export interface MatrixContextProviderOpts {
    * don't exercise either method).
    */
   rooms?: RoomBinding[]
+  /** Stores artifact bodies over 48 KB. Absent = such artifacts are refused. */
+  media?: Pick<MediaClient, 'download' | 'upload'>
 }
+
+/** Pages of thread relations searched for an artifact's latest version. */
+const ARTIFACT_SEARCH_PAGES = 10
 
 export class MatrixContextProvider implements TransportContextProvider {
   constructor(private readonly opts: MatrixContextProviderOpts) {}
@@ -258,5 +276,96 @@ export class MatrixContextProvider implements TransportContextProvider {
       ...(input.thread_id ? { threadRoot: input.thread_id } : {}),
     })
     return { event_id, ...(input.thread_id ? { thread_id: input.thread_id } : {}) }
+  }
+
+  /**
+   * Edits are applied here, against this agent's latest version in the
+   * thread, so every event holds a whole version and a bad edit fails back to
+   * the model instead of rendering a broken artifact.
+   */
+  async sendArtifact(channelId: string, threadId: string, input: ArtifactInput): Promise<ArtifactResult> {
+    validateArtifactInput(input)
+    // The web client opens artifacts beside their thread; a room-level one would be a dead card.
+    if (!threadId.startsWith('$')) {
+      throw new Error('unsupported: artifacts are shown in threads. Reply in a thread to use zooid_artifact.')
+    }
+    const previous =
+      input.edits || !input.title ? await this.latestArtifact(channelId, threadId, input.identifier) : null
+    if (input.edits && !previous) {
+      throw new Error(`not_found: no earlier version of "${input.identifier}" by you in this thread. Send the full content.`)
+    }
+    const text = input.edits
+      ? applyArtifactEdits(await this.artifactBody(previous!), input.edits)
+      : input.content!
+    const bytes = new TextEncoder().encode(text)
+    if (bytes.byteLength > MAX_ARTIFACT_BYTES) {
+      throw new Error(`too_large: ${bytes.byteLength} bytes, the limit is ${MAX_ARTIFACT_BYTES}. Split or simplify it.`)
+    }
+    const type = input.type ?? previous!.type
+    const content: Record<string, unknown> = {
+      identifier: input.identifier,
+      type,
+      title: input.title || previous?.title || input.identifier,
+    }
+    const language = input.language ?? (input.type ? undefined : previous?.language)
+    if (language) content.language = language
+    // Measured as encoded in the event: JSON escaping can double quote- and newline-heavy code.
+    if (new TextEncoder().encode(JSON.stringify(text)).byteLength <= MAX_INLINE_ARTIFACT_BYTES) {
+      content.body = text
+    } else {
+      if (!this.opts.media) throw new Error(`too_large: artifacts over ${MAX_INLINE_ARTIFACT_BYTES} bytes are not supported here.`)
+      const { content_uri } = await this.opts.media.upload({
+        data: bytes,
+        contentType: 'text/plain; charset=utf-8',
+        filename: `${input.identifier}.txt`,
+        asUserId: this.opts.asUserId,
+      })
+      Object.assign(content, { url: content_uri, sha256: sha256Hex(bytes), size: bytes.byteLength })
+    }
+    content['m.relates_to'] = { rel_type: 'm.thread', event_id: threadId }
+    const { event_id } = await this.opts.client.sendCustomEvent({
+      roomId: channelId,
+      asUserId: this.opts.asUserId,
+      eventType: ARTIFACT_EVENT_TYPE,
+      content,
+    })
+    return { event_id, identifier: input.identifier }
+  }
+
+  private async latestArtifact(roomId: string, threadId: string, identifier: string): Promise<StoredArtifact | null> {
+    let from: string | undefined
+    for (let page = 0; page < ARTIFACT_SEARCH_PAGES; page++) {
+      const { chunk, next_batch } = await this.opts.client.fetchThreadRelations({
+        roomId,
+        rootEventId: threadId,
+        asUserId: this.opts.asUserId,
+        eventType: ARTIFACT_EVENT_TYPE,
+        dir: 'b',
+        limit: 50,
+        from,
+      })
+      for (const ev of chunk) {
+        if (ev.sender !== this.opts.asUserId) continue
+        const stored = readStoredArtifact(ev.content)
+        if (stored?.identifier === identifier) return stored
+      }
+      if (!next_batch) return null
+      from = next_batch
+    }
+    return null
+  }
+
+  private async artifactBody(stored: StoredArtifact): Promise<string> {
+    if (typeof stored.body === 'string') return stored.body
+    if (!this.opts.media) throw new Error('media_unavailable: cannot read the earlier version. Send the full content.')
+    const { data } = await this.opts.media.download({
+      mxcUri: stored.url!,
+      asUserId: this.opts.asUserId,
+      maxBytes: MAX_ARTIFACT_BYTES,
+    })
+    if (stored.sha256 && sha256Hex(data) !== stored.sha256) {
+      throw new Error('media_mismatch: the earlier version does not match its checksum. Send the full content.')
+    }
+    return new TextDecoder().decode(data)
   }
 }

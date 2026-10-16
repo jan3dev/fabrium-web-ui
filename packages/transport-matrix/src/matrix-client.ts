@@ -379,9 +379,13 @@ export class MatrixClient {
     asUserId: string
     limit?: number
     from?: string
+    /** Default m.room.message. */
+    eventType?: string
+    /** Default 'f' (oldest-first). */
+    dir?: 'f' | 'b'
   }): Promise<{ chunk: Array<Record<string, unknown>>; next_batch?: string }> {
     const params = new URLSearchParams({
-      dir: 'f',
+      dir: opts.dir ?? 'f',
       limit: String(opts.limit ?? 100),
       user_id: opts.asUserId,
     })
@@ -393,7 +397,7 @@ export class MatrixClient {
     // has_more/next_before (zooid-ai/zooid#21).
     const url =
       `${this.homeserver}/_matrix/client/v1/rooms/${encodeURIComponent(opts.roomId)}` +
-      `/relations/${encodeURIComponent(opts.rootEventId)}/m.thread/m.room.message?${params.toString()}`
+      `/relations/${encodeURIComponent(opts.rootEventId)}/m.thread/${encodeURIComponent(opts.eventType ?? 'm.room.message')}?${params.toString()}`
     const r = await this.fetch(url, {
       method: 'GET',
       headers: { Authorization: `Bearer ${this.asToken}` },

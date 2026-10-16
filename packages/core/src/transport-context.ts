@@ -45,6 +45,33 @@ export interface SendMessageResult {
   thread_id?: string
 }
 
+export const ARTIFACT_KINDS = ['html', 'svg', 'react', 'markdown', 'code'] as const
+export type ArtifactKind = (typeof ARTIFACT_KINDS)[number]
+
+export interface ArtifactEdit {
+  old_str: string
+  new_str: string
+}
+
+/**
+ * A new version of an artifact shown in the client's artifact panel. Exactly
+ * one of `content` (the full new version) or `edits` (find/replace pairs
+ * against the latest version with the same identifier) is set.
+ */
+export interface ArtifactInput {
+  identifier: string
+  type?: ArtifactKind
+  title?: string
+  language?: string
+  content?: string
+  edits?: ArtifactEdit[]
+}
+
+export interface ArtifactResult {
+  event_id: string
+  identifier: string
+}
+
 export interface HistoryPage {
   messages: Message[]
   next_before?: string
@@ -104,4 +131,6 @@ export interface TransportContextProvider {
   /** Rooms this agent is bound to. Targets for sendMessage. */
   getRooms(): Promise<RoomInfo[]>
   sendMessage(input: SendMessageInput): Promise<SendMessageResult>
+  /** Post an artifact version into the bound thread. Absent = transport has no artifacts. */
+  sendArtifact?(channelId: string, threadId: string, input: ArtifactInput): Promise<ArtifactResult>
 }

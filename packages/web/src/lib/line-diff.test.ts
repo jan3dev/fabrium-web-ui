@@ -31,4 +31,16 @@ describe("lineDiff", () => {
       { type: "add", text: "y" },
     ]);
   });
+
+  it("diffs only the changed middle of a large file", () => {
+    const lines = Array.from({ length: 5000 }, (_, i) => `line ${i}`);
+    const changed = [...lines];
+    changed[2500] = "edited";
+    const rows = lineDiff(lines.join("\n"), changed.join("\n"));
+    expect(rows.filter((r) => r.type !== "ctx")).toEqual([
+      { type: "del", text: "line 2500" },
+      { type: "add", text: "edited" },
+    ]);
+  });
 });
+

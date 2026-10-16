@@ -1,5 +1,6 @@
 // Fabrium-shaped view model. Components import these types, never matrix-js-sdk;
 // `from-matrix.ts` is the one place Matrix data is mapped onto them.
+import type { ArtifactRef } from "@/lib/artifacts/refs";
 import type { QuoteRef } from "@/lib/matrix/quote";
 
 export type ActorKind = "human" | "agent" | "system";
@@ -29,6 +30,7 @@ export type TimelineKind =
   | "approval"
   | "question"
   | "error"
+  | "artifact"
   | "gap"
   | "divider";
 
@@ -43,6 +45,7 @@ export interface TimelineMessage {
   threadRootId: string | null; // m.thread
   replyToId: string | null; // m.in_reply_to
   quote?: QuoteRef; // dev.zooid.quote
+  artifactRefs?: ArtifactRef[]; // dev.fabrium.artifact_refs
   edited: boolean;
   pending: boolean;
   failed: boolean;
@@ -58,7 +61,7 @@ export interface TimelineMessage {
     w?: number;
     h?: number;
   };
-  /** Source payload for kinds rendered by the agent cards (agent-turn, approval, question, error). */
+  /** Source payload for kinds rendered by the agent cards (agent-turn, approval, question, error, artifact). */
   raw?: unknown;
 }
 
@@ -72,4 +75,25 @@ export interface ThreadSummary {
 export interface TimelineEntry {
   message: TimelineMessage;
   thread: ThreadSummary | null;
+}
+
+export const ARTIFACT_KINDS = ["html", "svg", "react", "markdown", "code"] as const;
+export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
+
+/** One version of an agent's artifact, numbered per thread + identifier. */
+export interface ArtifactVersion {
+  eventId: string;
+  identifier: string;
+  kind: ArtifactKind;
+  title: string;
+  language?: string;
+  /** Inline content; otherwise fetch `mxc` and check it against `sha256`. */
+  body?: string;
+  mxc?: string;
+  sha256?: string;
+  /** 1-based. */
+  version: number;
+  createdAt: number;
+  author: ActorSummary;
+  threadRootId: string | null;
 }

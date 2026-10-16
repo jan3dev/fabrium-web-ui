@@ -3,9 +3,11 @@ import type { MatrixEvent } from "matrix-js-sdk";
 import type * as React from "react";
 
 import { TurnBlock } from "@/components/agents/activity/turn-block";
+import { ArtifactCard } from "@/components/artifacts/artifact-card";
+import { useArtifactRoute } from "@/hooks/use-artifacts";
 import type { DecodedZooidEvent } from "@/events/zooid-events";
 import type { AgentTurn, ApprovalView } from "@/model/agent-activity";
-import type { TimelineEntry } from "@/model/types";
+import type { ArtifactVersion, TimelineEntry } from "@/model/types";
 import { ApprovalCard } from "./approval-card";
 import { ErrorTile } from "./error-tile";
 import { MessageRow, type MessageRowActions } from "./message-row";
@@ -28,6 +30,20 @@ export interface TimelineRowProps {
 
 function AgentCard({ children }: { children: React.ReactNode }) {
   return <div className="px-3 py-1">{children}</div>;
+}
+
+/** Opens the artifact panel beside this version's thread. */
+function ArtifactRow({ artifact }: { artifact: ArtifactVersion }) {
+  const route = useArtifactRoute();
+  return (
+    <AgentCard>
+      <ArtifactCard
+        artifact={artifact}
+        active={route.identifier === artifact.identifier && route.versionEventId === artifact.eventId}
+        onOpen={() => route.open(artifact.identifier, artifact.eventId, artifact.threadRootId)}
+      />
+    </AgentCard>
+  );
 }
 
 /** One timeline row, chosen by the entry's kind. */
@@ -88,6 +104,8 @@ export function TimelineRow({
           <ErrorTile decoded={message.raw as Extract<DecodedZooidEvent, { kind: "error" }>} />
         </AgentCard>
       );
+    case "artifact":
+      return <ArtifactRow artifact={message.raw as ArtifactVersion} />;
     case "agent-turn":
       return (
         <AgentCard>

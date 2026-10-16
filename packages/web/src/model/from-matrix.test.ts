@@ -6,6 +6,7 @@ import {
 } from "matrix-js-sdk";
 import { describe, expect, it } from "vitest";
 import { allRoomEvents } from "@/hooks/use-timeline";
+import { appendArtifactRefs, ARTIFACT_REFS_FIELD, type ArtifactRef } from "@/lib/artifacts/refs";
 import { QUOTE_FIELD, type QuoteRef } from "@/lib/matrix/quote";
 import {
   injectStateEvent,
@@ -22,6 +23,7 @@ import {
   toTimelineMessages,
 } from "./from-matrix";
 import type { AgentTurn, ApprovalView } from "./agent-activity";
+import type { ArtifactVersion } from "./types";
 
 const roomId = "!r:h.example";
 const me = "@me:h.example";
@@ -518,5 +520,44 @@ describe("agent turns", () => {
       isAgent: () => true,
     });
     expect((asAgent[0].message.raw as ApprovalView).viewerIsAgent).toBe(true);
+  });
+});
+
+describe("artifacts", () => {
+  const thread = { "m.relates_to": { rel_type: "m.thread", event_id: "$root" } };
+  const version = (sender: string, body: string, identifier = "page") =>
+    ev(sender, "dev.fabrium.artifact.version", { identifier, type: "html", title: "Page", body, ...thread });
+
+  it("numbers an agent's versions per thread + identifier and ignores anyone else's", () => {
+    const room = roomWith(
+      version(agent, "v1"),
+      version(ana, "forged"),
+      version(agent, "other", "other"),
+      version(agent, "v2"),
+    );
+    const artifacts = entries(room)
+      .filter((e) => e.message.kind === "artifact")
+      .map((e) => e.message.raw as ArtifactVersion);
+    expect(artifacts.map((a) => [a.identifier, a.version, a.body])).toEqual([
+      ["page", 1, "v1"],
+      ["other", 1, "other"],
+      ["page", 2, "v2"],
+    ]);
+    expect(artifacts[0]).toMatchObject({ kind: "html", threadRootId: "$root", author: { kind: "agent" } });
+  });
+
+  it("strips the annotation fallback from an annotated reply's body", () => {
+    const refs: ArtifactRef[] = [
+      {
+        identifier: "page",
+        title: "Page",
+        version: 2,
+        event_id: "$v2",
+        target: { kind: "element", selector: "button.cta", html: "<button>Go</button>", text: "Go" },
+        note: "make it blue",
+      },
+    ];
+    const room = roomWith(text(ana, appendArtifactRefs("tweak this", refs), undefined, { [ARTIFACT_REFS_FIELD]: refs }));
+    expect(entries(room)[0].message).toMatchObject({ body: "tweak this", artifactRefs: refs });
   });
 });

@@ -42,6 +42,7 @@ describe('buildContextMcpServer', () => {
     const client = await connect(server)
     const list = await client.listTools()
     expect(list.tools.map((t) => t.name).sort()).toEqual([
+      'zooid_artifact',
       'zooid_get_history',
       'zooid_get_members',
       'zooid_get_recent_threads',
@@ -50,6 +51,33 @@ describe('buildContextMcpServer', () => {
       'zooid_get_thread_history',
       'zooid_send_message',
     ])
+  })
+
+  it('zooid_artifact forwards to sendArtifact and returns its errors to the model', async () => {
+    const calls: unknown[] = []
+    const server = buildContextMcpServer({
+      resolve: async () =>
+        makeProvider({
+          sendArtifact: async (_c, _t, input) => {
+            calls.push(input)
+            if (input.edits) throw new Error('edit_failed: edit 1 old_str not found')
+            return { event_id: '$a', identifier: input.identifier }
+          },
+        }),
+    })
+    const client = await connect(server)
+    const ok = await client.callTool({
+      name: 'zooid_artifact',
+      arguments: { identifier: 'page', type: 'html', content: '<p/>' },
+    })
+    expect(JSON.parse((ok.content as Array<{ text: string }>)[0]!.text)).toEqual({ event_id: '$a', identifier: 'page' })
+    const bad = await client.callTool({
+      name: 'zooid_artifact',
+      arguments: { identifier: 'page', edits: [{ old_str: 'x', new_str: 'y' }] },
+    })
+    expect(bad.isError).toBe(true)
+    expect((bad.content as Array<{ text: string }>)[0]!.text).toMatch(/edit_failed/)
+    expect(calls).toHaveLength(2)
   })
 
   it('renames the two tools that did not name Matrix primitives', async () => {

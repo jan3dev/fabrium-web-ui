@@ -1,5 +1,8 @@
 import {
   AGENT_NOTIFY_INSTRUCTIONS,
+  ARTIFACT_DESCRIPTION,
+  ARTIFACT_KINDS,
+  ARTIFACT_INSTRUCTIONS,
   callDaemon,
   HANDOFF_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
@@ -80,12 +83,15 @@ export default function createExtension(pi: ExtensionAPI, deps: Deps = {}): void
     method: DaemonRequest['method'],
     params: Record<string, unknown>,
     ctx: ExtensionContext,
+    /** The daemon's error is the model's to fix (a missing old_str): pass it through as-is. */
+    rawErrors = false,
   ): Promise<ToolResult> => {
     const acpSessionId = ctx.sessionManager?.getSessionId?.()
     if (!acpSessionId) return error('zooid: this Pi session has no id; cannot address a Zooid session.')
     try {
       const reply = await resolve({ acpSessionId, method, params })
       if (!reply.ok) {
+        if (rawErrors) return error(`zooid: ${reply.error}`)
         return error(
           `zooid: this Pi session (${acpSessionId}) is not bound to a Zooid session — ${reply.error}.`,
         )
@@ -187,6 +193,29 @@ export default function createExtension(pi: ExtensionAPI, deps: Deps = {}): void
     async execute(_id, params, _signal, _update, ctx) {
       return call('handoff', { agent: params.agent, prompt: params.prompt }, ctx)
     },
+  })
+
+  pi.registerTool({
+    name: 'zooid_artifact',
+    label: 'Show artifact',
+    description: ARTIFACT_DESCRIPTION,
+    promptGuidelines: [ARTIFACT_INSTRUCTIONS],
+    parameters: {
+      type: 'object',
+      properties: {
+        identifier: { type: 'string' },
+        type: { enum: ARTIFACT_KINDS },
+        title: { type: 'string' },
+        language: { type: 'string' },
+        content: { type: 'string' },
+        edits: {
+          type: 'array',
+          items: { type: 'object', properties: { old_str: { type: 'string' }, new_str: { type: 'string' } }, required: ['old_str', 'new_str'] },
+        },
+      },
+      required: ['identifier'],
+    },
+    execute: (_id, params, _signal, _update, ctx) => call('sendArtifact', params, ctx, true),
   })
 
   // Role-conditional gating ([[ZOD084]]). Fail open on any error — the read

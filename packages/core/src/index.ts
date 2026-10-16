@@ -47,6 +47,10 @@ export type {
   WebhookTriggerConfig,
 } from './types.js'
 export type {
+  ArtifactEdit,
+  ArtifactInput,
+  ArtifactKind,
+  ArtifactResult,
   HistoryOptions,
   HistoryPage,
   Message,
@@ -58,6 +62,7 @@ export type {
   ThreadOverviewPage,
   TransportContextProvider,
 } from './transport-context.js'
+export { ARTIFACT_KINDS } from './transport-context.js'
 export * from './task-actions.js'
 
 export { ElicitationCorrelator } from './elicitation-correlator.js'

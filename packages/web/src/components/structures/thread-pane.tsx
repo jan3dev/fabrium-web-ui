@@ -5,7 +5,9 @@ import { ArrowDownIcon } from "@/components/icons";
 import { AuxPanelHeader } from "@/components/layout/aux-panel-header";
 import { AuxPanel } from "@/components/layout/aux-panel-shell";
 import { Button } from "@/components/ui/button";
+import { useArtifactRoute } from "@/hooks/use-artifacts";
 import { useAwaitingInput } from "@/hooks/use-timeline";
+import type { ArtifactVersion, TimelineMessage } from "@/model/types";
 import { buildTimelineItems } from "@/lib/timeline/timeline-items";
 import { MatrixClientPeg } from "../../client/peg";
 import { useAuxPanelWidth } from "../../hooks/use-aux-panel-width";
@@ -61,6 +63,23 @@ function ThreadPlan({
   );
 }
 
+/** Clock skew between the server's timestamps and ours. */
+const LIVE_SKEW_MS = 30_000;
+
+/** Open an artifact version the agent sends while this thread is open; never one from history. */
+function useAutoOpenArtifact(replies: TimelineMessage[]) {
+  const { open } = useArtifactRoute();
+  const [openedAt] = React.useState(() => Date.now());
+  const opened = React.useRef<string | null>(null);
+  const latest = [...replies].reverse().find((m) => m.kind === "artifact");
+  React.useEffect(() => {
+    if (!latest || latest.id === opened.current || latest.createdAt < openedAt - LIVE_SKEW_MS) return;
+    opened.current = latest.id;
+    const artifact = latest.raw as ArtifactVersion;
+    open(artifact.identifier, artifact.eventId);
+  }, [latest, open, openedAt]);
+}
+
 /**
  * A thread in the right pane: the root, its replies, and a composer bound to
  * the root. Opened from a summary row or `?thread=`; `?event=` scrolls to and
@@ -87,6 +106,7 @@ export function ThreadPane({
     workforceSpaceId,
   );
   const { actions, dialogs } = useMessageActions(roomId, { inThread: true });
+  useAutoOpenArtifact(replies);
   const {
     loadMore,
     loading,
