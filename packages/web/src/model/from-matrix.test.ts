@@ -71,7 +71,7 @@ describe("toActor", () => {
     });
   });
 
-  it("labels an agent Persona · Project from the roster, project falling back to the space", () => {
+  it("labels an agent Name · Project, project falling back to the space, and keeps its persona", () => {
     const room = roomWith();
     const withRoster = (entry: Record<string, string>) => ({
       ...roster,
@@ -95,7 +95,7 @@ describe("toActor", () => {
         withRoster({ persona: "Coder", project: "Payments" }),
       ),
     ).toMatchObject({
-      displayName: "Coder · Payments",
+      displayName: "coder · Payments",
       persona: "Coder",
       project: "Payments",
     });

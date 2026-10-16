@@ -1,31 +1,29 @@
 #!/usr/bin/env bash
-# Prepare an Ubuntu 24.04 VM to run one Fabrium agent, or update it: a zooid
-# workstation in client mode, run by systemd as this user. Idempotent: run it
+# Start one Fabrium agent on a VM made from the agent VM image, or update it: a zooid
+# workstation in client mode, run by systemd as this user. It installs nothing: the
+# image has the tools and the CLI (deploy/agent-vm/prepare-image.sh). Idempotent: run it
 # again with a new --ref to update. See "Agent VM (workstation)" in deploy/README.md.
 set -euo pipefail
 
 REPO_DIR="$HOME/fabrium-web-ui"
 REF=""
 ZOOID_HOME="${ZOOID_HOME:-$HOME/zooid}"
-REPO_URL="https://github.com/jan3dev/fabrium-web-ui.git"
-INSTALL_DOCKER=1
-PNPM_VERSION=12.9.1 # same as deploy/Dockerfile
+PNPM_VERSION=12.9.1 # same as deploy/Dockerfile and prepare-image.sh
 
 usage() {
   cat <<USAGE
-Usage: provision.sh --ref <commit|branch> [--repo-dir DIR] [--zooid-home DIR] [--repo-url URL] [--no-docker]
+Usage: provision.sh --ref <commit|branch> [--repo-dir DIR] [--zooid-home DIR]
 
-Installs Node 22, pnpm and Docker CE, checks out the repo at --ref, builds the
-zooid CLI, and runs it as the systemd user service fabrium-agent. Needs the
-bundle from deploy/add-workstation.sh in ZOOID_HOME (.env, workforce/zooid.yaml).
+Checks out the repo at --ref, builds the zooid CLI when the image holds another
+commit, and runs it as the systemd user service fabrium-agent. Needs the bundle
+from deploy/add-workstation.sh in ZOOID_HOME (.env, workforce/zooid.yaml) and a VM
+made from the agent VM image (or prepared with prepare-image.sh). Installs nothing.
 Ubuntu only. Needs sudo. The agent runs as this user, with this user's access.
 To update, run it again with a new --ref. The agent is stopped during the build.
 
   --ref REF          commit or branch to run (required); use the commit of the central instance
   --repo-dir DIR     repo clone path       (default: \$HOME/fabrium-web-ui)
   --zooid-home DIR   agent data dir        (default: \$HOME/zooid)
-  --repo-url URL     git remote            (default: $REPO_URL)
-  --no-docker        do not install Docker CE (the agent cannot start containers)
   -h, --help         show this help
 USAGE
 }
@@ -39,8 +37,6 @@ while [ $# -gt 0 ]; do
     --ref) [ $# -ge 2 ] || die "--ref needs a value"; REF="$2"; shift 2 ;;
     --repo-dir) [ $# -ge 2 ] || die "--repo-dir needs a value"; REPO_DIR="$2"; shift 2 ;;
     --zooid-home) [ $# -ge 2 ] || die "--zooid-home needs a value"; ZOOID_HOME="$2"; shift 2 ;;
-    --repo-url) [ $# -ge 2 ] || die "--repo-url needs a value"; REPO_URL="$2"; shift 2 ;;
-    --no-docker) INSTALL_DOCKER=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown argument: $1" ;;
   esac
@@ -82,11 +78,11 @@ done
 RUN_DIR="$ZOOID_HOME/workforce/data/run"
 [ "${#RUN_DIR}" -le 81 ] || die "run dir path is ${#RUN_DIR} chars (max 81, Unix socket limit): choose a shorter ZOOID_HOME"
 
-# --- Packages -----------------------------------------------------------
-APT="sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get"
-log "Installing base packages"
-$APT update
-$APT install -y ca-certificates curl git gnupg jq
+# --- Tools from the image ---------------------------------------------------
+for tool in curl git jq node pnpm; do
+  command -v "$tool" >/dev/null 2>&1 ||
+    die "$tool is missing: use the agent VM image, or run deploy/agent-vm/prepare-image.sh first"
+done
 
 # --- VM token -------------------------------------------------------------
 # The zooid log cannot prove the token (deploy/README.md): check it before an update stops the agent.
@@ -102,49 +98,6 @@ WHOAMI_ID="$(printf '%s' "$WHOAMI" | jq -r '.user_id // empty' 2>/dev/null || tr
   die "the VM token is for '$WHOAMI_ID', not @$WORKSTATION:$SERVER_NAME: run deploy/add-workstation.sh on the central box and copy the bundle again"
 log "The homeserver accepts the VM token as $WHOAMI_ID"
 
-# --- Node, pnpm and Docker CE ---------------------------------------------
-sudo install -m 0755 -d /etc/apt/keyrings
-
-if node -v 2>/dev/null | grep -q '^v22\.'; then
-  log "Node $(node -v) already installed; skipping"
-else
-  log "Installing Node 22 from the NodeSource apt repository"
-  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key |
-    sudo gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
-  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" |
-    sudo tee /etc/apt/sources.list.d/nodesource.list >/dev/null
-  $APT update
-  $APT install -y nodejs
-fi
-
-if [ "$(pnpm -v 2>/dev/null || true)" = "$PNPM_VERSION" ]; then
-  log "pnpm $PNPM_VERSION already installed; skipping"
-else
-  log "Installing pnpm $PNPM_VERSION"
-  sudo npm install -g "pnpm@$PNPM_VERSION"
-fi
-
-GROUP_ADDED=0
-if [ "$INSTALL_DOCKER" -eq 1 ]; then
-  if command -v dockerd >/dev/null 2>&1; then
-    log "Docker CE already installed; skipping"
-  else
-    log "Installing Docker CE from Docker's apt repository (for the agent's own containers)"
-    sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-    sudo chmod a+r /etc/apt/keyrings/docker.asc
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" |
-      sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
-    $APT update
-    $APT install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-  fi
-  # The docker group is root on this VM in practice; the agent has that access on purpose.
-  if ! id -nG "$(id -un)" | tr ' ' '\n' | grep -qx docker; then
-    log "Adding $(id -un) to the docker group"
-    sudo usermod -aG docker "$(id -un)"
-    GROUP_ADDED=1
-  fi
-fi
-
 # --- systemd user instance ------------------------------------------------
 # Linger starts the user's systemd instance at boot, without a login session.
 sudo loginctl enable-linger "$(id -un)"
@@ -156,15 +109,23 @@ done
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT_FILE="$UNIT_DIR/fabrium-agent.service"
 
+# The agent starts node and opencode from the service PATH (/usr/local/bin before /usr/bin): check it too.
+SERVICE_PATH="$(systemctl --user show-environment | sed -n 's/^PATH=//p')"
+[ -n "$SERVICE_PATH" ] || die "cannot read PATH from the systemd user instance"
+for path in "$PATH" "$SERVICE_PATH"; do
+  PATH="$path" node -v 2>/dev/null | grep -q '^v22\.' ||
+    die "the first node in PATH=$path is not v22; remove the other Node: $(PATH="$path" which -a node | tr '\n' ' ')"
+done
+[ "$(pnpm -v 2>/dev/null || true)" = "$PNPM_VERSION" ] ||
+  die "the first pnpm in PATH is not $PNPM_VERSION: $(which -a pnpm | tr '\n' ' ')"
+
 # --- Repo at --ref --------------------------------------------------------
+[ -d "$REPO_DIR/.git" ] ||
+  die "no repo in $REPO_DIR: use the agent VM image, or run deploy/agent-vm/prepare-image.sh first"
 # The commit of the running agent: the way back if this update fails.
 PREV_SHA=""
 if systemctl --user is-active --quiet fabrium-agent.service 2>/dev/null; then
   PREV_SHA="$(git -C "$REPO_DIR" rev-parse -q --verify HEAD 2>/dev/null || true)"
-fi
-if [ ! -d "$REPO_DIR/.git" ]; then
-  log "Cloning repo into $REPO_DIR"
-  git clone --quiet "$REPO_URL" "$REPO_DIR"
 fi
 git -C "$REPO_DIR" fetch --quiet --prune origin
 [ -z "$(git -C "$REPO_DIR" status --porcelain --untracked-files=no)" ] ||
@@ -187,13 +148,21 @@ SHA="$(git -C "$REPO_DIR" rev-parse --short=12 HEAD)"
 log "Repo at $SHA"
 
 # --- Build the CLI (not the web UI) ----------------------------------------
-log "Installing dependencies and building the zooid CLI"
-(
-  cd "$REPO_DIR"
-  CI=true pnpm install --frozen-lockfile
-  pnpm --filter 'zooid...' --filter '!@fabrium/web' build
-)
-[ -f "$REPO_DIR/packages/cli/dist/bin.js" ] || die "build did not produce packages/cli/dist/bin.js"
+# prepare-image.sh and this script write the commit of the last build in dist/.commit.
+BUILT_FILE="$REPO_DIR/packages/cli/dist/.commit"
+if [ "$(cat "$BUILT_FILE" 2>/dev/null || true)" = "$COMMIT" ] && [ -f "$REPO_DIR/packages/cli/dist/bin.js" ]; then
+  log "The CLI is already built at $SHA; skipping the build"
+else
+  log "Installing dependencies and building the zooid CLI"
+  (
+    cd "$REPO_DIR"
+    CI=true pnpm install --frozen-lockfile
+    pnpm --filter 'zooid...' --filter '!@fabrium/web' build
+  )
+  [ -f "$REPO_DIR/packages/cli/dist/bin.js" ] || die "build did not produce packages/cli/dist/bin.js"
+  # Last: the build cleans dist/.
+  printf '%s\n' "$COMMIT" >"$BUILT_FILE"
+fi
 
 # --- Agent layout ---------------------------------------------------------
 # Under runtime: local zooid does not create the agent's working directory.
@@ -241,6 +210,3 @@ NEXT STEPS
   3. Logs: journalctl --user -u fabrium-agent -f
   4. Update: run this script again with --ref <the commit of the central instance>.
 EOF_NEXT
-if [ "$GROUP_ADDED" -eq 1 ]; then
-  warn "$(id -un) was added to the docker group: reboot once (sudo reboot) so the agent gets it"
-fi

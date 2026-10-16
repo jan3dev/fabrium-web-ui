@@ -569,7 +569,7 @@ describe('BotPool.bootstrap creation-time power levels', () => {
 })
 
 describe('BotPool.bootstrap — display name', () => {
-  it('falls back to the user_id localpart when no displayName is supplied', async () => {
+  it('falls back to the user_id localpart when no displayName is supplied, ending it with the robot', async () => {
     const client = fakeClient()
     const pool = new BotPool(client, [
       {
@@ -580,10 +580,10 @@ describe('BotPool.bootstrap — display name', () => {
       },
     ])
     await pool.bootstrap()
-    expect(client.setDisplayName).toHaveBeenCalledWith('@docs:example.com', 'docs')
+    expect(client.setDisplayName).toHaveBeenCalledWith('@docs:example.com', 'docs 🤖')
   })
 
-  it('writes the supplied displayName when present', async () => {
+  it('writes the supplied displayName when present, ending it with the robot', async () => {
     const client = fakeClient()
     const pool = new BotPool(client, [
       {
@@ -595,7 +595,22 @@ describe('BotPool.bootstrap — display name', () => {
       },
     ])
     await pool.bootstrap()
-    expect(client.setDisplayName).toHaveBeenCalledWith('@docs:example.com', 'Docs Agent')
+    expect(client.setDisplayName).toHaveBeenCalledWith('@docs:example.com', 'Docs Agent 🤖')
+  })
+
+  it('adds the robot only once when the displayName already ends with it', async () => {
+    const client = fakeClient()
+    const pool = new BotPool(client, [
+      {
+        name: 'docs',
+        userId: '@docs:example.com',
+        displayName: 'Docs 🤖',
+        rooms: [],
+        trigger: 'mention',
+      },
+    ])
+    await pool.bootstrap()
+    expect(client.setDisplayName).toHaveBeenCalledWith('@docs:example.com', 'Docs 🤖')
   })
 
   it('passes the alias localpart as m.room.name when creating a room', async () => {

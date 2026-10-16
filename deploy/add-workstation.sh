@@ -259,7 +259,7 @@ else
   BUNDLE_NEW=1
   export WORKSTATION="$WS" AGENT_NAME="$AGENT"
   if [ "$PRESET" = echo ]; then
-    # Echo fixture; needs the repo clone that provision.sh makes at its default --repo-dir.
+    # Echo fixture; needs the repo clone that prepare-image.sh makes at its default --repo-dir.
     AGENT_ACP="{ command: sh, args: ['-c', 'exec node \"\$HOME/fabrium-web-ui/packages/acp-client/test/fixtures/echo-agent.ts\"'] }"
   else
     # shellcheck disable=SC2089
@@ -400,7 +400,7 @@ cat <<EOF_NEXT
 
 NEXT STEPS
   1. $COPY_STEP
-  2. On the VM, as the user that runs the agent (same commit as this instance):
-       curl -fsSL https://raw.githubusercontent.com/jan3dev/fabrium-web-ui/$SHA/deploy/agent-vm/provision.sh -o provision.sh
-       bash provision.sh --ref $SHA
+  2. On the VM (made from the agent VM image), as the user that runs the agent
+     (same commit as this instance):
+       bash ~/fabrium-web-ui/deploy/agent-vm/provision.sh --ref $SHA
 EOF_NEXT

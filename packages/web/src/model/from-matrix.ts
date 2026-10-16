@@ -27,7 +27,7 @@ import type {
 /** Who counts as an agent. `useWorkforce()` satisfies it. */
 export interface Roster {
   isAgent(userId: string): boolean;
-  /** The agent's roster entry, for its "Persona · Project" label. */
+  /** The agent's roster entry: the project of its "Name · Project" label, and its persona. */
   agent?(userId: string): RosterAgent | undefined;
   /** The workforce space's name: an agent's project when it names none. */
   spaceName?: string;
@@ -67,7 +67,8 @@ export function toActor(
   return {
     id: userId,
     kind,
-    displayName: project ? `${persona} · ${project}` : persona,
+    // The display name, not the persona: zooid ends it with a robot.
+    displayName: project ? `${name} · ${project}` : name,
     avatarUrl: member?.getMxcAvatarUrl() ?? null,
     persona,
     project,
