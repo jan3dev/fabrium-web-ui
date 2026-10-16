@@ -202,10 +202,12 @@ log "fabrium-agent started its sync loop at $SHA"
 cat <<EOF_NEXT
 
 NEXT STEPS
-  1. Give the agent its credentials as this user (for example ~/.claude or
-     ~/.config/opencode) and its secrets in $SECRETS_FILE, one KEY=value
-     per line. Not in $ENV_FILE: a new bundle overwrites it.
-     Then: systemctl --user restart fabrium-agent
+  1. Configure the agent. For preset opencode, set HAVEN_API_KEY, HAVEN_MODEL and
+     (optional) GH_TOKEN, then run bash $REPO_DIR/deploy/agent-vm/configure-agent.sh
+     (see "Configure an opencode agent" in deploy/README.md). For another preset,
+     give the agent its credentials as this user (for example ~/.claude) and its
+     secrets in $SECRETS_FILE, one KEY=value per line. Not in $ENV_FILE: a new
+     bundle overwrites it. Then: systemctl --user restart fabrium-agent
   2. Put the agent's instructions (AGENTS.md, skills) in $ZOOID_HOME/workforce/agents/$AGENT_NAME.
   3. Logs: journalctl --user -u fabrium-agent -f
   4. Update: run this script again with --ref <the commit of the central instance>.
