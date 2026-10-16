@@ -14,8 +14,8 @@ export {
   AGENT_NOTIFY_INSTRUCTIONS,
   ARTIFACT_DESCRIPTION,
   ARTIFACT_INSTRUCTIONS,
+  ARTIFACT_KINDS,
   HANDOFF_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
 } from './tool-text.js'
-export { ARTIFACT_KINDS } from '@zooid/core'
 export type { SpawnBinding, ZooidContextServerSpec } from './types.js'

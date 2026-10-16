@@ -1,3 +1,5 @@
+import type { ArtifactKind } from '@zooid/core'
+
 /**
  * Model-facing text shared by every Zooid tool surface — the MCP server here
  * and the native pi extension ([[ZOD080]]). One copy, so both runtimes teach
@@ -37,3 +39,9 @@ export const ARTIFACT_INSTRUCTIONS =
   'Also call it when you create or change such a file on disk and the user should look at it. ' +
   'When the user asks to change something you showed as an artifact, update the same identifier. ' +
   'Keep the chat message short: say what you made, do not repeat the artifact content in it. Short answers, explanations and snippets under ~15 lines stay in the message.'
+
+// A local value, not core's ARTIFACT_KINDS: the bin must stay free of @zooid/core
+// at runtime (tsup.config.ts). The Record fails to compile if the kinds drift.
+const KINDS: Record<ArtifactKind, true> = { html: true, svg: true, react: true, markdown: true, code: true }
+/** The artifact kinds, for the MCP and pi tool schemas. */
+export const ARTIFACT_KINDS = Object.keys(KINDS) as [ArtifactKind, ...ArtifactKind[]]

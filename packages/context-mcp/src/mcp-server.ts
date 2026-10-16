@@ -1,10 +1,11 @@
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { ARTIFACT_KINDS, type TaskActions, type TaskCallerRef, type TaskRole, type TransportContextProvider } from '@zooid/core'
+import type { TaskActions, TaskCallerRef, TaskRole, TransportContextProvider } from '@zooid/core'
 import {
   AGENT_NOTIFY_INSTRUCTIONS,
   ARTIFACT_DESCRIPTION,
   ARTIFACT_INSTRUCTIONS,
+  ARTIFACT_KINDS,
   HANDOFF_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
 } from './tool-text.js'
