@@ -41,6 +41,7 @@ deploy.log                    one line per successful deploy
 | `deploy/add-workstation.sh` | Admits an agent VM: writes its tokens and tuwunel registration, adds its users to the workforce space and its rooms, publishes its roster entry. See [Agent VM](#agent-vm-workstation). |
 | `deploy/agent-vm/prepare-image.sh` | Prepares a VM to become the agent VM image: installs Node 22, pnpm, opencode and Docker CE, builds the zooid CLI at a commit. No bundle, no service. See [Build a VM image](#build-a-vm-image). |
 | `deploy/agent-vm/provision.sh` | Runs on an agent VM made from the image: checks the bundle and the VM token, builds the zooid CLI only when `--ref` is not the image's commit, runs it as a systemd user service. Installs nothing. Idempotent; also the update path. |
+| `deploy/agent-vm/configure-agent.sh` | Runs on an agent VM after `provision.sh`, for `preset: opencode`: stores the Haven and GitHub variables in `secrets.env`, writes `opencode.json`, checks one opencode turn on Haven, configures git, restarts the agent. See [Configure an opencode agent](#configure-an-opencode-agent). |
 
 All scripts take `-h`. They never print secret values.
 
@@ -219,7 +220,7 @@ zooid: container agents, cron triggers                runtime: local ─► the 
 | Agent ID | `@<workstation>.<agent>:SERVER_NAME`, for example `@vm1.coder:fabrium.net` |
 | Roster entry (persona, project, rooms) | published by this box; the VM cannot change it |
 | Cron | `triggers:` in this box's `zooid.yaml` |
-| Agent credentials, instructions and secrets (`~/zooid/secrets.env`) | on the VM, put there by the operator |
+| Agent credentials, instructions and secrets (`~/zooid/secrets.env`) | on the VM, put there by the operator (`configure-agent.sh` for an opencode agent) |
 
 ### Admit a VM (on this box)
 
@@ -237,10 +238,11 @@ adds `@vm1` to the workforce space, and `@vm1.coder` to the space and the rooms,
 warns when one of them has a higher level. Last, it publishes the roster entry `vm1`. A new or changed
 registration restarts tuwunel: the chat is down for a few seconds for every user of the instance.
 
-Run it again to change the persona, the project or the rooms. It keeps the tokens and the bundle's
-`zooid.yaml`: keep the rooms in the VM's `zooid.yaml` equal to `--room`. If an earlier run stopped before
-tuwunel loaded the registration, the next run restarts tuwunel once. The script stops before it touches
-the registration in these cases:
+Run it again to change the persona, the project or the rooms. Give all of them on each run: it publishes
+the roster entry from its arguments, so a run without `--persona` removes the persona. It keeps the tokens
+and the bundle's `zooid.yaml`: keep the rooms in the VM's `zooid.yaml` equal to `--room`. If an earlier run
+stopped before tuwunel loaded the registration, the next run restarts tuwunel once. The script stops before
+it touches the registration in these cases:
 
 - `--agent` is not the agent of the bundle. One VM runs one agent: to change it, remove the VM first.
 - `registrations/vm1.yaml` exists, but `workstations/vm1/.env` does not. Restore `workstations/vm1/`
@@ -276,9 +278,11 @@ first (`systemctl --user stop fabrium-agent`).
    If the SSH session can drop, run it detached, for example
    `nohup setsid bash ~/fabrium-web-ui/deploy/agent-vm/provision.sh --ref <sha> >provision.log 2>&1 </dev/null &`.
    It is idempotent: run it again after an interruption.
-4. Give the agent its credentials (for example `~/.claude` or `~/.config/opencode`), its secrets in
-   `~/zooid/secrets.env` (`KEY=value` lines, mode 600; `provision.sh` creates the file empty), and its
-   instructions in `~/zooid/workforce/agents/<agent>/`. Then run `systemctl --user restart fabrium-agent`.
+4. Configure the agent. For `preset: opencode`, run `configure-agent.sh` (see
+   [Configure an opencode agent](#configure-an-opencode-agent)). For another preset, give the agent its
+   credentials (for example `~/.claude`) and its secrets in `~/zooid/secrets.env` (`KEY=value` lines, mode 600;
+   `provision.sh` creates the file empty), then run `systemctl --user restart fabrium-agent`. Put the agent's
+   instructions in `~/zooid/workforce/agents/<agent>/`.
 
 Logs: `journalctl --user -u fabrium-agent -f`. Two warnings at each start are expected:
 `m.space.child(…) failed: … 403` and `workforce roster publication failed: … 403`. The VM has power
@@ -291,6 +295,60 @@ changes a pinned tool version (Node, pnpm, opencode), build a new image: `provis
 To pin the harness version with an image, replace `runtime: local` with `runtime: docker` and add a
 `container.image` in the VM's `zooid.yaml`. This is optional and not recommended: in a container the
 agent cannot use the VM directly or start other containers.
+
+### Configure an opencode agent
+
+`deploy/agent-vm/configure-agent.sh` configures an agent with `preset: opencode`: inference on Haven, and
+GitHub access for git and `gh`. Run it on the VM as the user that runs the agent, after `provision.sh`, and
+again after a variable changes. It takes each variable from the environment, or from `~/zooid/secrets.env`
+when the environment does not set it. Then it stores the variables in `secrets.env`: the service reads only
+that file, and the agent gets the environment of the service.
+
+| Variable | Required | Use |
+|---|---|---|
+| `HAVEN_API_KEY` | yes | Haven API key (`hvn1_…`). opencode reads it from the environment |
+| `HAVEN_MODEL` | yes | A Haven model with tool calling, for example `glm-5-3`. When the model is wrong, the script lists the models on Haven |
+| `GH_TOKEN` | no | GitHub token for git and `gh`. Without it, the agent cannot push or open pull requests. Needs `gh` on the VM |
+| `GIT_USER_NAME`, `GIT_USER_EMAIL` | no | The git author. Default: the name and the noreply address of the `GH_TOKEN` account |
+
+```bash
+read -rsp 'Haven key: ' HAVEN_API_KEY; echo; export HAVEN_API_KEY
+read -rsp 'GitHub token: ' GH_TOKEN; echo; export GH_TOKEN
+HAVEN_MODEL=glm-5-3 bash ~/fabrium-web-ui/deploy/agent-vm/configure-agent.sh
+```
+
+`read -s` keeps the values off the screen and out of the shell history. When the checkout on the VM does not
+have the script, download it from a commit that has it:
+`curl -fsSL https://raw.githubusercontent.com/jan3dev/fabrium-web-ui/<sha>/deploy/agent-vm/configure-agent.sh -o configure-agent.sh`.
+The script does not change the checkout or the build.
+
+The script:
+
+1. Stops when the bundle does not use `preset: opencode` and `runtime: local`. For another preset, it prints
+   the commands for this box.
+2. Stops when `~/.config/opencode/opencode.json` sets a `model` or a `haven` or `haven-local` provider:
+   opencode merges that file with the agent's config.
+3. Writes `opencode.json` in the agent's working directory. It sets `model` and `provider.haven`; the other
+   keys stay.
+4. Runs one opencode turn with the binary, the environment files and the working directory of the service
+   (`systemd-run --user`). The model must read a file with a tool, so the turn checks the key, the model and
+   tool calling. The first turn installs the provider package and can take a few minutes. The script stores
+   the variables before this turn: after a failed turn, `secrets.env` holds the new values, and the agent
+   keeps the old ones until it restarts.
+5. With `GH_TOKEN`: checks the token, sets the git author and runs `gh auth setup-git`. git gets the token
+   from the environment at each call, so the token is only in `secrets.env`.
+6. Restarts `fabrium-agent` and waits for its sync loop.
+
+Haven limits that shape `opencode.json`:
+
+- Haven rejects request bodies above 256 KB. opencode sends the whole conversation and the tool output on
+  each turn, so `limit.context` is 64000, far below the window of the model: opencode compacts the
+  conversation first. A `413` from Haven means that a request was still too large.
+- The Haven model list does not show which models can call tools. The test turn checks it.
+- Keep the Haven balance above about $2. Below that, Haven refuses overlapping requests with HTTP `409`.
+
+The agent can read `HAVEN_API_KEY` and `GH_TOKEN`. Use a fine-grained GitHub token limited to the repos that
+the agent needs.
 
 ### Build a VM image
 
@@ -334,7 +392,8 @@ deploy/add-workstation.sh vm1 --agent echo --room '#general' --preset echo
 ```
 
 To change the preset later, delete the bundle's `workforce/zooid.yaml`, run the script again with the new
-`--preset`, and copy the bundle again. The agent name stays.
+`--preset` and the same `--room`, `--persona` and `--project`, and copy the bundle again. The agent name stays.
+The registration does not change, so tuwunel does not restart.
 
 ### Cron for a VM agent
 
