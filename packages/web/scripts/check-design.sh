@@ -25,12 +25,14 @@ fail "lucide-react imported directly; import from @/components/icons" \
   "$(src_grep "from [\"']lucide-react[\"']" | grep -v '^src/components/icons/index\.ts:')"
 fail "Desktop/Nostr dependency" "$(src_grep '@tauri-apps/|nostr-tools')"
 
-# Upstream design-system and company names, anywhere in the package. The pattern
+# Upstream design-system and company names, anywhere in the package except
+# vendored third-party bundles (public/artifact-runtime, generated). The pattern
 # is split so this script does not match itself.
 banned="aq""ua|ja""n3"
 fail "Upstream name in packages/web" "$(grep -rniE "$banned" . \
   --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=test-results \
-  --exclude-dir=storybook-static --exclude-dir=playwright-report)"
+  --exclude-dir=storybook-static --exclude-dir=playwright-report \
+  --exclude-dir=artifact-runtime)"
 
 [ "$status" -eq 0 ] && echo "check-design: ok"
 exit "$status"

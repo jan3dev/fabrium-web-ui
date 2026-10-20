@@ -9,6 +9,7 @@ import { TimelinePanel } from "./timeline-panel";
 import { useMarkRead } from "../../hooks/use-mark-read";
 import { useTyping } from "../../hooks/use-typing";
 import { useRoomKnown } from "../../hooks/use-room-known";
+import { withThread } from "@/hooks/use-artifacts";
 
 /** The room's main column: timeline and room composer. Threads open in the right pane. */
 export function RoomView() {
@@ -28,13 +29,7 @@ export function RoomView() {
 
   function openThread(id: string) {
     // A new history entry, so Back closes the thread again.
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set("thread", id);
-      next.delete("event");
-      next.delete("pane");
-      return next;
-    });
+    setSearchParams((prev) => withThread(prev, id));
   }
 
   if (!roomId) return <div>No room selected</div>;

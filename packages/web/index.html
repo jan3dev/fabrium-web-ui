@@ -2,6 +2,8 @@
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
+    <!-- Artifact previews are sandboxed srcdoc frames; this stops one navigating itself off-origin to leak data. -->
+    <meta http-equiv="Content-Security-Policy" content="frame-src 'self'" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#070708" />
     <!-- Applies the saved theme before first paint. Mirrors components/theme-provider.tsx. -->

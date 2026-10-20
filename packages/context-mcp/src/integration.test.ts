@@ -73,6 +73,7 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
     // task tool registers ([[ZOD084]] role-conditional registration).
     const list = await client.listTools()
     expect(list.tools.map((t) => t.name).sort()).toEqual([
+      'zooid_artifact',
       'zooid_get_history',
       'zooid_get_members',
       'zooid_get_recent_threads',

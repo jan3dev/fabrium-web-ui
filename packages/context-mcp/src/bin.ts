@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { buildContextMcpServer } from './mcp-server.js'
 import { callDaemon } from './daemon-socket.js'
 import type {
+  ArtifactResult,
   StartTasksOutput,
   CompleteTaskOutput,
   TaskActions,
@@ -65,6 +66,12 @@ const remoteProvider: TransportContextProvider = {
       method: 'sendMessage',
       params: input as unknown as Record<string, unknown>,
     }) as Promise<Awaited<ReturnType<TransportContextProvider['sendMessage']>>>,
+  sendArtifact: (_channelId, _threadId, input) =>
+    callDaemon(sockPath, {
+      spawnId,
+      method: 'sendArtifact',
+      params: input as unknown as Record<string, unknown>,
+    }) as Promise<ArtifactResult>,
 }
 
 const remoteTasks: TaskActions = {

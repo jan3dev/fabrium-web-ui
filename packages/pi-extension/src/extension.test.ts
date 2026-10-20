@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   AGENT_NOTIFY_INSTRUCTIONS,
+  ARTIFACT_INSTRUCTIONS,
   HANDOFF_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
 } from '@zooid/context-mcp'
@@ -39,7 +40,7 @@ describe('Pi Zooid extension', () => {
   it('registers the renamed surface plus the task and handoff tools', () => {
     const { tools } = harness()
     expect(tools.map((t) => t.name).sort()).toEqual([
-      'zooid_complete_task', 'zooid_get_history', 'zooid_get_members',
+      'zooid_artifact', 'zooid_complete_task', 'zooid_get_history', 'zooid_get_members',
       'zooid_get_recent_threads', 'zooid_get_room_info', 'zooid_get_rooms',
       'zooid_get_thread_history', 'zooid_handoff', 'zooid_send_message',
       'zooid_start_task_threads',
@@ -140,6 +141,13 @@ describe('zooid_handoff on pi ([[ZOD094]])', () => {
       properties: { agent: { type: 'string' }, prompt: { type: 'string' } },
       required: ['agent', 'prompt'],
     })
+  })
+
+  it('tells the model when to use zooid_artifact without being asked', () => {
+    const { tools } = harness()
+    const artifact = tools.find((t) => t.name === 'zooid_artifact')!
+    expect(artifact.promptGuidelines).toEqual([ARTIFACT_INSTRUCTIONS])
+    expect(ARTIFACT_INSTRUCTIONS).toMatch(/without being asked/)
   })
 
   it('carries the MCP server instructions and the end-your-turn rule in promptGuidelines', () => {

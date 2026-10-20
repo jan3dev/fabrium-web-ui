@@ -1,7 +1,9 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/messages/ui/MessageRow.tsx. Modified.
 import * as React from "react";
 
+import { ArtifactRefList } from "@/components/artifacts/artifact-refs";
 import { UserAvatar } from "@/components/user-avatar";
+import { useArtifactRoute } from "@/hooks/use-artifacts";
 import { UserProfilePopover } from "@/components/user-profile-popover";
 import {
   Tooltip,
@@ -74,6 +76,7 @@ function MessageBody({
     );
   }
   if (message.media) return <MediaMessage media={message.media} />;
+  if (message.artifactRefs) return <AnnotatedBody message={message} roomId={roomId} />;
   if (message.quote) {
     return (
       <>
@@ -90,6 +93,25 @@ function MessageBody({
     <PlainMessageBody text={message.body} roomId={roomId} />
   );
   return truncate ? <TruncatedBody>{body}</TruncatedBody> : body;
+}
+
+/** A reply carrying artifact annotations: the comment, any quote, then the annotations. */
+function AnnotatedBody({ message, roomId }: { message: TimelineMessage; roomId: string }) {
+  const route = useArtifactRoute();
+  return (
+    <>
+      {message.body ? <PlainMessageBody text={message.body} roomId={roomId} /> : null}
+      {message.quote ? <QuoteCard quote={message.quote} currentRoomId={roomId} /> : null}
+      <ArtifactRefList
+        refs={message.artifactRefs ?? []}
+        onOpen={
+          message.threadRootId
+            ? (r) => route.open(r.identifier, r.event_id, message.threadRootId)
+            : undefined
+        }
+      />
+    </>
+  );
 }
 
 /**

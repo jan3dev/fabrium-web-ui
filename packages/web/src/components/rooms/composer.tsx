@@ -1,6 +1,14 @@
 import { useState } from "react";
 import { EventStatus, type MatrixEvent, type Room } from "matrix-js-sdk";
 import { parseSlashCommand } from "@/lib/slash-commands";
+import { ArtifactRefChips } from "@/components/artifacts/artifact-refs";
+import {
+  appendArtifactRefs,
+  ARTIFACT_REFS_FIELD,
+  getArtifactRefDrafts,
+  setArtifactRefDrafts,
+  useArtifactRefDrafts,
+} from "@/lib/artifacts/refs";
 import { buildQuoteContent } from "@/lib/matrix/quote";
 import { setQuoteDraft, useQuoteDraft } from "@/lib/quote-draft-store";
 import { QuoteChip } from "./quote-chip";
@@ -35,6 +43,8 @@ export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }:
   const threadScoped = Boolean(threadRootEventId);
   const threadId = threadRootEventId ?? null;
   const quoteDraft = useQuoteDraft(roomId, threadId);
+  const refDrafts = useArtifactRefDrafts(roomId, threadId);
+  const hasRefs = refDrafts.length > 0;
 
   /**
    * Send one event. When the server rejects it, the SDK keeps a NOT_SENT local
@@ -69,7 +79,7 @@ export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }:
     setAttachments,
   }: MessageInputSubmit): Promise<void> {
     // Slash commands only apply when there's no attachment and the body starts with /
-    if (rawBody && attachments.length === 0 && !quoteDraft) {
+    if (rawBody && attachments.length === 0 && !quoteDraft && !hasRefs) {
       const slash = parseSlashCommand(rawBody, { threadScoped });
       if (slash) {
         // matrix-js-sdk auto-adds m.relates_to for m.room.message threaded
@@ -113,22 +123,33 @@ export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }:
       }
     }
 
-    if (body || quoteDraft) {
+    if (body || quoteDraft || hasRefs) {
+      // Annotations ride in `body` as plain text for the agent, before any
+      // quote fallback; the HTML would not carry them, so it is dropped.
+      const comment = appendArtifactRefs(hasRefs ? body.trim() : body, refDrafts);
       const content: Record<string, unknown> = quoteDraft
         ? buildQuoteContent({
-            comment: body,
+            comment,
             quote: quoteDraft.quote,
             senderName: quoteDraft.senderName,
             origin: window.location.origin,
           })
-        : formattedBody
+        : formattedBody && !hasRefs
           ? { msgtype: "m.text", body, format: "org.matrix.custom.html", formatted_body: formattedBody }
-          : { msgtype: "m.text", body };
+          : { msgtype: "m.text", body: comment };
+      if (hasRefs) content[ARTIFACT_REFS_FIELD] = refDrafts;
       if (mentionUserIds.length > 0) {
         content["m.mentions"] = { user_ids: mentionUserIds };
       }
       await sendEvent("m.room.message", content, { tile: true });
       if (quoteDraft) setQuoteDraft(roomId, threadId, null);
+      // Only the sent ones: the panel may have added more while this was in flight.
+      if (hasRefs)
+        setArtifactRefDrafts(
+          roomId,
+          threadId,
+          getArtifactRefDrafts(roomId, threadId).filter((r) => !refDrafts.includes(r)),
+        );
     }
   }
 
@@ -137,6 +158,10 @@ export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }:
       {quoteDraft && (
         <QuoteChip draft={quoteDraft} onRemove={() => setQuoteDraft(roomId, threadId, null)} />
       )}
+      <ArtifactRefChips
+        refs={refDrafts}
+        onRemove={(i) => setArtifactRefDrafts(roomId, threadId, refDrafts.filter((_, j) => j !== i))}
+      />
     </>
   );
 
@@ -147,7 +172,7 @@ export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }:
       className="shrink-0 px-3 pb-3"
       suggestionsClassName="left-3 right-3"
       threadScoped={threadScoped}
-      allowEmpty={Boolean(quoteDraft)}
+      allowEmpty={Boolean(quoteDraft) || hasRefs}
       uploadingId={uploadingId}
       uploadProgress={progress}
       error={error}
