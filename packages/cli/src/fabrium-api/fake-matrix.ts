@@ -253,6 +253,18 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
       if (roomId === adminRoomId) runAdminCommand(text)
       return json(200, { event_id: `$event${messages.length}` })
     }
+    const joinedMembers = /^\/_matrix\/client\/v3\/rooms\/([^/]+)\/joined_members$/.exec(path)
+    if (method === 'GET' && joinedMembers) {
+      const roomId = decodeURIComponent(joinedMembers[1]!)
+      const state = rooms.get(roomId)
+      if (!state || membershipOf(roomId, actor) !== 'join') return forbidden()
+      const joined: Record<string, object> = {}
+      for (const [k, ev] of state) {
+        const [type, stateKey] = k.split('\n')
+        if (type === 'm.room.member' && ev.content.membership === 'join') joined[stateKey!] = {}
+      }
+      return json(200, { joined })
+    }
     const full = /^\/_matrix\/client\/v3\/rooms\/([^/]+)\/state$/.exec(path)
     if (method === 'GET' && full) {
       const state = rooms.get(decodeURIComponent(full[1]!))
