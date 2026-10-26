@@ -22,7 +22,7 @@ data/matrix/config/           tuwunel.toml + registrations/zooid.yaml     (rende
 web/config.json               UI runtime config                           (rendered by deploy.sh)
 app/context-mcp/              context-mcp bundle copied out of the image  (by deploy.sh)
 workstations/<ws>/            agent VM bundle: .env with the VM tokens, workforce/zooid.yaml (by add-workstation.sh or the VM API; the VM API adds .runtime-registration)
-control-plane.key             tenant API key of the control plane, mode 600 (VM management)  ← you create
+control-plane-api-key         tenant API key of the control plane, mode 600 (VM management)  ← you create
 backups/                      backup.sh output
 deploy.log                    one line per successful deploy
 ```
@@ -126,9 +126,11 @@ deploy/restore.sh zooid-<UTC>.tar.gz   # into an empty ZOOID_HOME, then run depl
 ```
 
 The backup contains `.env`, the Matrix DB/media/config, `zooid.yaml`, `workforce/data` (minus sockets),
-`home/`, the agent VM bundles (`workstations/`), and the agent workdirs minus `node_modules`, `.pnpm-store`,
-`.cache`, attachments and any git clone (a first-level directory with `.git`). Agents lose nothing that
-matters: the chat history is in Matrix, and an agent starts a fresh session on its next message.
+`home/`, the agent VM bundles (`workstations/`), the control plane key file (when `FABRIUM_CONTROL_PLANE_KEY_FILE`
+in `.env` points under `ZOOID_HOME`; see [VM management](#vm-management-from-the-web-ui)), and the agent
+workdirs minus `node_modules`, `.pnpm-store`, `.cache`, attachments and any git clone (a first-level directory
+with `.git`). Agents lose nothing that matters: the chat history is in Matrix, and an agent starts a fresh session
+on its next message.
 
 ## Moving the current prod instance to this layout
 
@@ -495,15 +497,23 @@ The API is off unless the control plane is configured. Then every path under `/_
 | Variable | Set in | Use |
 |---|---|---|
 | `FABRIUM_CONTROL_PLANE_URL` | `.env` | Base URL of the control plane, for example `https://control.example.org`. It must be `https`; plain `http` works only for `localhost`, because the create request carries the Haven and GitHub secrets. |
-| `FABRIUM_CONTROL_PLANE_KEY_FILE` | `.env` | Absolute path of a file that holds the tenant API key (mode 600), for example `~/zooid/control-plane.key`. `ZOOID_HOME` is mounted at the same path in the daemon, so the file needs no mount of its own. The key is in a file, not in `.env`, because agents inherit the environment of the daemon. The daemon reads the file once at start. |
-| `FABRIUM_HAVEN_MODEL` | `.env` | Haven model of new VMs, for example `glm-5-3`. Without it, create answers `503`. |
+| `FABRIUM_CONTROL_PLANE_KEY_FILE` | `.env` | Absolute path of a file that holds the tenant API key and nothing else (mode 600), for example `/home/ubuntu/zooid/control-plane-api-key`. Write the whole path: neither `deploy.sh` nor compose expands `~` or `$HOME` in `.env`. `ZOOID_HOME` is mounted at the same path in the daemon, so the file needs no mount of its own, and `backup.sh` includes it when it is under `ZOOID_HOME`. The key is in a file, not in `.env`, because agents inherit the environment of the daemon. The daemon reads the file once at start. It stops when the file holds more than the key: the key is printable ASCII, with no space and no line break. |
+| `FABRIUM_HAVEN_MODEL` | `.env` | Haven model of new VMs, for example `glm-5-3`. Without it, create answers `503`. It must not have a line break, a backslash, or a leading quote: `configure-agent.sh` refuses such a value, and the daemon stops at start. |
 | `FABRIUM_VM_ROOMS` | `.env` | Rooms of new agents, comma separated. Default `#general`. The rooms must exist. Put the value in single quotes: `FABRIUM_VM_ROOMS='#general,#dev'`. |
 | `HOMESERVER_URL` | `.env` | Exists already. The bundle of each VM gets it as the public URL of the homeserver. |
 | `ZOOID_HOME` | compose | Exists already. The daemon finds `workstations/` and the registration files under it. |
 | `ZOOID_COMMIT` | image | The full commit of the image, set by `deploy.sh` at build time. A new VM checks out this commit from GitHub, so deploy a commit that is pushed. Without it, create answers `503`. |
 
-A setting that is wrong (a key file that cannot be read or is empty, a bad URL, a bad room) stops the daemon at
-start with a message that names the variable. The message never holds the key.
+On podman, buildah can reuse a cached image layer that was built with another `ZOOID_COMMIT`. After the build,
+`deploy.sh` reads `ZOOID_COMMIT` from the `fabrium-zooid` image. When it is not the commit of the checkout,
+`deploy.sh` warns and rebuilds only the zooid image without cache, and it stops if the value is still wrong. The
+first deploy that brings this check runs the old `deploy.sh` (bash keeps reading the script that it started
+with), so it can leave an image without the commit. Run `deploy/deploy.sh --no-pull` once more: the check
+repairs the image.
+
+A setting that is wrong (a key file that cannot be read, is empty, or holds more than the key; a bad URL; a bad
+room; a Haven model that the VM script refuses) stops the daemon at start with a message that names the variable.
+The message never holds the key.
 
 ### Make `@zooid` a tuwunel admin (once)
 
@@ -538,3 +548,18 @@ A failed create can be sent again with the same body. The daemon continues from 
 `register_appservice`, `whoami`, `register_user`, `join`, `roster`), with the same tokens, and sends the
 registration only when tuwunel does not know the VM token yet: tuwunel 1.9.3 refuses a second `register` of a
 loaded ID.
+
+An agent whose admission stopped before tuwunel loaded its registration is not free. `GET /agents` lists it with
+`free: false`, and a create for the existing agent answers `409`. Send the new-agent request again, with the
+same VM name and agent name: it finishes the admission. For an existing agent the daemon only asks tuwunel
+(`whoami` with the token of the bundle). It never runs the admission, because that would write the roster entry
+again without the persona and the project.
+
+The Haven key and the GitHub token must not have a line break, a backslash, or a leading quote.
+`configure-agent.sh` stores each secret as `KEY=value` in `secrets.env` and refuses such a value, so the API
+answers `400` before it creates anything.
+
+The appservice of a VM acts as every user whose name starts with `<ws>.`. Before it admits a new VM, the daemon
+refuses the name (`409`) when a member of the workforce space has such a name, or when `@<ws>.<agent>` exists
+already. It cannot see a user who is not in the workforce space. A user outside the space with a name such as
+`lima.bob` still falls under a VM named `lima`: do not name a VM like the start of such a name.

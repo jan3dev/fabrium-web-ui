@@ -8,10 +8,11 @@ import {
   type Bundle,
   type BundleFiles,
 } from './bundle.js'
-import { relay, type ControlPlane } from './control-plane.js'
+import { describeFailure, relay, type ControlPlane } from './control-plane.js'
 import { ApiError } from './errors.js'
-import { buildPayload } from './payload.js'
-import { agentsWithFree, fetchVms } from './vms.js'
+import type { MatrixConn } from './matrix.js'
+import { buildPayload, secretProblem } from './payload.js'
+import { agentsWithFree, fetchVms, liveWorkstations } from './vms.js'
 
 export interface CreateRequest {
   /** The VM name, and the workstation name of the agent. */
@@ -24,6 +25,7 @@ export interface CreateRequest {
 
 const MAX_TEXT = 200
 // A control character would split a line of the secrets file. A key never has one.
+// (A line break is also covered by secretProblem, with the wording of the VM script.)
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
 
 const bad = (error: string) => new ApiError(400, { error })
@@ -44,6 +46,9 @@ function secret(value: unknown, field: string, required: boolean): string | unde
   }
   if (typeof value !== 'string') throw bad(`${field} must be a string`)
   const trimmed = value.trim()
+  // What the VM script refuses: the API must not accept it, or the VM stops at its first boot.
+  const problem = secretProblem(trimmed, field)
+  if (problem) throw bad(problem)
   if (CONTROL_CHARS.test(trimmed)) throw bad(`${field} must not contain control characters`)
   return trimmed
 }
@@ -96,6 +101,8 @@ export interface CreateDeps {
   commit: string
   controlPlane: ControlPlane
   admission: { admitNew(agent: NewAgent): Promise<Bundle> }
+  /** For the read-only check of an existing agent. */
+  conn: MatrixConn
   workstationsDir: string
 }
 
@@ -118,11 +125,19 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
   } else {
     const listed = await fetchVms(deps.controlPlane)
     if ('failure' in listed) return listed.failure
-    const entry = agentsWithFree(await listBundles(deps.workstationsDir), listed.vms).find(
-      (e) => e.workstation === req.name,
-    )
-    const bundle = entry?.free ? await readBundle(join(deps.workstationsDir, req.name)) : null
-    if (!entry || !bundle) throw bad(`${req.name} is not a free agent`)
+    const bundles = await listBundles(deps.workstationsDir)
+    const entry = agentsWithFree(bundles, listed.vms).find((e) => e.workstation === req.name)
+    if (!entry?.free) throw bad(`${req.name} is not a free agent`)
+    // A read-only check. Running the admission again would write the roster without the persona and the project.
+    const asked = bundles.filter((b) => b.workstation === req.name)
+    const live = await liveWorkstations(deps.conn, deps.workstationsDir, asked)
+    if (!live.has(req.name)) {
+      throw new ApiError(409, {
+        error: `${req.name} is only partly admitted: send the new-agent request again`,
+      })
+    }
+    const bundle = await readBundle(join(deps.workstationsDir, req.name))
+    if (!bundle) throw bad(`${req.name} is not a free agent`)
     files = bundle
     agentId = entry.agent_id
   }
@@ -141,9 +156,19 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
     bootstrap: payload,
   })
   if (!upstream.ok) return relay(upstream)
-  const vm: unknown = await upstream.json().catch(() => null)
+  // The control plane went through with the create. If its answer is lost, the VM exists or may exist: say so,
+  // and do not report a failed create. The VM list shows the VM.
+  let vm: unknown
+  try {
+    vm = JSON.parse(await upstream.text())
+  } catch (err) {
+    console.warn(`[fabrium] create answered ${upstream.status}, but the body is unreadable: ${describeFailure(err)}`)
+  }
   if (typeof vm !== 'object' || vm === null || Array.isArray(vm)) {
-    throw new ApiError(502, { error: 'control plane sent an invalid response' })
+    throw new ApiError(502, {
+      error:
+        'the control plane answered, but the answer could not be read. The VM may exist: check the VM list',
+    })
   }
   return new Response(JSON.stringify({ ...vm, agent_id: agentId }), {
     status: upstream.status,

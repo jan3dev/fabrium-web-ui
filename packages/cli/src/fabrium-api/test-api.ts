@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MatrixClient } from '@zooid/transport-matrix'
 import { Hono } from 'hono'
-import { ensureBundle, type BundleSpec } from './bundle.js'
+import { MARKER, ensureBundle, type BundleSpec } from './bundle.js'
 import { createFakeMatrix } from './fake-matrix.js'
 import { mountFabriumApi, type FabriumApiDeps } from './index.js'
 
@@ -31,6 +31,20 @@ type Reply = Response | ((req: ControlPlaneRequest) => Response | Promise<Respon
 
 export const jsonResponse = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+
+/** An answer that sends its headers and the start of a body, then stalls until the request is aborted. */
+export const stalledResponse =
+  (status = 200) =>
+  (req: ControlPlaneRequest): Response =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('[{"id":'))
+          req.signal?.addEventListener('abort', () => controller.error(req.signal?.reason))
+        },
+      }),
+      { status, headers: { 'content-type': 'application/json' } },
+    )
 
 export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
   const fake = createFakeMatrix()
@@ -122,9 +136,19 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
         body: o.json === undefined ? undefined : JSON.stringify(o.json),
       })
     },
-    /** A bundle for `workstation`, as an earlier admission left it. */
-    bundle(workstation: string, agent: string, spec: Partial<BundleSpec> = {}) {
-      return ensureBundle(join(workstationsDir, workstation), {
+    /**
+     * A bundle for `workstation`, as an earlier admission left it: marked, and registered in the fake
+     * homeserver. `registered: false` is an admission that stopped before the registration loaded;
+     * `legacy: true` is a bundle of add-workstation.sh, which has no marker.
+     */
+    async bundle(
+      workstation: string,
+      agent: string,
+      spec: Partial<BundleSpec> = {},
+      opts: { registered?: boolean; legacy?: boolean } = {},
+    ) {
+      const dir = join(workstationsDir, workstation)
+      const bundle = await ensureBundle(dir, {
         workstation,
         agent,
         serverName: 'example.org',
@@ -133,6 +157,16 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
         rooms: ['#general'],
         ...spec,
       })
+      if (opts.legacy) rmSync(join(dir, MARKER))
+      if (opts.registered !== false) {
+        fake.registerAppservice({
+          id: workstation,
+          asToken: bundle.asToken,
+          senderLocalpart: workstation,
+          users: `@${workstation}\\..*:example\\.org`,
+        })
+      }
+      return bundle
     },
     cleanup() {
       rmSync(zooidHome, { recursive: true, force: true })

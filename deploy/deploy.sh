@@ -217,8 +217,21 @@ if [ "$NO_BUILD" -eq 0 ]; then
   if [ "$ENGINE" = "podman" ]; then
     export COMPOSE_BAKE=false DOCKER_BUILDKIT=0
   fi
-  compose build --build-arg GIT_SHA="$GIT_SHA" --build-arg ZOOID_COMMIT="$ZOOID_COMMIT" \
-    --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH"
+  BUILD_ARGS=(--build-arg GIT_SHA="$GIT_SHA" --build-arg ZOOID_COMMIT="$ZOOID_COMMIT"
+    --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH")
+  compose build "${BUILD_ARGS[@]}"
+  # buildah (podman) can reuse a cached layer of `ENV ZOOID_COMMIT=...` that an earlier build made with
+  # another value, and the daemon would then answer 503 to every create. Check the image; rebuild if it is wrong.
+  image_commit() {
+    docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "fabrium-zooid:${GIT_SHA}" |
+      sed -n 's/^ZOOID_COMMIT=//p'
+  }
+  if [ "$(image_commit)" != "$ZOOID_COMMIT" ]; then
+    warn "the zooid image has ZOOID_COMMIT '$(image_commit)', not $ZOOID_COMMIT (a cached layer): rebuilding it without cache"
+    compose build --no-cache "${BUILD_ARGS[@]}" zooid
+    [ "$(image_commit)" = "$ZOOID_COMMIT" ] ||
+      die "the zooid image still has the wrong ZOOID_COMMIT after a build without cache"
+  fi
 else
   log "--no-build: skipping image build"
 fi

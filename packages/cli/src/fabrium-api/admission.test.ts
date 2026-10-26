@@ -224,6 +224,40 @@ describe('a refusal', () => {
     expect(adminMessages()).toHaveLength(1)
   })
 
+  it('refuses a name when a member of the space has a name under it (RF2)', async () => {
+    api.fake.joinSpace('@lima.bob:example.org')
+    const err = await settle(admission().admitNew(agent))
+    expect(err).toMatchObject({ status: 409 })
+    expect(err?.body.error).toContain('@lima.bob:example.org')
+    expect(existsSync(join(api.workstationsDir, 'lima'))).toBe(false)
+    expect(adminMessages()).toHaveLength(0)
+  })
+
+  it('refuses when the agent id exists already, also outside the space', async () => {
+    api.fake.addUser(AGENT_ID)
+    const err = await settle(admission().admitNew(agent))
+    expect(err).toMatchObject({ status: 409 })
+    expect(err?.body.error).toContain(AGENT_ID)
+    expect(existsSync(join(api.workstationsDir, 'lima'))).toBe(false)
+    expect(adminMessages()).toHaveLength(0)
+  })
+
+  it.each([
+    ['a name that only starts the same way', '@limax.bob:example.org'],
+    ['a name that differs by one letter', '@lime.bob:example.org'],
+    ['a user of another server', '@lima.bob:other.org'],
+  ])('does not refuse the name for %s in the space', async (_name, user) => {
+    api.fake.joinSpace(user)
+    await expect(admission().admitNew(agent)).resolves.toMatchObject({ agentId: AGENT_ID })
+  })
+
+  it('answers 502 at bundle when the members of the space cannot be read', async () => {
+    api.fake.failOnce('GET', /joined_members/, 500)
+    const err = await settle(admission().admitNew(agent))
+    expect(err).toMatchObject({ status: 502, body: { step: 'bundle' } })
+    expect(existsSync(join(api.workstationsDir, 'lima'))).toBe(false)
+  })
+
   it.each(['ann', 'zooid'])('refuses a name that is already a Matrix user: %s (RF2)', async (name) => {
     const err = await settle(admission().admitNew({ workstation: name, agent: 'echo' }))
     expect(err).toMatchObject({ status: 409 })

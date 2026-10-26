@@ -23,6 +23,17 @@ export interface PayloadInput {
 
 export const FULL_COMMIT_RE = /^[0-9a-f]{40}$/
 
+// configure-agent.sh stores each secret as KEY=value in secrets.env, which systemd reads. It refuses a value
+// with a line break, a backslash, or a leading quote (the `for key in $VARS` loop of deploy/agent-vm/configure-agent.sh).
+const VM_REFUSES = /[\n\r\\]|^["']/
+
+/** Why the VM script would refuse this secret, in the words of the script, or undefined. `name` is the field or variable. */
+export function secretProblem(value: string, name: string): string | undefined {
+  return VM_REFUSES.test(value)
+    ? `${name} has a line break, a backslash or a leading quote: secrets.env cannot hold it as KEY=value`
+    : undefined
+}
+
 const ZOOID_DIR = '/home/ubuntu/zooid'
 const SECRETS_PATH = '/run/fabrium-agent-secrets.env'
 

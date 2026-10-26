@@ -2951,6 +2951,9 @@ describe('inbound logging', () => {
     '!admin appservices register\n```\nas_token: secret-as-token\n```',
     '  !admin users create-user bob secret-password',
     '\\!admin appservices register\n```\nas_token: secret-as-token\n```',
+    // tuwunel runs a message that starts with the mention of its server user as a command too.
+    '@conduit:example.com appservices register\n```\nas_token: secret-as-token\n```',
+    '  @conduit:example.com: users create-user bob secret-password',
   ])('does not log the body of an admin command: %j', async (body) => {
     const out = await logged(body)
     expect(out).toContain('inbound msg in !admins:example.com from @zooid:example.com')
@@ -2960,4 +2963,11 @@ describe('inbound logging', () => {
   it('still logs a message that only mentions !admin', async () => {
     expect(await logged('how do I use !admin here?')).toContain('how do I use !admin here?')
   })
+
+  it.each(['@architect:example.com please review this', '@conduit-fan:example.com hello'])(
+    'still logs a message that starts with another mention: %j',
+    async (body) => {
+      expect(await logged(body)).toContain(body)
+    },
+  )
 })

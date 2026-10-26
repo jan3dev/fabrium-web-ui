@@ -1,7 +1,10 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { COMMIT, createTestApi, jsonResponse } from './test-api.js'
+import { parseCreateRequest } from './create.js'
+import type { ApiError } from './errors.js'
+import { COMMIT, createTestApi, jsonResponse, stalledResponse } from './test-api.js'
 
 const VM = {
   id: 'i-0123456789abcdef0',
@@ -95,6 +98,11 @@ describe('validation', () => {
     ['a Haven key with a newline inside (RF5)', { haven_api_key: 'a\nb' }],
     ['a GitHub token that is not a string', { github_token: 5 }],
     ['a GitHub token with a NUL (RF5)', { github_token: 'a\u0000b' }],
+    ['a Haven key with a backslash', { haven_api_key: 'abc\\def' }],
+    ['a Haven key that starts with a double quote', { haven_api_key: '"hvn1_abc"' }],
+    ['a Haven key that starts with a single quote', { haven_api_key: "'hvn1_abc'" }],
+    ['a GitHub token with a backslash', { github_token: 'abc\\def' }],
+    ['a GitHub token that starts with a quote', { github_token: '"ghp_abc' }],
     ['an instance type that is not a string', { instance_type: 5 }],
   ])('answers 400 for %s, without a secret in the message', async (_name, over) => {
     setup()
@@ -118,6 +126,71 @@ describe('validation', () => {
     expect(res.status).toBe(400)
     expect(await res.text()).not.toContain(HAVEN)
   })
+})
+
+// configure-agent.sh stores each secret as KEY=value in secrets.env and refuses what that file cannot hold.
+// The API must refuse the same values, or the VM stops at its first boot. This runs the check of the script itself.
+describe('secrets that the VM script refuses', () => {
+  const script = readFileSync(
+    new URL('../../../../deploy/agent-vm/configure-agent.sh', import.meta.url),
+    'utf8',
+  )
+  const block = /for key in \$VARS; do\n {2}case "\$\{!key\}" in[\s\S]*?\n {2}esac\ndone\n/.exec(script)?.[0]
+  const vmVerdict = (value: string): string =>
+    execFileSync(
+      'bash',
+      ['-c', `die() { printf 'REJECT %s' "$*"; exit 0; }\nVARS=SECRET\nSECRET="$1"\n${block}printf ACCEPT`, '_', value],
+      { encoding: 'utf8' },
+    )
+  const apiVerdict = (field: string, value: string): string => {
+    try {
+      parseCreateRequest({
+        name: 'lima',
+        agent: { mode: 'new', name: 'echo' },
+        haven_api_key: 'hvn1_abc',
+        github_token: undefined,
+        [field]: value,
+      })
+      return 'ACCEPT'
+    } catch (err) {
+      return `REJECT ${(err as ApiError).body.error}`
+    }
+  }
+
+  it('finds the check in the script', () => {
+    expect(block).toBeDefined()
+    expect(vmVerdict('hvn1_abc')).toBe('ACCEPT')
+    expect(vmVerdict('abc\\def')).toMatch(/^REJECT SECRET has a line break, a backslash or a leading quote/)
+  })
+
+  it.each(['haven_api_key', 'github_token'])(
+    'refuses with the wording of the script, for %s',
+    (field) => {
+      for (const value of ['abc\\def', '"hvn1_abc"', "'hvn1_abc'", 'a\nb', 'a\rb', '\\']) {
+        const script = vmVerdict(value).replace('SECRET', field)
+        expect(script).toMatch(/^REJECT /)
+        expect(apiVerdict(field, value)).toBe(script)
+      }
+    },
+  )
+
+  it.each(['hvn1_abc', 'ab"cd', "ab'cd", 'ab cd', 'a$b`c`', 'ghp_0123456789'])(
+    'accepts %j, as the script does',
+    (value) => {
+      expect(vmVerdict(value)).toBe('ACCEPT')
+      expect(apiVerdict('haven_api_key', value)).toBe('ACCEPT')
+    },
+  )
+
+  it.each(['"', "'", '\\', 'a\\', ' "x', '\t"x'])(
+    'never accepts %j when the script refuses the value that the API would send',
+    (value) => {
+      // The API trims a secret first, so the VM gets the trimmed value.
+      if (vmVerdict(value.trim()).startsWith('REJECT')) {
+        expect(apiVerdict('haven_api_key', value)).toMatch(/^REJECT /)
+      }
+    },
+  )
 })
 
 describe('a new agent', () => {
@@ -205,6 +278,42 @@ describe('a new agent', () => {
     ])
   })
 
+  describe('when the create went through but its answer is lost', () => {
+    const lost = 'the control plane answered, but the answer could not be read. The VM may exist: check the VM list'
+
+    it('does not say that the create failed when the body stalls', async () => {
+      setup({ controlPlaneTimeoutMs: 30 })
+      api.controlPlane.on('POST', '/v1/vms', stalledResponse(201))
+      const res = await create(body())
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: lost })
+    })
+
+    it('says the same when the body is not JSON', async () => {
+      setup()
+      api.controlPlane.on('POST', '/v1/vms', new Response('<html>', { status: 201 }))
+      const res = await create(body())
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: lost })
+    })
+
+    it('keeps the identity free for the next try, like any control plane failure', async () => {
+      setup({ controlPlaneTimeoutMs: 30 })
+      api.controlPlane.on('POST', '/v1/vms', stalledResponse(201))
+      await create(body())
+      const agents = (await (await api.request('GET', '/agents')).json()) as { free: boolean }[]
+      expect(agents.map((a) => a.free)).toEqual([true])
+    })
+
+    it('answers 502 control plane unreachable when an error answer stalls', async () => {
+      setup({ controlPlaneTimeoutMs: 30 })
+      api.controlPlane.on('POST', '/v1/vms', stalledResponse(409))
+      const res = await create(body())
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: 'control plane unreachable' })
+    })
+  })
+
   it('relays a control plane answer that is not JSON (413 text)', async () => {
     setup()
     api.controlPlane.on(
@@ -262,6 +371,42 @@ describe('an existing agent', () => {
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({ error: 'lima is not a free agent' })
     expect(api.controlPlane.requests.filter((r) => r.method === 'POST')).toEqual([])
+  })
+
+  it('answers 409 for an agent whose admission stopped, and sends nothing', async () => {
+    setup()
+    await api.bundle('lima', 'echo', {}, { registered: false })
+    const seen = api.fake.calls.length
+    const res = await create(existing())
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({
+      error: 'lima is only partly admitted: send the new-agent request again',
+    })
+    expect(api.controlPlane.requests.filter((r) => r.method === 'POST')).toEqual([])
+    // A read-only check: admission is not run again, which would reset the persona and the project.
+    expect(api.fake.calls.slice(seen).filter((c) => c.method !== 'GET')).toEqual([])
+    expect(api.fake.messages).toEqual([])
+  })
+
+  it('takes the agent once a new-agent request has finished its admission', async () => {
+    setup({ whoamiTimeoutMs: 60, pollIntervalMs: 5 })
+    const free = async () =>
+      ((await (await api.request('GET', '/agents')).json()) as { free: boolean }[]).map((a) => a.free)
+    api.fake.knobs.adminCommandWorks = false
+    expect((await create(body())).status).toBe(502)
+    expect(await free()).toEqual([false])
+    expect((await create(existing())).status).toBe(409)
+
+    api.fake.knobs.adminCommandWorks = true
+    expect((await create(body())).status).toBe(201)
+    expect(await free()).toEqual([true])
+    expect((await create(existing())).status).toBe(201)
+  })
+
+  it('does not ask tuwunel about a bundle of add-workstation.sh', async () => {
+    setup()
+    await api.bundle('lima', 'echo', {}, { legacy: true, registered: false })
+    expect((await create(existing())).status).toBe(201)
   })
 
   it('passes a failure of the VM list through and creates nothing', async () => {

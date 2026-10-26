@@ -111,6 +111,22 @@ export function createAdmission(deps: AdmissionDeps): { admitNew(agent: NewAgent
     if (!(await usernameAvailable(deps.conn, deps.asToken, ws))) {
       throw conflict(`@${ws}:${deps.serverName} is already a Matrix user; choose another name`)
     }
+    // The namespace of the new appservice is `@<ws>.*`: it acts as every user there. So the agent
+    // must be new, and no member of the workforce space may be under that prefix. The check sees the
+    // users of the space only: a user outside it with such a name is not found (deploy/README.md).
+    const agentId = `@${ws}.${a.agent}:${deps.serverName}`
+    if (!(await usernameAvailable(deps.conn, deps.asToken, `${ws}.${a.agent}`))) {
+      throw conflict(`${agentId} is already a Matrix user; choose another name`)
+    }
+    const { joined } = await deps.client.getJoinedMembers(requireSpace(), deps.asUserId)
+    const captured = Object.keys(joined).find(
+      (id) => id.startsWith(`@${ws}.`) && id.endsWith(`:${deps.serverName}`),
+    )
+    if (captured) {
+      throw conflict(
+        `${captured} is in the workforce space: a VM named ${ws} would act as that user. Choose another name`,
+      )
+    }
     return false
   }
 

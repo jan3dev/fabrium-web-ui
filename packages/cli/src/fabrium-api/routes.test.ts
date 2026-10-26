@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CONTROL_PLANE_KEY, createTestApi, jsonResponse } from './test-api.js'
+import { CONTROL_PLANE_KEY, createTestApi, jsonResponse, stalledResponse } from './test-api.js'
 
 const VM_ID = 'i-0123456789abcdef0'
 const vm = (name: string, extra: Record<string, unknown> = {}) => ({
@@ -153,6 +153,27 @@ describe('control plane errors', () => {
   })
 })
 
+describe('a control plane that stalls after its headers', () => {
+  it.each([
+    ['GET', '/vms', '/v1/vms'],
+    ['GET', '/instance-types', '/v1/instance-types'],
+    ['GET', '/agents', '/v1/vms'],
+    ['POST', `/vms/${VM_ID}/stop`, `/v1/vms/${VM_ID}/stop`],
+    ['DELETE', `/vms/${VM_ID}`, `/v1/vms/${VM_ID}`],
+  ])('answers 502 control plane unreachable for %s %s, not 500', async (method, path, upstream) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const slow = createTestApi({ controlPlaneTimeoutMs: 30 })
+    try {
+      slow.controlPlane.on(method, upstream, stalledResponse())
+      const res = await slow.request(method, path)
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: 'control plane unreachable' })
+    } finally {
+      slow.cleanup()
+    }
+  })
+})
+
 describe('proxy routes', () => {
   it('GET /instance-types returns the list of the control plane', async () => {
     const types = [{ name: 't3a.medium', vcpus: 2, memory_mib: 4096, sev_snp: false, default: true }]
@@ -210,5 +231,39 @@ describe('GET /agents', () => {
     const res = await api.request('GET', '/agents')
     expect(res.status).toBe(502)
     expect(await res.json()).toEqual({ error: 'ec2 failed' })
+  })
+
+  const whoamiCalls = () =>
+    api.fake.calls.filter((c) => c.path.startsWith('/_matrix/client/v3/account/whoami')).length
+
+  it('lists an agent as not free when its admission stopped before tuwunel loaded the registration', async () => {
+    await api.bundle('half', 'amy', {}, { registered: false })
+    await api.bundle('whole', 'bob')
+    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
+    const res = await api.request('GET', '/agents')
+    expect(await res.json()).toEqual([
+      expect.objectContaining({ workstation: 'half', preset: 'opencode', free: false }),
+      expect.objectContaining({ workstation: 'whole', preset: 'opencode', free: true }),
+    ])
+  })
+
+  it('asks tuwunel only about the bundles that the VM API made', async () => {
+    await api.bundle('one', 'amy')
+    await api.bundle('two', 'bob')
+    await api.bundle('legacy', 'cat', {}, { legacy: true })
+    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
+    const before = whoamiCalls()
+    const res = await api.request('GET', '/agents')
+    expect((await res.json()).map((a: { free: boolean }) => a.free)).toEqual([true, true, true])
+    expect(whoamiCalls() - before).toBe(2)
+  })
+
+  it('does not list an agent as free when tuwunel answers an error to whoami', async () => {
+    await api.bundle('lima', 'amy')
+    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
+    api.fake.failOnce('GET', /account\/whoami/, 500)
+    const res = await api.request('GET', '/agents')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual([expect.objectContaining({ workstation: 'lima', free: false })])
   })
 })

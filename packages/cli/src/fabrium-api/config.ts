@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { secretProblem } from './payload.js'
 
 export interface FabriumApiConfig {
   /** Base URL of the control plane, without a trailing slash. */
@@ -18,6 +19,7 @@ export interface FabriumApiConfig {
 
 // The rules of deploy/add-workstation.sh for --room.
 const ROOM_RE = /^[#!][^\s'",\\]+$/
+const KEY_RE = /^[\x21-\x7e]+$/
 // The URL goes into the bundle `.env` as it is: no whitespace, quote, `$`, or backtick.
 const SAFE_URL_RE = /^https?:\/\/[^\s'"\\$`]+$/
 
@@ -75,11 +77,23 @@ export function loadFabriumApiConfig(
     throw new Error(`FABRIUM_CONTROL_PLANE_KEY_FILE: cannot read ${keyFile}: ${(err as Error).message}`)
   }
   if (!key) throw new Error(`FABRIUM_CONTROL_PLANE_KEY_FILE: ${keyFile} is empty`)
+  // The key goes into an Authorization header: anything but printable ASCII breaks it, and
+  // Node puts the whole header value into the message of that error.
+  if (!KEY_RE.test(key)) {
+    throw new Error(
+      `FABRIUM_CONTROL_PLANE_KEY_FILE: ${keyFile} must hold the key only: printable ASCII, with no space and no line break`,
+    )
+  }
+
+  // The model goes into the same secrets file as the Haven key: the VM script refuses the same values.
+  const havenModel = env.FABRIUM_HAVEN_MODEL?.trim() || undefined
+  const modelProblem = havenModel && secretProblem(havenModel, 'FABRIUM_HAVEN_MODEL')
+  if (modelProblem) throw new Error(modelProblem)
 
   return {
     controlPlaneUrl: url.replace(/\/+$/, ''),
     controlPlaneKey: key,
-    havenModel: env.FABRIUM_HAVEN_MODEL?.trim() || undefined,
+    havenModel,
     vmRooms: rooms.length > 0 ? rooms : ['#general'],
     zooidCommit: env.ZOOID_COMMIT?.trim() || undefined,
     homeserverUrl,

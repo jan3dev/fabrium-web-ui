@@ -75,12 +75,7 @@ describe('shellQuote', () => {
     expect(shellQuote("a'b")).toBe("'a'\\''b'")
   })
 
-  it.each([
-    `it's $HOME "x" \`id\` \\ end`,
-    'line one\nline two',
-    "'",
-    '',
-  ])('survives sourcing in bash: %j', (value) => {
+  const sourced = (value: string, name: 'HAVEN_API_KEY' | 'GH_TOKEN') => {
     const dir = mkdtempSync(join(tmpdir(), 'fabrium-payload-'))
     try {
       const file = join(dir, 'secrets.env')
@@ -88,16 +83,32 @@ describe('shellQuote', () => {
         file,
         buildPayload({ ...input, havenApiKey: value, githubToken: value }).files[2]!.content,
       )
-      const read = (name: string) =>
-        execFileSync('bash', ['-c', `set -a; . "$0"; set +a; printf %s "$${name}"`, file], {
-          encoding: 'utf8',
-        })
-      expect(read('HAVEN_API_KEY')).toBe(value)
-      expect(read('GH_TOKEN')).toBe(value)
+      return execFileSync('bash', ['-c', `set -a; . "$0"; set +a; printf %s "$${name}"`, file], {
+        encoding: 'utf8',
+      })
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
-  })
+  }
+
+  // Values that the API accepts (create.test.ts): no backslash, no line break, no leading quote.
+  it.each([`it's $HOME "x" \`id\` end`, "ab'cd", 'ab cd', 'ghp_0123456789'])(
+    'survives sourcing in bash: %j',
+    (value) => {
+      expect(sourced(value, 'HAVEN_API_KEY')).toBe(value)
+      expect(sourced(value, 'GH_TOKEN')).toBe(value)
+    },
+  )
+
+  // The API refuses these before they get here, because the VM script refuses them. If validation ever
+  // misses one, the file must still be safe to source: no shell code can run from a secret.
+  it.each([`it's $HOME "x" \`id\` \\ end`, 'line one\nline two', "'", ''])(
+    'is still safe to source when validation is bypassed: %j',
+    (value) => {
+      expect(sourced(value, 'HAVEN_API_KEY')).toBe(value)
+      expect(sourced(value, 'GH_TOKEN')).toBe(value)
+    },
+  )
 })
 
 describe('FULL_COMMIT_RE', () => {

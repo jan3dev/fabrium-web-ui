@@ -42,6 +42,14 @@ export interface FakeMatrix {
   }
   /** A new OpenID access token for `userId`. */
   openIdToken(userId: string): string
+  /** Load an appservice, as `!admin appservices register` does: its token answers whoami as `@<senderLocalpart>`. */
+  registerAppservice(registration: {
+    id: string
+    asToken: string
+    senderLocalpart: string
+    /** Regex of the users it owns. */
+    users: string
+  }): void
   addUser(userId: string): void
   userExists(userId: string): boolean
   /** A room that `@zooid` has joined. `alias` gets the server name when it has none. */
@@ -143,13 +151,27 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
       sender_localpart: string
       namespaces: { users: { regex: string }[] }
     }
-    // tuwunel 1.9.3 refuses a loaded ID: "Duplicate id".
-    if ([...appservices.values()].some((a) => a.id === registration.id)) return
-    const sender = `@${registration.sender_localpart}:${serverName}`
-    appservices.set(registration.as_token, {
+    registerAppservice({
       id: registration.id,
+      asToken: registration.as_token,
+      senderLocalpart: registration.sender_localpart,
+      users: registration.namespaces.users[0]!.regex,
+    })
+  }
+
+  function registerAppservice(r: {
+    id: string
+    asToken: string
+    senderLocalpart: string
+    users: string
+  }): void {
+    // tuwunel 1.9.3 refuses a loaded ID: "Duplicate id".
+    if ([...appservices.values()].some((a) => a.id === r.id)) return
+    const sender = `@${r.senderLocalpart}:${serverName}`
+    appservices.set(r.asToken, {
+      id: r.id,
       sender,
-      users: new RegExp(registration.namespaces.users[0]!.regex, 'i'),
+      users: new RegExp(r.users, 'i'),
       delayPolls: knobs.registerAfterWhoamiPolls,
     })
     users.add(sender)
@@ -231,6 +253,18 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
       if (roomId === adminRoomId) runAdminCommand(text)
       return json(200, { event_id: `$event${messages.length}` })
     }
+    const joinedMembers = /^\/_matrix\/client\/v3\/rooms\/([^/]+)\/joined_members$/.exec(path)
+    if (method === 'GET' && joinedMembers) {
+      const roomId = decodeURIComponent(joinedMembers[1]!)
+      const state = rooms.get(roomId)
+      if (!state || membershipOf(roomId, actor) !== 'join') return forbidden()
+      const joined: Record<string, object> = {}
+      for (const [k, ev] of state) {
+        const [type, stateKey] = k.split('\n')
+        if (type === 'm.room.member' && ev.content.membership === 'join') joined[stateKey!] = {}
+      }
+      return json(200, { joined })
+    }
     const full = /^\/_matrix\/client\/v3\/rooms\/([^/]+)\/state$/.exec(path)
     if (method === 'GET' && full) {
       const state = rooms.get(decodeURIComponent(full[1]!))
@@ -293,6 +327,7 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
       openIdTokens.set(token, userId)
       return token
     },
+    registerAppservice,
     addUser: (userId) => void users.add(userId),
     userExists: (userId) => users.has(userId),
     addRoom,
