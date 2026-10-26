@@ -74,6 +74,13 @@ function renderRail(
   return onSelect;
 }
 
+/** Every rail button marked current, by label. */
+const currentButtons = () =>
+  within(screen.getByRole("navigation", { name: "Workspaces" }))
+    .getAllByRole("button")
+    .filter((b) => b.getAttribute("aria-current") === "true")
+    .map((b) => b.getAttribute("aria-label"));
+
 describe("<WorkspaceRail>", () => {
   it("lists Home and each top-level workspace, not projects", () => {
     seed();
@@ -129,14 +136,31 @@ describe("<WorkspaceRail>", () => {
     expect(open).toHaveBeenCalledTimes(1);
   });
 
-  it("marks the VM button current while the VM page is open", () => {
-    seed();
-    renderRail({ kind: "home" }, vi.fn(), { active: true, onSelect: vi.fn() });
-    expect(screen.getByRole("button", { name: "VM" })).toHaveAttribute(
-      "aria-current",
-      "true",
-    );
-  });
+  it.each([
+    ["Home", { kind: "home" } as Scope],
+    ["a workspace", { kind: "space", spaceId: acme } as Scope],
+  ])(
+    "marks only the VM button current while the VM page is open, over %s",
+    (_, scope) => {
+      seed();
+      renderRail(scope, vi.fn(), { active: true, onSelect: vi.fn() });
+      expect(currentButtons()).toEqual(["VM"]);
+    },
+  );
+
+  it.each([
+    ["Home", { kind: "home" } as Scope, "Home"],
+    ["a workspace", { kind: "space", spaceId: acme } as Scope, /^Acme Corp/],
+  ])(
+    "marks the scope, not VM, current while the VM page is closed: %s",
+    (_, scope, label) => {
+      seed();
+      renderRail(scope, vi.fn(), { active: false, onSelect: vi.fn() });
+      expect(currentButtons()).toEqual([
+        typeof label === "string" ? label : expect.stringMatching(label),
+      ]);
+    },
+  );
 
   it("badges mentions and dots plain unread", () => {
     seed();

@@ -182,7 +182,8 @@ function WorkspaceButton({
  * Vertical rail of workspaces on the far left: Home (every room) plus one
  * button per top-level space. Shows a mention badge or unread dot per
  * workspace; right-click marks a workspace read. Below Home, a VM button
- * opens the VM page for people who can manage VMs.
+ * opens the VM page for people who can manage VMs. One button is current at a
+ * time: VM while its page is open, otherwise the button of `scope`.
  */
 export function WorkspaceRail({
   scope,
@@ -197,6 +198,7 @@ export function WorkspaceRail({
   className?: string;
 }) {
   const workspaces = useWorkspaces();
+  const scopeCurrent = !vm?.active;
 
   return (
     <nav
@@ -208,7 +210,7 @@ export function WorkspaceRail({
     >
       <RailButton
         label="Home"
-        isActive={scope.kind === "home"}
+        isActive={scopeCurrent && scope.kind === "home"}
         onSelect={() => onSelect({ kind: "home" })}
       >
         <HomeIcon aria-hidden />
@@ -225,7 +227,11 @@ export function WorkspaceRail({
         <WorkspaceButton
           key={space.roomId}
           space={space}
-          isActive={scope.kind === "space" && scope.spaceId === space.roomId}
+          isActive={
+            scopeCurrent &&
+            scope.kind === "space" &&
+            scope.spaceId === space.roomId
+          }
           onSelect={() => onSelect({ kind: "space", spaceId: space.roomId })}
         />
       ))}

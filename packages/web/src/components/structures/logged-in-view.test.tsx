@@ -23,6 +23,30 @@ const activeWorkspace = () => {
   return el?.getAttribute("aria-label") ?? "";
 };
 
+/** Every rail button marked current, by label. */
+const currentInRail = () =>
+  Array.from(
+    document.querySelectorAll(
+      'nav[aria-label="Workspaces"] [aria-current="true"]',
+    ),
+    (el) => el.getAttribute("aria-label"),
+  );
+
+/** A joined space, as the sync stub describes it. */
+const space = (roomId: string, name: string) => ({
+  roomId,
+  myUserId: me,
+  state: [
+    {
+      type: "m.room.create",
+      sender: me,
+      stateKey: "",
+      content: { type: "m.space" },
+    },
+    { type: "m.room.name", sender: me, stateKey: "", content: { name } },
+  ],
+});
+
 describe("<LoggedInView /> sidebar polish", () => {
   beforeEach(() => {
     relaxUnhandled();
@@ -334,19 +358,6 @@ describe("<LoggedInView /> sidebar polish", () => {
 });
 
 describe("<LoggedInView /> workforce space from runtime config", () => {
-  const space = (roomId: string, name: string) => ({
-    roomId,
-    myUserId: me,
-    state: [
-      {
-        type: "m.room.create",
-        sender: me,
-        stateKey: "",
-        content: { type: "m.space" },
-      },
-      { type: "m.room.name", sender: me, stateKey: "", content: { name } },
-    ],
-  });
   const aliases: Record<string, string> = {
     "#dev:h.example": "!dev:h.example",
     "#ops:h.example": "!ops:h.example",
@@ -491,13 +502,17 @@ describe("<LoggedInView /> VM button", () => {
     localStorage.clear();
   });
 
-  it("shows the VM button when the API grants access, and opens the VM page", async () => {
+  /** The API says this user is an admin, and lists one VM. */
+  const grantAccess = () =>
     mswServer.use(
       http.get("/_fabrium/v1/access", () =>
         HttpResponse.json({ user_id: me, role: "admin" }),
       ),
       http.get("/_fabrium/v1/vms", () => HttpResponse.json([makeVm()])),
     );
+
+  it("shows the VM button when the API grants access, and opens the VM page", async () => {
+    grantAccess();
     const user = userEvent.setup();
     render(<App config={{ homeserverUrl: HS }} />);
 
@@ -511,6 +526,42 @@ describe("<LoggedInView /> VM button", () => {
       "aria-current",
       "true",
     );
+  });
+
+  it("marks only VM current on the VM page, and Home leaves the page", async () => {
+    grantAccess();
+    const user = userEvent.setup();
+    render(<App config={{ homeserverUrl: HS }} />);
+
+    await user.click(await screen.findByRole("button", { name: "VM" }));
+    expect(await screen.findByRole("heading", { name: "VMs" })).toBeInTheDocument();
+    expect(currentInRail()).toEqual(["VM"]);
+
+    await user.click(screen.getByRole("button", { name: "Home" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "VMs" })).toBeNull(),
+    );
+    expect(currentInRail()).toEqual(["Home"]);
+  });
+
+  it("leaves the VM page through a workspace, which becomes the current one", async () => {
+    stubSyncWithRooms(HS, [
+      space("!ops:h.example", "Ops"),
+      space("!eng:h.example", "Eng"),
+    ]);
+    grantAccess();
+    const user = userEvent.setup();
+    render(<App config={{ homeserverUrl: HS }} />);
+
+    await user.click(await screen.findByRole("button", { name: "VM" }));
+    expect(await screen.findByRole("heading", { name: "VMs" })).toBeInTheDocument();
+    expect(currentInRail()).toEqual(["VM"]);
+
+    await user.click(await screen.findByRole("button", { name: /^Eng/ }));
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "VMs" })).toBeNull(),
+    );
+    expect(currentInRail()).toEqual([expect.stringMatching(/^Eng/)]);
   });
 
   it.each([

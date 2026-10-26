@@ -198,7 +198,11 @@ export function LoggedInView({
   const rail = (
     <WorkspaceRail
       scope={activeScope}
-      onSelect={setScope}
+      onSelect={(next) => {
+        setScope(next);
+        // Home and the workspaces are other destinations than the VM page.
+        if (vmPageOpen) navigate("/");
+      }}
       vm={
         canManageVms
           ? { active: vmPageOpen, onSelect: () => navigate("/vm") }
