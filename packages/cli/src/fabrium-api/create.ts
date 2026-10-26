@@ -99,6 +99,8 @@ export interface CreateDeps {
   havenModel: string
   /** Full commit of the running image. */
   commit: string
+  /** The caller: the new agent greets them in a direct message once it works. */
+  creator: string
   controlPlane: ControlPlane
   admission: { admitNew(agent: NewAgent): Promise<Bundle> }
   /** For the read-only check of an existing agent. */
@@ -149,6 +151,7 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
     havenModel: deps.havenModel,
     githubToken: req.githubToken,
     commit: deps.commit,
+    creator: deps.creator,
   })
   const upstream = await deps.controlPlane.request('POST', '/v1/vms', {
     name: req.name,

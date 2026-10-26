@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseCreateRequest } from './create.js'
 import type { ApiError } from './errors.js'
-import { COMMIT, createTestApi, jsonResponse, stalledResponse } from './test-api.js'
+import { ADMIN, COMMIT, createTestApi, jsonResponse, stalledResponse } from './test-api.js'
 
 const VM = {
   id: 'i-0123456789abcdef0',
@@ -215,9 +215,11 @@ describe('a new agent', () => {
       readFileSync(join(api.workstationsDir, 'lima', 'workforce', 'zooid.yaml'), 'utf8'),
     )
     expect(secrets?.content).toBe(
-      `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='${GITHUB}'\n`,
+      `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='${GITHUB}'\nFABRIUM_CREATOR='${ADMIN}'\n`,
     )
     expect(sent.bootstrap.script).toContain(`provision.sh --ref ${COMMIT}'`)
+    // The caller is the creator: the new agent greets them in a direct message once it works.
+    expect(sent.bootstrap.script).toContain('greet-creator.sh')
   })
 
   it('omits instance_type and GH_TOKEN when they are absent or empty', async () => {
@@ -225,14 +227,16 @@ describe('a new agent', () => {
     await create(body({ instance_type: undefined, github_token: '' }))
     const sent = upstreamCreate()
     expect(Object.keys(sent).sort()).toEqual(['bootstrap', 'name'])
-    expect(sent.bootstrap.files[2]?.content).toBe(`HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\n`)
+    expect(sent.bootstrap.files[2]?.content).toBe(
+      `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nFABRIUM_CREATOR='${ADMIN}'\n`,
+    )
   })
 
   it('trims whitespace around the secrets', async () => {
     setup()
     await create(body({ haven_api_key: `  ${HAVEN}\n`, github_token: ` ${GITHUB} ` }))
     expect(upstreamCreate().bootstrap.files[2]?.content).toBe(
-      `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='${GITHUB}'\n`,
+      `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='${GITHUB}'\nFABRIUM_CREATOR='${ADMIN}'\n`,
     )
   })
 
