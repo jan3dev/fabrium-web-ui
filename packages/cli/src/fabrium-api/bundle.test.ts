@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 import {
   MARKER,
+  bundleAgent,
   ensureBundle,
   listBundles,
   readBundle,
@@ -204,6 +205,14 @@ describe('readBundle and listBundles', () => {
       ['a-one', '@a-one.amy:example.org'],
       ['b-two', '@b-two.bob:example.org'],
     ])
+  })
+
+  it('reads the agent of a .env, also from a bundle without zooid.yaml', async () => {
+    const dir = join(root, 'lima')
+    await ensureBundle(dir, spec)
+    rmSync(join(dir, 'workforce', 'zooid.yaml'))
+    expect(await bundleAgent(dir)).toBe('echo')
+    expect(await bundleAgent(join(root, 'missing'))).toBeUndefined()
   })
 
   it('lists nothing when the directory does not exist', async () => {

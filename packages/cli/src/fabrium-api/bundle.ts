@@ -179,6 +179,15 @@ function envVar(env: string, key: string): string | undefined {
   return value || undefined
 }
 
+/** `AGENT_NAME` of the `.env` in `dir`, if there is one. */
+export async function bundleAgent(dir: string): Promise<string | undefined> {
+  try {
+    return envVar(await readFile(join(dir, '.env'), 'utf8'), 'AGENT_NAME')
+  } catch {
+    return undefined
+  }
+}
+
 function presetOf(yaml: string, agent: string): string | null {
   try {
     const doc = parse(yaml) as { agents?: Record<string, { acp?: { preset?: unknown } }> } | null
