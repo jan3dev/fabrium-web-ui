@@ -554,11 +554,15 @@ A failed create can be sent again with the same body. The daemon continues from 
 registration only when tuwunel does not know the VM token yet: tuwunel 1.9.3 refuses a second `register` of a
 loaded ID.
 
-An agent whose admission stopped before tuwunel loaded its registration is not free. `GET /agents` lists it with
-`free: false`, and a create for the existing agent answers `409`. Send the new-agent request again, with the
-same VM name and agent name: it finishes the admission. For an existing agent the daemon only asks tuwunel
-(`whoami` with the token of the bundle). It never runs the admission, because that would write the roster entry
-again without the persona and the project.
+An agent whose admission did not finish is not free. The admission is finished when tuwunel accepts the token of
+the bundle (`whoami`), the agent is in the workforce space, and the roster entry of the workstation lists the
+agent. A failure at any step of a first admission (`register_appservice`, `whoami`, `register_user`, `join`, or
+`roster`) leaves the bundle on disk with at least one of these facts missing. `GET /agents` lists such an agent
+with `free: false`, and a create for the existing agent answers `409`. Send the new-agent request again, with the
+same VM name and agent name: it finishes the admission. For an existing agent the daemon only reads from
+tuwunel, with the three checks above. It never runs the admission, because that would write the roster entry
+again without the persona and the project. A bundle of `add-workstation.sh` has no `.runtime-registration`
+marker and gets no check.
 
 The Haven key and the GitHub token must not have a line break, a backslash, or a leading quote.
 `configure-agent.sh` stores each secret as `KEY=value` in `secrets.env` and refuses such a value, so the API

@@ -10,9 +10,8 @@ import {
 } from './bundle.js'
 import { describeFailure, relay, type ControlPlane } from './control-plane.js'
 import { ApiError } from './errors.js'
-import type { MatrixConn } from './matrix.js'
 import { buildPayload, secretProblem } from './payload.js'
-import { agentsWithFree, fetchVms, liveWorkstations } from './vms.js'
+import { agentsWithFree, fetchVms, liveWorkstations, type LiveDeps } from './vms.js'
 
 export interface CreateRequest {
   /** The VM name, and the workstation name of the agent. */
@@ -95,7 +94,8 @@ export function parseCreateRequest(raw: unknown): CreateRequest {
   }
 }
 
-export interface CreateDeps {
+/** `LiveDeps` is for the read-only check of an existing agent. */
+export interface CreateDeps extends LiveDeps {
   havenModel: string
   /** Full commit of the running image. */
   commit: string
@@ -103,9 +103,6 @@ export interface CreateDeps {
   creator: string
   controlPlane: ControlPlane
   admission: { admitNew(agent: NewAgent): Promise<Bundle> }
-  /** For the read-only check of an existing agent. */
-  conn: MatrixConn
-  workstationsDir: string
 }
 
 /**
@@ -132,7 +129,7 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
     if (!entry?.free) throw bad(`${req.name} is not a free agent`)
     // A read-only check. Running the admission again would write the roster without the persona and the project.
     const asked = bundles.filter((b) => b.workstation === req.name)
-    const live = await liveWorkstations(deps.conn, deps.workstationsDir, asked)
+    const live = await liveWorkstations(deps, asked)
     if (!live.has(req.name)) {
       throw new ApiError(409, {
         error: `${req.name} is only partly admitted: send the new-agent request again`,

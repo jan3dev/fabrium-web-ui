@@ -407,6 +407,64 @@ describe('an existing agent', () => {
     expect((await create(existing())).status).toBe(201)
   })
 
+  // tuwunel loaded the registration in each of these, so whoami works: the admission still did not finish.
+  it.each([
+    [
+      'register_user',
+      'the agent user is not registered',
+      {},
+      () => api.fake.failOnce('POST', /\/register$/, 500),
+      () => {},
+    ],
+    [
+      'join',
+      'a room of the agent does not exist yet',
+      { vmRooms: ['#general', '#ops'] },
+      () => {},
+      () => api.fake.addRoom('#ops', '!ops:example.org', 'public'),
+    ],
+    [
+      'join',
+      'the agent is in the space but a room refuses it',
+      {},
+      () => api.fake.setMember(api.fake.generalRoomId, '@lima.echo:example.org', 'ban'),
+      () => api.fake.setMember(api.fake.generalRoomId, '@lima.echo:example.org', 'leave'),
+    ],
+    [
+      'roster',
+      'the roster entry is not published',
+      {},
+      () => api.fake.failOnce('PUT', /\/state\/dev\.zooid\.workforce/, 500),
+      () => {},
+    ],
+  ])(
+    'keeps an agent whose admission failed at %s (%s) out of the free list until a new-agent request finishes it',
+    async (step, _what, over, arrange, repair) => {
+      setup(over)
+      arrange()
+      const free = async () =>
+        ((await (await api.request('GET', '/agents')).json()) as { free: boolean }[]).map((a) => a.free)
+      const vmCreates = () => api.controlPlane.requests.filter((r) => r.method === 'POST')
+
+      const failed = await create(body())
+      expect(failed.status).toBe(502)
+      expect(await failed.json()).toMatchObject({ step })
+      expect(await free()).toEqual([false])
+
+      const asked = await create(existing())
+      expect(asked.status).toBe(409)
+      expect(await asked.json()).toEqual({
+        error: 'lima is only partly admitted: send the new-agent request again',
+      })
+      expect(vmCreates()).toEqual([])
+
+      repair()
+      expect((await create(body())).status).toBe(201)
+      expect(await free()).toEqual([true])
+      expect((await create(existing())).status).toBe(201)
+    },
+  )
+
   it('does not ask tuwunel about a bundle of add-workstation.sh', async () => {
     setup()
     await api.bundle('lima', 'echo', {}, { legacy: true, registered: false })
