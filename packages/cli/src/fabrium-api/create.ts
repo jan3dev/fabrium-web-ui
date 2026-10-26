@@ -10,7 +10,7 @@ import {
 } from './bundle.js'
 import { relay, type ControlPlane } from './control-plane.js'
 import { ApiError } from './errors.js'
-import { buildPayload } from './payload.js'
+import { buildPayload, secretProblem } from './payload.js'
 import { agentsWithFree, fetchVms } from './vms.js'
 
 export interface CreateRequest {
@@ -24,6 +24,7 @@ export interface CreateRequest {
 
 const MAX_TEXT = 200
 // A control character would split a line of the secrets file. A key never has one.
+// (A line break is also covered by secretProblem, with the wording of the VM script.)
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
 
 const bad = (error: string) => new ApiError(400, { error })
@@ -44,6 +45,9 @@ function secret(value: unknown, field: string, required: boolean): string | unde
   }
   if (typeof value !== 'string') throw bad(`${field} must be a string`)
   const trimmed = value.trim()
+  // What the VM script refuses: the API must not accept it, or the VM stops at its first boot.
+  const problem = secretProblem(trimmed, field)
+  if (problem) throw bad(problem)
   if (CONTROL_CHARS.test(trimmed)) throw bad(`${field} must not contain control characters`)
   return trimmed
 }

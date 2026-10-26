@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { secretProblem } from './payload.js'
 
 export interface FabriumApiConfig {
   /** Base URL of the control plane, without a trailing slash. */
@@ -76,10 +77,15 @@ export function loadFabriumApiConfig(
   }
   if (!key) throw new Error(`FABRIUM_CONTROL_PLANE_KEY_FILE: ${keyFile} is empty`)
 
+  // The model goes into the same secrets file as the Haven key: the VM script refuses the same values.
+  const havenModel = env.FABRIUM_HAVEN_MODEL?.trim() || undefined
+  const modelProblem = havenModel && secretProblem(havenModel, 'FABRIUM_HAVEN_MODEL')
+  if (modelProblem) throw new Error(modelProblem)
+
   return {
     controlPlaneUrl: url.replace(/\/+$/, ''),
     controlPlaneKey: key,
-    havenModel: env.FABRIUM_HAVEN_MODEL?.trim() || undefined,
+    havenModel,
     vmRooms: rooms.length > 0 ? rooms : ['#general'],
     zooidCommit: env.ZOOID_COMMIT?.trim() || undefined,
     homeserverUrl,

@@ -1,6 +1,9 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { parseCreateRequest } from './create.js'
+import type { ApiError } from './errors.js'
 import { COMMIT, createTestApi, jsonResponse } from './test-api.js'
 
 const VM = {
@@ -95,6 +98,11 @@ describe('validation', () => {
     ['a Haven key with a newline inside (RF5)', { haven_api_key: 'a\nb' }],
     ['a GitHub token that is not a string', { github_token: 5 }],
     ['a GitHub token with a NUL (RF5)', { github_token: 'a\u0000b' }],
+    ['a Haven key with a backslash', { haven_api_key: 'abc\\def' }],
+    ['a Haven key that starts with a double quote', { haven_api_key: '"hvn1_abc"' }],
+    ['a Haven key that starts with a single quote', { haven_api_key: "'hvn1_abc'" }],
+    ['a GitHub token with a backslash', { github_token: 'abc\\def' }],
+    ['a GitHub token that starts with a quote', { github_token: '"ghp_abc' }],
     ['an instance type that is not a string', { instance_type: 5 }],
   ])('answers 400 for %s, without a secret in the message', async (_name, over) => {
     setup()
@@ -118,6 +126,71 @@ describe('validation', () => {
     expect(res.status).toBe(400)
     expect(await res.text()).not.toContain(HAVEN)
   })
+})
+
+// configure-agent.sh stores each secret as KEY=value in secrets.env and refuses what that file cannot hold.
+// The API must refuse the same values, or the VM stops at its first boot. This runs the check of the script itself.
+describe('secrets that the VM script refuses', () => {
+  const script = readFileSync(
+    new URL('../../../../deploy/agent-vm/configure-agent.sh', import.meta.url),
+    'utf8',
+  )
+  const block = /for key in \$VARS; do\n {2}case "\$\{!key\}" in[\s\S]*?\n {2}esac\ndone\n/.exec(script)?.[0]
+  const vmVerdict = (value: string): string =>
+    execFileSync(
+      'bash',
+      ['-c', `die() { printf 'REJECT %s' "$*"; exit 0; }\nVARS=SECRET\nSECRET="$1"\n${block}printf ACCEPT`, '_', value],
+      { encoding: 'utf8' },
+    )
+  const apiVerdict = (field: string, value: string): string => {
+    try {
+      parseCreateRequest({
+        name: 'lima',
+        agent: { mode: 'new', name: 'echo' },
+        haven_api_key: 'hvn1_abc',
+        github_token: undefined,
+        [field]: value,
+      })
+      return 'ACCEPT'
+    } catch (err) {
+      return `REJECT ${(err as ApiError).body.error}`
+    }
+  }
+
+  it('finds the check in the script', () => {
+    expect(block).toBeDefined()
+    expect(vmVerdict('hvn1_abc')).toBe('ACCEPT')
+    expect(vmVerdict('abc\\def')).toMatch(/^REJECT SECRET has a line break, a backslash or a leading quote/)
+  })
+
+  it.each(['haven_api_key', 'github_token'])(
+    'refuses with the wording of the script, for %s',
+    (field) => {
+      for (const value of ['abc\\def', '"hvn1_abc"', "'hvn1_abc'", 'a\nb', 'a\rb', '\\']) {
+        const script = vmVerdict(value).replace('SECRET', field)
+        expect(script).toMatch(/^REJECT /)
+        expect(apiVerdict(field, value)).toBe(script)
+      }
+    },
+  )
+
+  it.each(['hvn1_abc', 'ab"cd', "ab'cd", 'ab cd', 'a$b`c`', 'ghp_0123456789'])(
+    'accepts %j, as the script does',
+    (value) => {
+      expect(vmVerdict(value)).toBe('ACCEPT')
+      expect(apiVerdict('haven_api_key', value)).toBe('ACCEPT')
+    },
+  )
+
+  it.each(['"', "'", '\\', 'a\\', ' "x', '\t"x'])(
+    'never accepts %j when the script refuses the value that the API would send',
+    (value) => {
+      // The API trims a secret first, so the VM gets the trimmed value.
+      if (vmVerdict(value.trim()).startsWith('REJECT')) {
+        expect(apiVerdict('haven_api_key', value)).toMatch(/^REJECT /)
+      }
+    },
+  )
 })
 
 describe('a new agent', () => {

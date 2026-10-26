@@ -93,6 +93,15 @@ describe('loadFabriumApiConfig', () => {
     },
   )
 
+  it.each(['glm\\5', '"glm-5-3"', "'glm-5-3'", 'glm\n5'])(
+    'refuses the Haven model %j, which the VM script would refuse',
+    (model) => {
+      expect(() =>
+        loadFabriumApiConfig({ ...base, FABRIUM_HAVEN_MODEL: model }, reader()),
+      ).toThrow(/FABRIUM_HAVEN_MODEL has a line break, a backslash or a leading quote/)
+    },
+  )
+
   it('strips trailing slashes from the control plane URL', () => {
     const config = loadFabriumApiConfig(
       { ...base, FABRIUM_CONTROL_PLANE_URL: 'https://control.example.org//' },
