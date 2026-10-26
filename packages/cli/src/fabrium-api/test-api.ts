@@ -32,6 +32,20 @@ type Reply = Response | ((req: ControlPlaneRequest) => Response | Promise<Respon
 export const jsonResponse = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
+/** An answer that sends its headers and the start of a body, then stalls until the request is aborted. */
+export const stalledResponse =
+  (status = 200) =>
+  (req: ControlPlaneRequest): Response =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('[{"id":'))
+          req.signal?.addEventListener('abort', () => controller.error(req.signal?.reason))
+        },
+      }),
+      { status, headers: { 'content-type': 'application/json' } },
+    )
+
 export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
   const fake = createFakeMatrix()
   const zooidHome = mkdtempSync(join(tmpdir(), 'fabrium-api-'))

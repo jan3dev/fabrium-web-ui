@@ -8,7 +8,7 @@ import {
   type Bundle,
   type BundleFiles,
 } from './bundle.js'
-import { relay, type ControlPlane } from './control-plane.js'
+import { describeFailure, relay, type ControlPlane } from './control-plane.js'
 import { ApiError } from './errors.js'
 import type { MatrixConn } from './matrix.js'
 import { buildPayload, secretProblem } from './payload.js'
@@ -156,9 +156,19 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
     bootstrap: payload,
   })
   if (!upstream.ok) return relay(upstream)
-  const vm: unknown = await upstream.json().catch(() => null)
+  // The control plane went through with the create. If its answer is lost, the VM exists or may exist: say so,
+  // and do not report a failed create. The VM list shows the VM.
+  let vm: unknown
+  try {
+    vm = JSON.parse(await upstream.text())
+  } catch (err) {
+    console.warn(`[fabrium] create answered ${upstream.status}, but the body is unreadable: ${describeFailure(err)}`)
+  }
   if (typeof vm !== 'object' || vm === null || Array.isArray(vm)) {
-    throw new ApiError(502, { error: 'control plane sent an invalid response' })
+    throw new ApiError(502, {
+      error:
+        'the control plane answered, but the answer could not be read. The VM may exist: check the VM list',
+    })
   }
   return new Response(JSON.stringify({ ...vm, agent_id: agentId }), {
     status: upstream.status,

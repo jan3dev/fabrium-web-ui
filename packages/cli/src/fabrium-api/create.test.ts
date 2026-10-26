@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseCreateRequest } from './create.js'
 import type { ApiError } from './errors.js'
-import { COMMIT, createTestApi, jsonResponse } from './test-api.js'
+import { COMMIT, createTestApi, jsonResponse, stalledResponse } from './test-api.js'
 
 const VM = {
   id: 'i-0123456789abcdef0',
@@ -276,6 +276,42 @@ describe('a new agent', () => {
     expect(agents).toEqual([
       expect.objectContaining({ workstation: 'lima', free: true, preset: 'opencode' }),
     ])
+  })
+
+  describe('when the create went through but its answer is lost', () => {
+    const lost = 'the control plane answered, but the answer could not be read. The VM may exist: check the VM list'
+
+    it('does not say that the create failed when the body stalls', async () => {
+      setup({ controlPlaneTimeoutMs: 30 })
+      api.controlPlane.on('POST', '/v1/vms', stalledResponse(201))
+      const res = await create(body())
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: lost })
+    })
+
+    it('says the same when the body is not JSON', async () => {
+      setup()
+      api.controlPlane.on('POST', '/v1/vms', new Response('<html>', { status: 201 }))
+      const res = await create(body())
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: lost })
+    })
+
+    it('keeps the identity free for the next try, like any control plane failure', async () => {
+      setup({ controlPlaneTimeoutMs: 30 })
+      api.controlPlane.on('POST', '/v1/vms', stalledResponse(201))
+      await create(body())
+      const agents = (await (await api.request('GET', '/agents')).json()) as { free: boolean }[]
+      expect(agents.map((a) => a.free)).toEqual([true])
+    })
+
+    it('answers 502 control plane unreachable when an error answer stalls', async () => {
+      setup({ controlPlaneTimeoutMs: 30 })
+      api.controlPlane.on('POST', '/v1/vms', stalledResponse(409))
+      const res = await create(body())
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: 'control plane unreachable' })
+    })
   })
 
   it('relays a control plane answer that is not JSON (413 text)', async () => {

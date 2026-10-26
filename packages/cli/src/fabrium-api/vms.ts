@@ -1,7 +1,7 @@
 import { access, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { MARKER, envVar, type BundleSummary } from './bundle.js'
-import { relay, type ControlPlane } from './control-plane.js'
+import { readBody, relay, type ControlPlane } from './control-plane.js'
 import { ApiError } from './errors.js'
 import { whoami, type MatrixConn } from './matrix.js'
 
@@ -24,7 +24,13 @@ export async function fetchVms(
 ): Promise<{ vms: Vm[] } | { failure: Response }> {
   const upstream = await controlPlane.request('GET', '/v1/vms')
   if (!upstream.ok) return { failure: await relay(upstream) }
-  const body: unknown = await upstream.json().catch(() => null)
+  const text = await readBody(upstream)
+  let body: unknown
+  try {
+    body = JSON.parse(text)
+  } catch {
+    body = undefined
+  }
   if (!Array.isArray(body) || !body.every((vm) => typeof vm?.name === 'string')) {
     throw new ApiError(502, { error: 'control plane sent an invalid response' })
   }

@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CONTROL_PLANE_KEY, createTestApi, jsonResponse } from './test-api.js'
+import { CONTROL_PLANE_KEY, createTestApi, jsonResponse, stalledResponse } from './test-api.js'
 
 const VM_ID = 'i-0123456789abcdef0'
 const vm = (name: string, extra: Record<string, unknown> = {}) => ({
@@ -145,6 +145,27 @@ describe('control plane errors', () => {
           ),
       )
       const res = await slow.request('GET', '/vms')
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: 'control plane unreachable' })
+    } finally {
+      slow.cleanup()
+    }
+  })
+})
+
+describe('a control plane that stalls after its headers', () => {
+  it.each([
+    ['GET', '/vms', '/v1/vms'],
+    ['GET', '/instance-types', '/v1/instance-types'],
+    ['GET', '/agents', '/v1/vms'],
+    ['POST', `/vms/${VM_ID}/stop`, `/v1/vms/${VM_ID}/stop`],
+    ['DELETE', `/vms/${VM_ID}`, `/v1/vms/${VM_ID}`],
+  ])('answers 502 control plane unreachable for %s %s, not 500', async (method, path, upstream) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const slow = createTestApi({ controlPlaneTimeoutMs: 30 })
+    try {
+      slow.controlPlane.on(method, upstream, stalledResponse())
+      const res = await slow.request(method, path)
       expect(res.status).toBe(502)
       expect(await res.json()).toEqual({ error: 'control plane unreachable' })
     } finally {
