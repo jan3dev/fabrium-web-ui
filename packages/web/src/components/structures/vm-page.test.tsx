@@ -6,9 +6,9 @@ import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mswServer } from "../../../test/setup";
 import { signInForVmApi } from "../../../test/vm-api";
-import { makeVm } from "../../../test/vm-fixtures";
+import { AGENTS, INSTANCE_TYPES, makeVm } from "../../../test/vm-fixtures";
 import { MatrixClientPeg } from "../../client/peg";
-import type { Vm } from "../../model/types";
+import type { CreateVmRequest, Vm } from "../../model/types";
 import { VmRoute } from "./vm-page";
 import { VmView } from "./vm-view";
 
@@ -47,13 +47,39 @@ const tango = makeVm({
 
 const AFTER_ACTION = { start: "pending", stop: "stopping", reboot: "running" } as const;
 
-/** A fake control plane behind the browser API. `calls` records what reached it, in order. */
+/**
+ * A fake control plane behind the browser API. `calls` records what reached
+ * it, in order, and `created` holds the bodies of the creates.
+ */
 function serve(initial: Vm[]) {
-  const cp = { vms: initial, calls: [] as string[] };
+  const cp = { vms: initial, calls: [] as string[], created: [] as CreateVmRequest[] };
   mswServer.use(
     http.get(`${API}/vms`, () => {
       cp.calls.push("GET /vms");
       return HttpResponse.json(cp.vms);
+    }),
+    http.get(`${API}/instance-types`, () => {
+      cp.calls.push("GET /instance-types");
+      return HttpResponse.json(INSTANCE_TYPES);
+    }),
+    http.get(`${API}/agents`, () => {
+      cp.calls.push("GET /agents");
+      return HttpResponse.json(AGENTS);
+    }),
+    http.post(`${API}/vms`, async ({ request }) => {
+      const body = (await request.json()) as CreateVmRequest;
+      cp.calls.push("POST /vms");
+      cp.created.push(body);
+      const vm = makeVm({
+        id: "i-0123456789abcdef9",
+        name: body.name,
+        state: "pending",
+        setup: "pending",
+        public_ip: null,
+        agent_id: `@${body.name}.${body.agent.name}:example.org`,
+      });
+      cp.vms = [...cp.vms, vm];
+      return HttpResponse.json(vm, { status: 201 });
     }),
     http.post(`${API}/vms/:id/:verb`, ({ params }) => {
       const verb = params.verb as keyof typeof AFTER_ACTION;
@@ -275,6 +301,102 @@ describe("<VmRoute>", () => {
     renderPage();
     expect(await screen.findByText("No VMs yet")).toBeInTheDocument();
     expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  describe("New VM dialog", () => {
+    /** Opens the dialog and waits until its options have loaded. */
+    async function openDialog(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(await screen.findByRole("button", { name: "New VM" }));
+      const dialog = await screen.findByRole("dialog", { name: "New VM" });
+      return dialog;
+    }
+    const fill = async (
+      user: ReturnType<typeof userEvent.setup>,
+      dialog: HTMLElement,
+    ) => {
+      await user.type(within(dialog).getByLabelText(/^vm name/i), "kilo");
+      await user.type(within(dialog).getByLabelText(/^agent name/i), "scout");
+      await user.type(within(dialog).getByLabelText(/haven api key/i), "hk-1");
+    };
+
+    it("creates the VM, closes, and refreshes the list", async () => {
+      const cp = serve([lima]);
+      const user = userEvent.setup();
+      renderPage();
+
+      const dialog = await openDialog(user);
+      await within(dialog).findByLabelText("Instance type");
+      await fill(user, dialog);
+      await user.click(within(dialog).getByRole("button", { name: "Create VM" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(await screen.findByRole("rowheader", { name: "kilo" })).toBeInTheDocument();
+      expect(cp.created).toStrictEqual([
+        {
+          name: "kilo",
+          instance_type: "t3a.medium",
+          agent: { mode: "new", name: "scout" },
+          haven_api_key: "hk-1",
+        },
+      ]);
+      expect(cp.calls.slice(-2)).toEqual(["POST /vms", "GET /vms"]);
+    });
+
+    it("loads the instance types and agents each time it opens", async () => {
+      const cp = serve([lima]);
+      const user = userEvent.setup();
+      renderPage();
+
+      const dialog = await openDialog(user);
+      await within(dialog).findByLabelText("Instance type");
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      await within(await openDialog(user)).findByLabelText("Instance type");
+
+      expect(cp.calls.filter((c) => c === "GET /agents")).toHaveLength(2);
+      expect(cp.calls.filter((c) => c === "GET /instance-types")).toHaveLength(2);
+    });
+
+    it("shows a failed create inline with its step, and stays open", async () => {
+      serve([lima]);
+      mswServer.use(
+        http.post(`${API}/vms`, () =>
+          HttpResponse.json(
+            { error: "could not register the agent", step: "register_appservice" },
+            { status: 502 },
+          ),
+        ),
+      );
+      const user = userEvent.setup();
+      renderPage();
+
+      const dialog = await openDialog(user);
+      await within(dialog).findByLabelText("Instance type");
+      await fill(user, dialog);
+      await user.click(within(dialog).getByRole("button", { name: "Create VM" }));
+
+      const alert = await within(dialog).findByRole("alert");
+      expect(alert).toHaveTextContent("could not register the agent");
+      expect(alert).toHaveTextContent("register_appservice");
+      expect(screen.getByRole("dialog", { name: "New VM" })).toBeInTheDocument();
+    });
+
+    it("shows why the options did not load", async () => {
+      serve([lima]);
+      mswServer.use(
+        http.get(`${API}/instance-types`, () =>
+          HttpResponse.json({ error: "control plane unreachable" }, { status: 502 }),
+        ),
+      );
+      const user = userEvent.setup();
+      renderPage();
+
+      const dialog = await openDialog(user);
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "control plane unreachable",
+      );
+      expect(within(dialog).getByRole("button", { name: "Create VM" })).toBeDisabled();
+    });
   });
 });
 
