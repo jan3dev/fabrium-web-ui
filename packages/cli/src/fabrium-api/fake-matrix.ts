@@ -56,6 +56,8 @@ export interface FakeMatrix {
   addRoom(alias: string, roomId: string, joinRule: JoinRule): void
   membership(roomId: string, userId: string): string | undefined
   state(roomId: string, type: string, stateKey: string): Record<string, unknown> | undefined
+  /** Set one state event, sent by `@zooid`. */
+  setState(roomId: string, type: string, stateKey: string, content: Record<string, unknown>): void
   setMember(roomId: string, userId: string, membership: string): void
   setLevel(roomId: string, userId: string, level: number): void
   setPowerLevels(roomId: string, content: Record<string, unknown>): void
@@ -333,6 +335,7 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
     addRoom,
     membership: membershipOf,
     state: getState,
+    setState,
     setMember: (roomId, userId, membership) => setState(roomId, 'm.room.member', userId, { membership }),
     setLevel(roomId, userId, level) {
       const current = getState(roomId, 'm.room.power_levels', '') ?? {}

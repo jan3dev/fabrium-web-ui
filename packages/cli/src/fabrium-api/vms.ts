@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { MARKER, envVar, type BundleSummary } from './bundle.js'
 import { readBody, relay, type ControlPlane } from './control-plane.js'
 import { ApiError } from './errors.js'
-import { whoami, type MatrixConn } from './matrix.js'
+import { stateEvent, whoami, type MatrixConn } from './matrix.js'
 
 /** A VM of the control plane (contracts section 1). zooid reads only the name. */
 export interface Vm {
@@ -37,25 +37,63 @@ export async function fetchVms(
   return { vms: body as Vm[] }
 }
 
+/** What `liveWorkstations` reads from the homeserver and from disk. */
+export interface LiveDeps {
+  conn: MatrixConn
+  /** The central appservice token, `@zooid`: it reads the workforce space. */
+  asToken: string
+  getSpaceRoomId(): string | undefined
+  workstationsDir: string
+}
+
 /**
- * The workstations whose identity is complete. A bundle of add-workstation.sh is: tuwunel loaded its
- * registration when the script ran. A bundle of the VM API is when tuwunel accepts its appservice token as its
- * sender: an admission that stopped before the registration loaded leaves a bundle that no VM can use.
+ * True when the last steps of an admission are done: the agent is in the workforce space, and the roster entry
+ * of the workstation lists it. A read that fails proves nothing, so it counts as not done.
+ */
+async function admissionFinished(
+  { conn, asToken, getSpaceRoomId }: LiveDeps,
+  ws: string,
+  agentId: string,
+): Promise<boolean> {
+  const spaceId = getSpaceRoomId()
+  if (!spaceId) return false
+  try {
+    const [member, roster] = await Promise.all([
+      stateEvent(conn, asToken, spaceId, 'm.room.member', agentId),
+      stateEvent(conn, asToken, spaceId, 'dev.zooid.workforce', ws),
+    ])
+    const agents = roster?.agents
+    return (
+      member?.membership === 'join' &&
+      Array.isArray(agents) &&
+      agents.some((a) => a?.user_id === agentId)
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The workstations whose identity is complete. A bundle of add-workstation.sh is: an operator ran the script
+ * and saw it fail or finish. A bundle of the VM API is when tuwunel accepts its appservice token as its sender
+ * and its admission reached the last step (see `admissionFinished`). An admission can fail at any step, and
+ * the bundle then stays on disk with its marker.
  * Read-only. It never admits, because that would write the roster again without the persona and the project.
  */
 export async function liveWorkstations(
-  conn: MatrixConn,
-  root: string,
+  deps: LiveDeps,
   bundles: BundleSummary[],
 ): Promise<Set<string>> {
   const live = await Promise.all(
-    bundles.map(async ({ workstation }) => {
-      const dir = join(root, workstation)
+    bundles.map(async ({ workstation, agentId }) => {
+      const dir = join(deps.workstationsDir, workstation)
       if (!(await access(join(dir, MARKER)).then(() => true, () => false))) return workstation
       const env = await readFile(join(dir, '.env'), 'utf8').catch(() => '')
       const token = envVar(env, 'MATRIX_AS_TOKEN')
-      const sender = `@${envVar(env, 'WORKSTATION') ?? workstation}:${envVar(env, 'SERVER_NAME')}`
-      return token && (await whoami(conn, token)) === sender ? workstation : undefined
+      const ws = envVar(env, 'WORKSTATION') ?? workstation
+      const sender = `@${ws}:${envVar(env, 'SERVER_NAME')}`
+      const loaded = token && (await whoami(deps.conn, token)) === sender
+      return loaded && (await admissionFinished(deps, ws, agentId)) ? workstation : undefined
     }),
   )
   return new Set(live.filter((workstation): workstation is string => workstation !== undefined))
