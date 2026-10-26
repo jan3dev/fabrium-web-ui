@@ -2,13 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { isNoAccess, listVms } from "../client/fabrium-api";
 import type { Vm } from "../model/types";
 
-export const POLL_FAST_MS = 5_000;
-export const POLL_SLOW_MS = 30_000;
+const POLL_FAST_MS = 5_000;
+const POLL_SLOW_MS = 30_000;
 
 const IN_TRANSITION = new Set<string>(["pending", "stopping", "shutting-down"]);
 
 /** A VM that is changing state, or still waiting for its setup, changes soon. */
-export const isVmBusy = (vm: Vm) => IN_TRANSITION.has(vm.state) || vm.setup === "pending";
+const isVmBusy = (vm: Vm) => IN_TRANSITION.has(vm.state) || vm.setup === "pending";
 
 interface Snapshot {
   vms: Vm[] | null;

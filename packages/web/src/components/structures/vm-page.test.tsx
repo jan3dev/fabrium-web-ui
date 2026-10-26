@@ -304,16 +304,14 @@ describe("<VmRoute>", () => {
   });
 
   describe("New VM dialog", () => {
-    /** Opens the dialog and waits until its options have loaded. */
-    async function openDialog(user: ReturnType<typeof userEvent.setup>) {
+    type User = ReturnType<typeof userEvent.setup>;
+
+    /** Opens the dialog. Its options load after it opens. */
+    async function openDialog(user: User) {
       await user.click(await screen.findByRole("button", { name: "New VM" }));
-      const dialog = await screen.findByRole("dialog", { name: "New VM" });
-      return dialog;
+      return screen.findByRole("dialog", { name: "New VM" });
     }
-    const fill = async (
-      user: ReturnType<typeof userEvent.setup>,
-      dialog: HTMLElement,
-    ) => {
+    const fill = async (user: User, dialog: HTMLElement) => {
       await user.type(within(dialog).getByLabelText(/^vm name/i), "kilo");
       await user.type(within(dialog).getByLabelText(/^agent name/i), "scout");
       await user.type(within(dialog).getByLabelText(/haven api key/i), "hk-1");
