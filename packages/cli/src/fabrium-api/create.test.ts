@@ -337,6 +337,42 @@ describe('an existing agent', () => {
     expect(api.controlPlane.requests.filter((r) => r.method === 'POST')).toEqual([])
   })
 
+  it('answers 409 for an agent whose admission stopped, and sends nothing', async () => {
+    setup()
+    await api.bundle('lima', 'echo', {}, { registered: false })
+    const seen = api.fake.calls.length
+    const res = await create(existing())
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({
+      error: 'lima is only partly admitted: send the new-agent request again',
+    })
+    expect(api.controlPlane.requests.filter((r) => r.method === 'POST')).toEqual([])
+    // A read-only check: admission is not run again, which would reset the persona and the project.
+    expect(api.fake.calls.slice(seen).filter((c) => c.method !== 'GET')).toEqual([])
+    expect(api.fake.messages).toEqual([])
+  })
+
+  it('takes the agent once a new-agent request has finished its admission', async () => {
+    setup({ whoamiTimeoutMs: 60, pollIntervalMs: 5 })
+    const free = async () =>
+      ((await (await api.request('GET', '/agents')).json()) as { free: boolean }[]).map((a) => a.free)
+    api.fake.knobs.adminCommandWorks = false
+    expect((await create(body())).status).toBe(502)
+    expect(await free()).toEqual([false])
+    expect((await create(existing())).status).toBe(409)
+
+    api.fake.knobs.adminCommandWorks = true
+    expect((await create(body())).status).toBe(201)
+    expect(await free()).toEqual([true])
+    expect((await create(existing())).status).toBe(201)
+  })
+
+  it('does not ask tuwunel about a bundle of add-workstation.sh', async () => {
+    setup()
+    await api.bundle('lima', 'echo', {}, { legacy: true, registered: false })
+    expect((await create(existing())).status).toBe(201)
+  })
+
   it('passes a failure of the VM list through and creates nothing', async () => {
     setup()
     await api.bundle('lima', 'echo')

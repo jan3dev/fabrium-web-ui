@@ -173,7 +173,7 @@ export async function ensureBundle(dir: string, spec: BundleSpec): Promise<Bundl
 }
 
 /** The last `KEY=value` line wins, as in the scripts (`tail -n 1`). */
-function envVar(env: string, key: string): string | undefined {
+export function envVar(env: string, key: string): string | undefined {
   let value: string | undefined
   for (const match of env.matchAll(new RegExp(`^${key}=(.*)$`, 'gm'))) value = match[1]
   return value || undefined

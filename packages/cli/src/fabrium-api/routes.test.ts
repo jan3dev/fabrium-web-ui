@@ -211,4 +211,38 @@ describe('GET /agents', () => {
     expect(res.status).toBe(502)
     expect(await res.json()).toEqual({ error: 'ec2 failed' })
   })
+
+  const whoamiCalls = () =>
+    api.fake.calls.filter((c) => c.path.startsWith('/_matrix/client/v3/account/whoami')).length
+
+  it('lists an agent as not free when its admission stopped before tuwunel loaded the registration', async () => {
+    await api.bundle('half', 'amy', {}, { registered: false })
+    await api.bundle('whole', 'bob')
+    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
+    const res = await api.request('GET', '/agents')
+    expect(await res.json()).toEqual([
+      expect.objectContaining({ workstation: 'half', preset: 'opencode', free: false }),
+      expect.objectContaining({ workstation: 'whole', preset: 'opencode', free: true }),
+    ])
+  })
+
+  it('asks tuwunel only about the bundles that the VM API made', async () => {
+    await api.bundle('one', 'amy')
+    await api.bundle('two', 'bob')
+    await api.bundle('legacy', 'cat', {}, { legacy: true })
+    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
+    const before = whoamiCalls()
+    const res = await api.request('GET', '/agents')
+    expect((await res.json()).map((a: { free: boolean }) => a.free)).toEqual([true, true, true])
+    expect(whoamiCalls() - before).toBe(2)
+  })
+
+  it('does not list an agent as free when tuwunel answers an error to whoami', async () => {
+    await api.bundle('lima', 'amy')
+    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
+    api.fake.failOnce('GET', /account\/whoami/, 500)
+    const res = await api.request('GET', '/agents')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual([expect.objectContaining({ workstation: 'lima', free: false })])
+  })
 })

@@ -10,7 +10,7 @@ import { createVm, parseCreateRequest } from './create.js'
 import { ApiError, apiErrorHandler } from './errors.js'
 import type { MatrixConn } from './matrix.js'
 import { FULL_COMMIT_RE } from './payload.js'
-import { agentsWithFree, fetchVms } from './vms.js'
+import { agentsWithFree, fetchVms, liveWorkstations } from './vms.js'
 
 export interface FabriumApiDeps extends FabriumApiConfig {
   // From the daemon.
@@ -89,7 +89,9 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
   app.get('/agents', async (c) => {
     const result = await fetchVms(controlPlane)
     if ('failure' in result) return result.failure
-    return c.json(agentsWithFree(await listBundles(workstationsDir), result.vms))
+    const bundles = await listBundles(workstationsDir)
+    const live = await liveWorkstations(deps.conn, workstationsDir, bundles)
+    return c.json(agentsWithFree(bundles, result.vms, live))
   })
 
   app.post('/vms', async (c) => {
@@ -107,6 +109,7 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
         commit: deps.zooidCommit,
         controlPlane,
         admission,
+        conn: deps.conn,
         workstationsDir,
       },
       parseCreateRequest(raw),

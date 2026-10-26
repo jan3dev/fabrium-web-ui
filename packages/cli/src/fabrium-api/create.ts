@@ -10,8 +10,9 @@ import {
 } from './bundle.js'
 import { relay, type ControlPlane } from './control-plane.js'
 import { ApiError } from './errors.js'
+import type { MatrixConn } from './matrix.js'
 import { buildPayload, secretProblem } from './payload.js'
-import { agentsWithFree, fetchVms } from './vms.js'
+import { agentsWithFree, fetchVms, liveWorkstations } from './vms.js'
 
 export interface CreateRequest {
   /** The VM name, and the workstation name of the agent. */
@@ -100,6 +101,8 @@ export interface CreateDeps {
   commit: string
   controlPlane: ControlPlane
   admission: { admitNew(agent: NewAgent): Promise<Bundle> }
+  /** For the read-only check of an existing agent. */
+  conn: MatrixConn
   workstationsDir: string
 }
 
@@ -122,11 +125,19 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
   } else {
     const listed = await fetchVms(deps.controlPlane)
     if ('failure' in listed) return listed.failure
-    const entry = agentsWithFree(await listBundles(deps.workstationsDir), listed.vms).find(
-      (e) => e.workstation === req.name,
-    )
-    const bundle = entry?.free ? await readBundle(join(deps.workstationsDir, req.name)) : null
-    if (!entry || !bundle) throw bad(`${req.name} is not a free agent`)
+    const bundles = await listBundles(deps.workstationsDir)
+    const entry = agentsWithFree(bundles, listed.vms).find((e) => e.workstation === req.name)
+    if (!entry?.free) throw bad(`${req.name} is not a free agent`)
+    // A read-only check. Running the admission again would write the roster without the persona and the project.
+    const asked = bundles.filter((b) => b.workstation === req.name)
+    const live = await liveWorkstations(deps.conn, deps.workstationsDir, asked)
+    if (!live.has(req.name)) {
+      throw new ApiError(409, {
+        error: `${req.name} is only partly admitted: send the new-agent request again`,
+      })
+    }
+    const bundle = await readBundle(join(deps.workstationsDir, req.name))
+    if (!bundle) throw bad(`${req.name} is not a free agent`)
     files = bundle
     agentId = entry.agent_id
   }
