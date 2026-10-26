@@ -504,6 +504,13 @@ The API is off unless the control plane is configured. Then every path under `/_
 | `ZOOID_HOME` | compose | Exists already. The daemon finds `workstations/` and the registration files under it. |
 | `ZOOID_COMMIT` | image | The full commit of the image, set by `deploy.sh` at build time. A new VM checks out this commit from GitHub, so deploy a commit that is pushed. Without it, create answers `503`. |
 
+On podman, buildah can reuse a cached image layer that was built with another `ZOOID_COMMIT`. After the build,
+`deploy.sh` reads `ZOOID_COMMIT` from the `fabrium-zooid` image. When it is not the commit of the checkout,
+`deploy.sh` warns and rebuilds only the zooid image without cache, and it stops if the value is still wrong. The
+first deploy that brings this check runs the old `deploy.sh` (bash keeps reading the script that it started
+with), so it can leave an image without the commit. Run `deploy/deploy.sh --no-pull` once more: the check
+repairs the image.
+
 A setting that is wrong (a key file that cannot be read or is empty, a bad URL, a bad room) stops the daemon at
 start with a message that names the variable. The message never holds the key.
 
