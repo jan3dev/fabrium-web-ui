@@ -235,6 +235,10 @@ describe('GET /agents', () => {
 
   const whoamiCalls = () =>
     api.fake.calls.filter((c) => c.path.startsWith('/_matrix/client/v3/account/whoami')).length
+  const rosterReads = () =>
+    api.fake.calls.filter((c) => /\/state\/dev\.zooid\.workforce\//.test(c.path)).length
+  const frees = async () =>
+    ((await (await api.request('GET', '/agents')).json()) as { free: boolean }[]).map((a) => a.free)
 
   it('lists an agent as not free when its admission stopped before tuwunel loaded the registration', async () => {
     await api.bundle('half', 'amy', {}, { registered: false })
@@ -247,15 +251,71 @@ describe('GET /agents', () => {
     ])
   })
 
+  // tuwunel loaded the registration (whoami works), but a later step of the admission failed.
+  describe('an agent whose admission stopped after tuwunel loaded the registration', () => {
+    const HALF = '@half.amy:example.org'
+    it.each([
+      ['the agent is not in the workforce space', () => {}],
+      ['the agent is in the space and the roster has no entry for it', () => api.fake.joinSpace(HALF)],
+      [
+        'the agent is in the space and the roster entry is empty',
+        () => {
+          api.fake.joinSpace(HALF)
+          api.fake.setState(api.fake.spaceId, 'dev.zooid.workforce', 'half', {})
+        },
+      ],
+    ])('is not free when %s', async (_name, arrange) => {
+      await api.bundle('half', 'amy', {}, { admitted: false })
+      await api.bundle('whole', 'bob')
+      arrange()
+      api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
+      const res = await api.request('GET', '/agents')
+      expect(await res.json()).toEqual([
+        expect.objectContaining({ workstation: 'half', preset: 'opencode', free: false }),
+        expect.objectContaining({ workstation: 'whole', preset: 'opencode', free: true }),
+      ])
+    })
+
+    it('is not free when the agent left the workforce space after its admission', async () => {
+      await api.bundle('lima', 'amy')
+      api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
+      expect(await frees()).toEqual([true])
+      api.fake.setMember(api.fake.spaceId, '@lima.amy:example.org', 'leave')
+      expect(await frees()).toEqual([false])
+    })
+
+    it('is free once the admission is complete', async () => {
+      await api.bundle('half', 'amy', {}, { admitted: false })
+      api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
+      expect(await frees()).toEqual([false])
+      api.fake.joinSpace('@half.amy:example.org')
+      api.fake.setState(api.fake.spaceId, 'dev.zooid.workforce', 'half', {
+        version: 1,
+        agents: [{ user_id: '@half.amy:example.org', name: 'amy', rooms: [] }],
+      })
+      expect(await frees()).toEqual([true])
+    })
+  })
+
   it('asks tuwunel only about the bundles that the VM API made', async () => {
     await api.bundle('one', 'amy')
     await api.bundle('two', 'bob')
     await api.bundle('legacy', 'cat', {}, { legacy: true })
     api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
     const before = whoamiCalls()
+    const rosterBefore = rosterReads()
     const res = await api.request('GET', '/agents')
     expect((await res.json()).map((a: { free: boolean }) => a.free)).toEqual([true, true, true])
     expect(whoamiCalls() - before).toBe(2)
+    expect(rosterReads() - rosterBefore).toBe(2)
+  })
+
+  it('reads the space only for a bundle whose token tuwunel accepts', async () => {
+    await api.bundle('half', 'amy', {}, { registered: false })
+    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
+    const rosterBefore = rosterReads()
+    expect(await frees()).toEqual([false])
+    expect(rosterReads() - rosterBefore).toBe(0)
   })
 
   it('does not list an agent as free when tuwunel answers an error to whoami', async () => {
@@ -265,5 +325,18 @@ describe('GET /agents', () => {
     const res = await api.request('GET', '/agents')
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual([expect.objectContaining({ workstation: 'lima', free: false })])
+  })
+
+  it('does not list an agent as free when tuwunel answers an error to a read of the roster', async () => {
+    await api.bundle('lima', 'amy')
+    await api.bundle('legacy', 'cat', {}, { legacy: true })
+    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
+    api.fake.failOnce('GET', /state\/dev\.zooid\.workforce/, 500)
+    const res = await api.request('GET', '/agents')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual([
+      expect.objectContaining({ workstation: 'legacy', free: true }),
+      expect.objectContaining({ workstation: 'lima', free: false }),
+    ])
   })
 })
