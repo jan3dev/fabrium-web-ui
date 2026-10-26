@@ -74,6 +74,25 @@ describe('loadFabriumApiConfig', () => {
     expect(message).not.toContain(KEY)
   })
 
+  it.each([
+    ['http://control.example.org', /https/],
+    ['http://10.0.0.5:8080', /https/],
+  ])('refuses the plain-http control plane URL %s: the payload holds secrets', (url, message) => {
+    expect(() =>
+      loadFabriumApiConfig({ ...base, FABRIUM_CONTROL_PLANE_URL: url }, reader()),
+    ).toThrow(message)
+  })
+
+  it.each(['http://localhost:8080', 'http://127.0.0.1:29100', 'http://[::1]:29100'])(
+    'accepts %s for a control plane on this host',
+    (url) => {
+      expect(
+        loadFabriumApiConfig({ ...base, FABRIUM_CONTROL_PLANE_URL: url }, reader())
+          ?.controlPlaneUrl,
+      ).toBe(url)
+    },
+  )
+
   it('strips trailing slashes from the control plane URL', () => {
     const config = loadFabriumApiConfig(
       { ...base, FABRIUM_CONTROL_PLANE_URL: 'https://control.example.org//' },

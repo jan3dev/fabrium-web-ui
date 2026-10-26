@@ -21,14 +21,19 @@ const ROOM_RE = /^[#!][^\s'",\\]+$/
 // The URL goes into the bundle `.env` as it is: no whitespace, quote, `$`, or backtick.
 const SAFE_URL_RE = /^https?:\/\/[^\s'"\\$`]+$/
 
-function httpUrl(value: string, name: string): URL {
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
+
+/** The create request sends the Haven and GitHub secrets: plain http is for a control plane on this host only. */
+function controlPlaneUrl(value: string, name: string): void {
+  let url: URL | undefined
   try {
-    const url = new URL(value)
-    if (url.protocol === 'http:' || url.protocol === 'https:') return url
+    url = new URL(value)
   } catch {
     // reported below
   }
-  throw new Error(`${name} must be an http or https URL`)
+  if (url?.protocol !== 'https:' && !(url?.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname))) {
+    throw new Error(`${name} must be an https URL (http only for localhost): the payload holds secrets`)
+  }
 }
 
 /**
@@ -44,7 +49,7 @@ export function loadFabriumApiConfig(
   const keyFile = env.FABRIUM_CONTROL_PLANE_KEY_FILE
   if (!url || !keyFile) return undefined
 
-  httpUrl(url, 'FABRIUM_CONTROL_PLANE_URL')
+  controlPlaneUrl(url, 'FABRIUM_CONTROL_PLANE_URL')
   const zooidHome = env.ZOOID_HOME
   if (!zooidHome) throw new Error('VM management needs ZOOID_HOME, the instance directory')
   const homeserverUrl = env.HOMESERVER_URL
