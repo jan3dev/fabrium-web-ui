@@ -19,7 +19,7 @@ One build serves every deployment. Host-specific settings live in a same-origin 
 
 If the value is malformed, or the alias can't be resolved or joined, login still succeeds: the client opens the only joined space if there is exactly one, and Home otherwise.
 
-`fabrium_api_url` is optional. It is the origin of the Fabrium service API, for example `https://chat.example.com`. The client calls `<fabrium_api_url>/_fabrium/v1/...` with a Matrix OpenID token. When the key is omitted, the client uses its own origin, which is the normal setup: the reverse proxy sends `/_fabrium/*` to the zooid daemon.
+`fabrium_api_url` is optional. It is the origin of the Fabrium service API, for example `https://chat.example.com`. The client calls `<fabrium_api_url>/_fabrium/v1/...` with a Matrix OpenID token. When the key is omitted, the client uses its own origin, which is the normal setup: the reverse proxy sends `/_fabrium/*` to the zooid daemon. The VM button in the workspace rail shows only when `GET /_fabrium/v1/access` answers `200`, which means the user is an admin or an owner and VM management is on.
 
 ## Development
 
