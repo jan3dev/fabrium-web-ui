@@ -2923,3 +2923,41 @@ describe('users of this daemon’s own workstation', () => {
     expect(t.approvals.resolve).not.toHaveBeenCalled()
   })
 })
+
+describe('inbound logging', () => {
+  const message = (eventId: string, body: string) => ({
+    type: 'm.room.message',
+    event_id: eventId,
+    room_id: '!admins:example.com',
+    sender: '@zooid:example.com',
+    content: { msgtype: 'm.text', body },
+  })
+  const logged = async (body: string) => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      const { transport } = makeTransport()
+      await postTxn(transport.app, { events: [message(`$log${++txnCounter}`, body)] })
+      return log.mock.calls.map((call) => call.join(' ')).join('\n')
+    } finally {
+      log.mockRestore()
+    }
+  }
+
+  it('logs the start of a chat message', async () => {
+    expect(await logged('hello there')).toContain('from @zooid:example.com: hello there')
+  })
+
+  it.each([
+    '!admin appservices register\n```\nas_token: secret-as-token\n```',
+    '  !admin users create-user bob secret-password',
+    '\\!admin appservices register\n```\nas_token: secret-as-token\n```',
+  ])('does not log the body of an admin command: %j', async (body) => {
+    const out = await logged(body)
+    expect(out).toContain('inbound msg in !admins:example.com from @zooid:example.com')
+    expect(out).not.toContain('secret')
+  })
+
+  it('still logs a message that only mentions !admin', async () => {
+    expect(await logged('how do I use !admin here?')).toContain('how do I use !admin here?')
+  })
+})
