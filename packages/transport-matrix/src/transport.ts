@@ -2077,6 +2077,9 @@ function isRemoteAgent(
   return knownAgentIds?.has(sender) === true || msgtype === 'm.notice'
 }
 
+// A tuwunel admin command, also with the backslash that runs it outside the admin room.
+const ADMIN_COMMAND = /^\s*\\*!admin\b/
+
 function logInbound(evt: MatrixEvent): void {
   const sender = evt.sender ?? '?'
   const room = evt.room_id ?? '?'
@@ -2085,9 +2088,9 @@ function logInbound(evt: MatrixEvent): void {
     const body = evt.content?.body ?? ''
     const mentions = (evt.content?.['m.mentions'] as { user_ids?: string[] } | undefined)?.user_ids
     const mentionsStr = mentions?.length ? ` mentions=${JSON.stringify(mentions)}` : ''
-    console.log(
-      `[matrix] inbound msg in ${room} from ${sender}${mentionsStr}: ${truncate(body, 200)}`,
-    )
+    // An admin command can carry secrets: an appservice registration holds its tokens.
+    const shown = ADMIN_COMMAND.test(body) ? '(admin command)' : truncate(body, 200)
+    console.log(`[matrix] inbound msg in ${room} from ${sender}${mentionsStr}: ${shown}`)
   } else {
     console.log(`[matrix] inbound ${type} in ${room} from ${sender}`)
   }

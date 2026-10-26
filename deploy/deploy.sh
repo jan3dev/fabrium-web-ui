@@ -164,6 +164,9 @@ else
 fi
 
 export GIT_SHA="$NEW_SHA"
+# The full commit: the daemon image keeps it (ZOOID_COMMIT) and gives it to each new agent VM.
+ZOOID_COMMIT="$(git -C "$REPO_DIR" rev-parse HEAD)"
+export ZOOID_COMMIT
 engine_env
 log "engine: $ENGINE (socket $DOCKER_SOCK, daemon uid $DAEMON_UID)"
 
@@ -214,7 +217,8 @@ if [ "$NO_BUILD" -eq 0 ]; then
   if [ "$ENGINE" = "podman" ]; then
     export COMPOSE_BAKE=false DOCKER_BUILDKIT=0
   fi
-  compose build --build-arg GIT_SHA="$GIT_SHA" --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH"
+  compose build --build-arg GIT_SHA="$GIT_SHA" --build-arg ZOOID_COMMIT="$ZOOID_COMMIT" \
+    --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH"
 else
   log "--no-build: skipping image build"
 fi
