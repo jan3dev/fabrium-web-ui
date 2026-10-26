@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isNoAccess, listVms } from "../client/fabrium-api";
 import type { Vm } from "../model/types";
 
@@ -21,12 +21,17 @@ interface Snapshot {
  */
 export function useVms() {
   const [snap, setSnap] = useState<Snapshot>({ vms: null, error: null });
+  const seqRef = useRef(0);
 
+  // The timer and refresh() can overlap. Only the newest request may update the
+  // state, so an older answer that arrives late, a list or a failure, is dropped.
   const load = useCallback(async () => {
+    const seq = ++seqRef.current;
     try {
-      setSnap({ vms: await listVms(), error: null });
+      const vms = await listVms();
+      if (seq === seqRef.current) setSnap({ vms, error: null });
     } catch (error) {
-      setSnap((s) => ({ ...s, error }));
+      if (seq === seqRef.current) setSnap((s) => ({ ...s, error }));
     }
   }, []);
 
