@@ -18,7 +18,7 @@ agents:
   architect:
     acp: { preset: opencode }
     matrix:
-      rooms: ["#dev:example.org"]
+      rooms: ["#engineering:example.org"]
 `
 
 const flat = `${head}

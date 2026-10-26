@@ -72,6 +72,21 @@ export interface ArtifactResult {
   identifier: string
 }
 
+export interface SendAttachmentInput {
+  /** As the agent sees it. Relative paths resolve against the agent's workspace. */
+  path: string
+  /** Display filename. Default: basename of `path`. */
+  name?: string
+  /** Sent as a threaded m.notice right after the media event. Empty/absent = none. */
+  caption?: string
+}
+
+export interface SendAttachmentResult {
+  /** The media event, not the caption. */
+  event_id: string
+  mxc_uri: string
+}
+
 export interface HistoryPage {
   messages: Message[]
   next_before?: string
@@ -130,7 +145,24 @@ export interface TransportContextProvider {
   getRoomInfo(channelId: string): Promise<RoomInfo>
   /** Rooms this agent is bound to. Targets for sendMessage. */
   getRooms(): Promise<RoomInfo[]>
+  /**
+   * Resolve an agent-supplied room selector (canonical ID or configured alias)
+   * against this agent's own bindings, locally: no transport read. Returns
+   * the canonical room ID, or undefined when the agent is not in that room.
+   * Absent = the provider cannot name rooms, so an explicit-room read is
+   * refused ([[ZOD084]]).
+   */
+  resolveRoom?(selector: string): string | undefined
   sendMessage(input: SendMessageInput): Promise<SendMessageResult>
   /** Post an artifact version into the bound thread. Absent = transport has no artifacts. */
   sendArtifact?(channelId: string, threadId: string, input: ArtifactInput): Promise<ArtifactResult>
+  /**
+   * Post a file to the given thread as the agent. Optional: absent = the
+   * transport cannot send attachments ([[ZOD068]]).
+   */
+  sendAttachment?(
+    channelId: string,
+    threadId: string,
+    input: SendAttachmentInput,
+  ): Promise<SendAttachmentResult>
 }

@@ -61,7 +61,12 @@ const baseAgents = [
   },
 ]
 
-function makeTransport(o?: { drainQuietMs?: number; drainMaxMs?: number; workstation?: string }) {
+function makeTransport(o?: {
+  drainQuietMs?: number
+  drainMaxMs?: number
+  drainNoStreamMs?: number
+  workstation?: string
+}) {
   const { reg, finishPrompt } = fakeRegistry()
   const approvals = fakeApprovals()
   const client = fakeClient()
@@ -76,6 +81,7 @@ function makeTransport(o?: { drainQuietMs?: number; drainMaxMs?: number; worksta
     // Tests covering trailing-chunk behavior pass an explicit window.
     drainQuietMs: o?.drainQuietMs ?? 0,
     drainMaxMs: o?.drainMaxMs,
+    drainNoStreamMs: o?.drainNoStreamMs,
     workstation: o?.workstation,
   })
   return { transport, agents: reg, approvals, client, finishPrompt }
@@ -257,6 +263,71 @@ describe('matrix transport /transactions', () => {
         content: expect.objectContaining({ body: 'Hi. How can I help?' }),
       }),
     )
+  })
+
+  const topLevelMention = () => ({
+    type: 'm.room.message',
+    event_id: '$root',
+    room_id: '!r:example.com',
+    sender: '@alice:example.com',
+    content: {
+      msgtype: 'm.text',
+      body: 'hi',
+      'm.mentions': { user_ids: ['@architect:example.com'] },
+    },
+  })
+  const turnEnds = (client: ReturnType<typeof makeTransport>['client']) =>
+    client.sendCustomEvent.mock.calls
+      .map((c) => c[0] as { eventType: string; content: Record<string, unknown> })
+      .filter((c) => c.eventType === 'dev.zooid.turn.end')
+
+  it('ends a silent turn at the no-stream bound, not the drain cap', async () => {
+    // [[ZOD076]] smoke: end_turn with no output held typing and turn.end for the
+    // full 30s cap. Nothing arrives, so the no-stream bound ends the drain.
+    const { transport, agents, client } = makeTransport({
+      drainQuietMs: 10,
+      drainNoStreamMs: 60,
+      drainMaxMs: 5_000,
+    })
+    agents.prompt.mockImplementation(async () => ({ stopReason: 'end_turn' as const }))
+    const started = Date.now()
+    await postTxn(transport.app, { events: [topLevelMention()] })
+    await vi.waitFor(() => expect(turnEnds(client)).toHaveLength(1), { timeout: 1_000 })
+    expect(Date.now() - started).toBeLessThan(1_000)
+
+    const [turnEnd] = turnEnds(client)
+    expect(turnEnd.content.produced_output).toBe(false)
+    expect(client.sendMessage).not.toHaveBeenCalled()
+    // typing.exit precedes the turn.end send ([[ZOD091]]).
+    const typingOff = client.setTyping.mock.invocationCallOrder.at(-1)!
+    expect(typingOff).toBeLessThan(client.sendCustomEvent.mock.invocationCallOrder.at(-1)!)
+  })
+
+  it('still collects a chunk that starts after prompt() resolves and a quiet gap (opencode late start)', async () => {
+    const { transport, agents, client } = makeTransport({
+      drainQuietMs: 10,
+      drainNoStreamMs: 300,
+      drainMaxMs: 5_000,
+    })
+    agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
+      // Nothing during the turn; the stream starts well after prompt resolves
+      // and after several empty quiet windows.
+      setTimeout(() => {
+        agents.onEvent('architect', {
+          type: 'agent_message_chunk',
+          sessionId: 'sess-' + p.threadId,
+          content: { type: 'text', text: 'late reply' },
+        })
+      }, 100)
+      return { stopReason: 'end_turn' as const }
+    })
+    await postTxn(transport.app, { events: [topLevelMention()] })
+    await vi.waitFor(() => expect(turnEnds(client)).toHaveLength(1), { timeout: 2_000 })
+
+    expect(client.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.objectContaining({ body: 'late reply' }) }),
+    )
+    expect(turnEnds(client)[0].content.produced_output).toBe(true)
   })
 
   it('uses an in-thread message event_id as the thread root when one is set', async () => {
@@ -584,6 +655,57 @@ describe('dev.zooid.turn.end', () => {
       (c) => (c[0] as { eventType: string }).eventType === 'dev.zooid.turn.end',
     )
     expect(turnEndCall).toBeDefined()
+  })
+
+  describe('stop_reason and turn_id', () => {
+    async function turnEndContent(
+      impl: (
+        p: { threadId: string },
+        agents: { onEvent: (n: string, e: unknown) => void },
+      ) => Promise<unknown>,
+    ) {
+      const { transport, agents, client } = makeTransport()
+      agents.prompt.mockImplementation(((_n: string, p: { threadId: string }) => impl(p, agents)) as never)
+      await postTxn(transport.app, { events: [topLevelMention()] })
+      await settleTurn()
+      const call = client.sendCustomEvent.mock.calls.find(
+        (c) => (c[0] as { eventType: string }).eventType === 'dev.zooid.turn.end',
+      )
+      return (call![0] as { content: Record<string, unknown> }).content
+    }
+
+    it('silent turn carries stop_reason and turn_id', async () => {
+      const content = await turnEndContent(async () => ({ stopReason: 'end_turn', turnId: 'turn-9' }))
+      expect(content).toMatchObject({ produced_output: false, stop_reason: 'end_turn', turn_id: 'turn-9' })
+    })
+
+    it('turn with output carries them too', async () => {
+      const content = await turnEndContent(async (p, agents) => {
+        agents.onEvent('architect', {
+          type: 'agent_message_chunk',
+          sessionId: 'sess-' + p.threadId,
+          content: { type: 'text', text: 'hello back' },
+        })
+        return { stopReason: 'end_turn', turnId: 'turn-1' }
+      })
+      expect(content.produced_output).toBe(true)
+      expect(content).toMatchObject({ stop_reason: 'end_turn', turn_id: 'turn-1' })
+    })
+
+    it('throwing turn has no stop_reason or turn_id', async () => {
+      const content = await turnEndContent(async () => {
+        throw new Error('boom')
+      })
+      expect(content.produced_output).toBe(false)
+      expect('stop_reason' in content).toBe(false)
+      expect('turn_id' in content).toBe(false)
+    })
+
+    it('registry without turnId omits turn_id', async () => {
+      const content = await turnEndContent(async () => ({ stopReason: 'end_turn' }))
+      expect('turn_id' in content).toBe(false)
+      expect(content.stop_reason).toBe('end_turn')
+    })
   })
 
   it('threads to the turn root', async () => {

@@ -78,6 +78,17 @@ describe('Pi Zooid extension', () => {
     ])
   })
 
+  it('zooid_get_thread_history forwards room to the daemon only when given', async () => {
+    const { tools, calls } = harness()
+    const tool = tools.find((t) => t.name === 'zooid_get_thread_history')
+    await tool.execute('c', { room: '!other:hs', thread_id: '$root' }, undefined, undefined, ctx())
+    await tool.execute('c', { thread_id: '$root' }, undefined, undefined, ctx())
+    expect(calls).toEqual([
+      { acpSessionId: 'session-a', method: 'getThreadHistory', params: { threadId: '$root', room: '!other:hs', limit: 50 } },
+      { acpSessionId: 'session-a', method: 'getThreadHistory', params: { threadId: '$root', limit: 50 } },
+    ])
+  })
+
   it('zooid_send_message forwards room, thread_id and text', async () => {
     const { tools, calls } = harness({ ok: true, result: { event_id: '$e' } })
     await tools.find((tool) => tool.name === 'zooid_send_message').execute(

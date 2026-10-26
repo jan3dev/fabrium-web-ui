@@ -91,6 +91,42 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
     expect(payload.messages[0].id).toBe('e1')
   })
 
+  it('a dead daemon socket registers zooid_context_status; a daemon error reply does not', async () => {
+    const connect = async (sockPath: string, spawnId: string) => {
+      const transport = new StdioClientTransport({
+        command: process.execPath,
+        args: [BIN, '--spawn-id', spawnId],
+        env: { ...process.env, ZOOID_DAEMON_SOCK: sockPath } as Record<string, string>,
+      })
+      const client = new Client({ name: 'it', version: '0.0.1' }, { capabilities: {} })
+      await client.connect(transport)
+      cleanup.push(async () => {
+        await client.close()
+      })
+      return client
+    }
+
+    const dead = await connect(join(tmpdir(), `zooid-it-${randomUUID()}.sock`), 'spawn-x')
+    const deadTools = (await dead.listTools()).tools.map((t) => t.name)
+    expect(deadTools).toContain('zooid_context_status')
+    const status = await dead.callTool({ name: 'zooid_context_status', arguments: {} })
+    expect(status.isError).toBe(true)
+    expect((status.content as Array<{ text: string }>)[0].text).toContain('ENOENT')
+
+    // Live daemon, no task actions: describeRole is answered with "task actions unavailable".
+    const registry = new SpawnRegistry()
+    const spawnId = registry.register({
+      agentName: 'architect',
+      threadRef: { channelId: '!room:hs', threadId: '!room:hs' },
+      provider: fakeProvider(),
+    })
+    const sockPath = join(tmpdir(), `zooid-it-${randomUUID()}.sock`)
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'architect' })
+    cleanup.push(() => server.close())
+    const live = await connect(sockPath, spawnId)
+    expect((await live.listTools()).tools.map((t) => t.name)).not.toContain('zooid_context_status')
+  })
+
   it('two MCP server subprocesses sharing one socket route to their own bindings', async () => {
     const providerA = fakeProvider({
       getRoomHistory: async () => ({
@@ -180,6 +216,65 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
     })
     expect(JSON.parse((infoA.content as Array<{ text: string }>)[0].text).id).toBe('!a:hs')
     expect(JSON.parse((infoB.content as Array<{ text: string }>)[0].text).id).toBe('!b:hs')
+  })
+})
+
+describe.skipIf(!existsSync(BIN))('zooid_send_attachment (out-of-process)', () => {
+  async function start(
+    sendAttachment: TransportContextProvider['sendAttachment'],
+    flag: boolean,
+  ) {
+    const registry = new SpawnRegistry()
+    const spawnId = registry.register({
+      agentName: 'architect',
+      threadRef: { channelId: '!r:hs', threadId: '$root' },
+      provider: fakeProvider({ sendAttachment }),
+    })
+    const sockPath = join(tmpdir(), `zooid-it-${randomUUID()}.sock`)
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'architect' })
+    cleanup.push(() => server.close())
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [BIN, '--spawn-id', spawnId, ...(flag ? ['--send-attachment'] : [])],
+      env: { ...process.env, ZOOID_DAEMON_SOCK: sockPath } as Record<string, string>,
+    })
+    const client = new Client({ name: 'it', version: '0.0.1' }, { capabilities: {} })
+    await client.connect(transport)
+    cleanup.push(async () => {
+      await client.close()
+    })
+    return client
+  }
+
+  it('lists the tool with --send-attachment and omits it without', async () => {
+    const stub = async () => ({ event_id: '$m', mxc_uri: 'mxc://hs/a' })
+    const on = await start(stub, true)
+    expect((await on.listTools()).tools.map((t) => t.name)).toContain('zooid_send_attachment')
+    const off = await start(stub, false)
+    expect((await off.listTools()).tools.map((t) => t.name)).not.toContain('zooid_send_attachment')
+  })
+
+  it('end-to-end call reaches the provider with the binding scope', async () => {
+    const calls: unknown[][] = []
+    const client = await start(async (...args) => {
+      calls.push(args)
+      return { event_id: '$m', mxc_uri: 'mxc://hs/a' }
+    }, true)
+    const res = await client.callTool({ name: 'zooid_send_attachment', arguments: { path: 'a.png' } })
+    expect(calls).toEqual([['!r:hs', '$root', { path: 'a.png' }]])
+    expect(JSON.parse((res.content as Array<{ text: string }>)[0].text)).toEqual({
+      event_id: '$m',
+      mxc_uri: 'mxc://hs/a',
+    })
+  })
+
+  it('a provider failure reaches the model as an isError result', async () => {
+    const client = await start(async () => {
+      throw new Error('attachment_failed: x')
+    }, true)
+    const res = await client.callTool({ name: 'zooid_send_attachment', arguments: { path: 'a.png' } })
+    expect(res.isError).toBe(true)
+    expect((res.content as Array<{ text: string }>)[0].text).toContain('attachment_failed: x')
   })
 })
 
