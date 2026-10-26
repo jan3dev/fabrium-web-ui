@@ -3,7 +3,7 @@ import { type Room } from "matrix-js-sdk";
 import type * as React from "react";
 import { useMemo } from "react";
 
-import { CircleCheckIcon, HomeIcon } from "@/components/icons";
+import { CircleCheckIcon, CpuIcon, HomeIcon } from "@/components/icons";
 import { useRoomAvatarMxc } from "@/components/room-avatar";
 import {
   ContextMenu,
@@ -181,18 +181,24 @@ function WorkspaceButton({
 /**
  * Vertical rail of workspaces on the far left: Home (every room) plus one
  * button per top-level space. Shows a mention badge or unread dot per
- * workspace; right-click marks a workspace read.
+ * workspace; right-click marks a workspace read. Below Home, a VM button
+ * opens the VM page for people who can manage VMs. One button is current at a
+ * time: VM while its page is open, otherwise the button of `scope`.
  */
 export function WorkspaceRail({
   scope,
   onSelect,
+  vm,
   className,
 }: {
   scope: Scope;
   onSelect: (scope: Scope) => void;
+  /** Set only for people who can manage VMs. `active` marks the VM page as open. */
+  vm?: { active: boolean; onSelect: () => void };
   className?: string;
 }) {
   const workspaces = useWorkspaces();
+  const scopeCurrent = !vm?.active;
 
   return (
     <nav
@@ -204,11 +210,16 @@ export function WorkspaceRail({
     >
       <RailButton
         label="Home"
-        isActive={scope.kind === "home"}
+        isActive={scopeCurrent && scope.kind === "home"}
         onSelect={() => onSelect({ kind: "home" })}
       >
         <HomeIcon aria-hidden />
       </RailButton>
+      {vm ? (
+        <RailButton label="VM" isActive={vm.active} onSelect={vm.onSelect}>
+          <CpuIcon aria-hidden />
+        </RailButton>
+      ) : null}
       {workspaces.length > 0 ? (
         <span aria-hidden className="h-px w-6 shrink-0 bg-sidebar-border" />
       ) : null}
@@ -216,7 +227,11 @@ export function WorkspaceRail({
         <WorkspaceButton
           key={space.roomId}
           space={space}
-          isActive={scope.kind === "space" && scope.spaceId === space.roomId}
+          isActive={
+            scopeCurrent &&
+            scope.kind === "space" &&
+            scope.spaceId === space.roomId
+          }
           onSelect={() => onSelect({ kind: "space", spaceId: space.roomId })}
         />
       ))}

@@ -20,6 +20,7 @@ import { InboxRoute } from "./components/structures/inbox/inbox-view";
 import { InvitesPage } from "./components/structures/invites-page";
 import { LoggedInView } from "./components/structures/logged-in-view";
 import { RoomView } from "./components/structures/room-view";
+import { VmRoute } from "./components/structures/vm-page";
 import { useAuthState } from "./hooks/use-auth-state";
 
 export interface AppConfig {
@@ -139,6 +140,7 @@ function AppRoutes({ config }: { config: AppConfig }) {
         <Route path="search" element={<SearchPageRoute />} />
         <Route path="invites" element={<InvitesPage />} />
         <Route path="inbox" element={<InboxRoute />} />
+        <Route path="vm" element={<VmRoute />} />
       </Route>
       <Route
         path="/login"
