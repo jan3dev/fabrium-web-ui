@@ -43,7 +43,7 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
   const replies: { method: string; path: string | RegExp; reply: Reply }[] = []
   const controlPlane = {
     requests,
-    /** Answer `method path` (`path` without the query) with `reply`; the first match wins. */
+    /** Answer `method path` (`path` without the query) with `reply`. A later call for the same route wins. */
     on(method: string, path: string | RegExp, reply: Reply) {
       replies.push({ method, path, reply })
     },
@@ -59,11 +59,13 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
       signal: init?.signal,
     }
     requests.push(req)
-    const match = replies.find(
-      (r) =>
-        r.method === req.method &&
-        (typeof r.path === 'string' ? r.path === parsed.pathname : r.path.test(parsed.pathname)),
-    )
+    const match = [...replies]
+      .reverse()
+      .find(
+        (r) =>
+          r.method === req.method &&
+          (typeof r.path === 'string' ? r.path === parsed.pathname : r.path.test(parsed.pathname)),
+      )
     if (!match) return jsonResponse(404, { error: 'not found' })
     return typeof match.reply === 'function' ? match.reply(req) : match.reply.clone()
   }

@@ -1,11 +1,14 @@
 import { join } from 'node:path'
 import type { MatrixClient } from '@zooid/transport-matrix'
 import { Hono } from 'hono'
+import { createAdmission } from './admission.js'
 import { requireRole, type Caller } from './auth.js'
 import { listBundles } from './bundle.js'
 import { createControlPlane, relay } from './control-plane.js'
-import { apiErrorHandler } from './errors.js'
+import { createVm, parseCreateRequest } from './create.js'
+import { ApiError, apiErrorHandler } from './errors.js'
 import type { MatrixConn } from './matrix.js'
+import { FULL_COMMIT_RE } from './payload.js'
 import { agentsWithFree, fetchVms } from './vms.js'
 
 export interface FabriumApiDeps {
@@ -48,6 +51,21 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
     timeoutMs: deps.controlPlaneTimeoutMs,
   })
   const workstationsDir = join(deps.zooidHome, 'workstations')
+  const admission = createAdmission({
+    conn: deps.conn,
+    client: deps.client,
+    asToken: deps.asToken,
+    asUserId: deps.asUserId,
+    serverName: deps.serverName,
+    homeserverUrl: deps.homeserverUrl,
+    workforceSpace: deps.workforceSpace,
+    getSpaceRoomId: deps.getSpaceRoomId,
+    rooms: deps.vmRooms,
+    workstationsDir,
+    registrationsDir: join(deps.zooidHome, 'data', 'matrix', 'config', 'registrations'),
+    whoamiTimeoutMs: deps.whoamiTimeoutMs,
+    pollIntervalMs: deps.pollIntervalMs,
+  })
 
   app.onError(apiErrorHandler)
   app.use(
@@ -83,6 +101,27 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
     const result = await fetchVms(controlPlane)
     if ('failure' in result) return result.failure
     return c.json(agentsWithFree(await listBundles(workstationsDir), result.vms))
+  })
+
+  app.post('/vms', async (c) => {
+    if (!deps.havenModel) throw new ApiError(503, { error: 'FABRIUM_HAVEN_MODEL is not set' })
+    if (!deps.zooidCommit) throw new ApiError(503, { error: 'ZOOID_COMMIT is not set' })
+    if (!FULL_COMMIT_RE.test(deps.zooidCommit)) {
+      throw new ApiError(503, { error: 'ZOOID_COMMIT is not a full commit hash' })
+    }
+    const raw: unknown = await c.req.json().catch(() => {
+      throw new ApiError(400, { error: 'the body must be JSON' })
+    })
+    return createVm(
+      {
+        havenModel: deps.havenModel,
+        commit: deps.zooidCommit,
+        controlPlane,
+        admission,
+        workstationsDir,
+      },
+      parseCreateRequest(raw),
+    )
   })
 
   for (const action of ['start', 'stop', 'reboot']) {
