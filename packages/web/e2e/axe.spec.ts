@@ -1,10 +1,40 @@
 import { createRequire } from "node:module";
 import type { Page } from "@playwright/test";
 import type { AxeResults } from "axe-core";
+import { makeVm } from "../test/vm-fixtures";
 import { HS_URL, expect, test } from "./fixtures/daemon-impersonator";
 
 const AXE_PATH = createRequire(import.meta.url).resolve("axe-core/axe.min.js");
 const BLOCKING = new Set(["serious", "critical"]);
+
+// One VM per look the /vm page has: each state tone, a Confidential type, an
+// expired setup, and no IP or agent.
+const VMS = [
+  makeVm(),
+  makeVm({ id: "i-0123456789abcdef1", name: "kilo", state: "stopped", public_ip: null }),
+  makeVm({
+    id: "i-0123456789abcdef2",
+    name: "oscar",
+    state: "pending",
+    setup: "pending",
+    public_ip: null,
+    agent_id: null,
+  }),
+  makeVm({
+    id: "i-0123456789abcdef3",
+    name: "tango",
+    instance_type: "c6a.large",
+    sev_snp: true,
+    setup: "expired",
+    agent_id: "@tango.echo:example.org",
+  }),
+];
+
+// The homeserver answers on another origin, so a stubbed answer needs CORS headers.
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers": "*",
+};
 
 /** One axe pass: the page's serious and critical violations, keyed by rule and target. */
 async function axePass(page: Page): Promise<Map<string, string>> {
@@ -74,6 +104,28 @@ for (const theme of ["light", "dark"] as const) {
       toolCallId: "tc-axe",
     });
 
+    // The fixture runs no Fabrium API. Stub it, and the OpenID request that
+    // signs its calls, so the rail shows VM and /vm shows a list.
+    await page.route("**/openid/request_token", (route) =>
+      route.request().method() === "OPTIONS"
+        ? route.fulfill({ status: 204, headers: CORS })
+        : route.fulfill({
+            headers: CORS,
+            json: {
+              access_token: "e2e-openid-token",
+              token_type: "Bearer",
+              matrix_server_name: "localhost",
+              expires_in: 3600,
+            },
+          }),
+    );
+    await page.route("**/_fabrium/v1/access", (route) =>
+      route.fulfill({ json: { user_id: human.userId, role: "admin" } }),
+    );
+    await page.route("**/_fabrium/v1/vms", (route) =>
+      route.fulfill({ json: VMS }),
+    );
+
     const found: string[] = [];
     // Visit a page, wait until `ready` shows, then sweep it.
     async function sweep(path: string, ready: () => Promise<void>) {
@@ -112,6 +164,7 @@ for (const theme of ["light", "dark"] as const) {
         .waitFor(),
     );
     await sweep("/invites", () => page.getByRole("main").waitFor());
+    await sweep("/vm", text("tango"));
 
     expect(found, found.join("\n\n")).toEqual([]);
   });
