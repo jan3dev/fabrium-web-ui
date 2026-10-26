@@ -8,15 +8,32 @@ import { useVms } from "./use-vms";
 
 type Reply = Vm[] | { status: number; body: unknown };
 
+const respond = (reply: Reply) =>
+  Array.isArray(reply)
+    ? new Response(JSON.stringify(reply))
+    : new Response(JSON.stringify(reply.body), { status: reply.status });
+
 /** Answers each GET /vms with the next reply; the last one repeats. */
 function serve(...replies: Reply[]) {
   let next = 0;
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-    const reply = replies[Math.min(next++, replies.length - 1)];
-    return Array.isArray(reply)
-      ? new Response(JSON.stringify(reply))
-      : new Response(JSON.stringify(reply.body), { status: reply.status });
-  });
+  return vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async () => respond(replies[Math.min(next++, replies.length - 1)]));
+}
+
+/** Holds each GET /vms until the test answers it, so answers can arrive out of order. */
+function hold() {
+  const replies: Array<(reply: Reply) => void> = [];
+  const fetchMock = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(() => new Promise((resolve) => replies.push((r) => resolve(respond(r)))));
+  /** Answers the nth request (from 0) and lets the hook handle the answer. */
+  const answer = (n: number, reply: Reply) =>
+    act(async () => {
+      replies[n](reply);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  return { fetchMock, answer };
 }
 
 /** Moves the clock and lets the requests it starts finish. */
@@ -141,5 +158,42 @@ describe("useVms", () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  describe("when two requests overlap", () => {
+    /** Renders the hook with its first load and a refresh both still in flight. */
+    async function renderWithTwoInFlight() {
+      const { fetchMock, answer } = hold();
+      const { result } = renderHook(() => useVms());
+      await tick(0);
+      await act(async () => {
+        result.current.refresh();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      return { fetchMock, result, answer };
+    }
+
+    it("keeps the newer list when an older request answers last", async () => {
+      const { fetchMock, result, answer } = await renderWithTwoInFlight();
+      const stopping = [makeVm({ state: "stopping" })];
+
+      await answer(1, stopping);
+      await answer(0, settled);
+      expect(result.current.vms).toEqual(stopping);
+
+      // The newer list is still in transition, so the next poll is 5 s out, not 30 s.
+      await tick(5_000);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it("ignores an older failure that arrives after a newer list", async () => {
+      const { result, answer } = await renderWithTwoInFlight();
+
+      await answer(1, settled);
+      await answer(0, { status: 502, body: { error: "aws" } });
+      expect(result.current.vms).toEqual(settled);
+      expect(result.current.error).toBeNull();
+    });
   });
 });
