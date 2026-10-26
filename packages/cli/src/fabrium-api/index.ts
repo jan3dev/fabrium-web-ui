@@ -107,6 +107,7 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
       {
         havenModel: deps.havenModel,
         commit: deps.zooidCommit,
+        creator: c.get('caller').userId,
         controlPlane,
         admission,
         conn: deps.conn,

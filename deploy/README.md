@@ -492,6 +492,11 @@ the secrets, and a setup script). The Fabrium control plane, a separate service,
 the payload to it once. The VM then runs `provision.sh` and `configure-agent.sh`, as in
 [Agent VM](#agent-vm-workstation).
 
+When the agent works, `deploy/agent-vm/greet-creator.sh` sends its first message to the user who created the VM,
+in a new direct room. The agent's model writes the message; a fixed text replaces it when the model fails. The
+agent answers only in its configured rooms (when it is mentioned there), so the message tells the user to mention
+it in a room of the workspace. A failed greeting does not fail the setup.
+
 The API is off unless the control plane is configured. Then every path under `/_fabrium/` answers `404`.
 
 | Variable | Set in | Use |

@@ -19,9 +19,13 @@ export interface PayloadInput {
   githubToken?: string
   /** Full commit of the running zooid image; the VM checks it out. */
   commit: string
+  /** The user who asked for the VM. The new agent greets them in a direct message once it works. */
+  creator?: string
 }
 
 export const FULL_COMMIT_RE = /^[0-9a-f]{40}$/
+// The creator goes into the secrets file and, on the VM, into a JSON body: only a plain user ID may pass.
+const USER_ID_RE = /^@[a-z0-9._=/+-]+:[A-Za-z0-9.-]+(:[0-9]+)?$/
 
 // configure-agent.sh stores each secret as KEY=value in secrets.env, which systemd reads. It refuses a value
 // with a line break, a backslash, or a leading quote (the `for key in $VARS` loop of deploy/agent-vm/configure-agent.sh).
@@ -43,7 +47,7 @@ export function shellQuote(value: string): string {
 }
 
 // One array entry per line: a template literal would expand `${uid}` and drop the `\` continuation.
-const setupScript = (commit: string): string =>
+const setupScript = (commit: string, greet: boolean): string =>
   [
     '#!/bin/bash',
     'set -euo pipefail',
@@ -59,6 +63,13 @@ const setupScript = (commit: string): string =>
     "trap 'rm -f /run/fabrium-agent-secrets.env' EXIT",
     `as_ubuntu bash -lc 'bash ~/fabrium-web-ui/deploy/agent-vm/provision.sh --ref ${commit}'`,
     "as_ubuntu bash -lc 'set -a; . /run/fabrium-agent-secrets.env; set +a; bash ~/fabrium-web-ui/deploy/agent-vm/configure-agent.sh'",
+    // The greeting is a courtesy: its failure must not fail the setup.
+    ...(greet
+      ? [
+          "as_ubuntu bash -lc 'set -a; . /run/fabrium-agent-secrets.env; set +a; bash ~/fabrium-web-ui/deploy/agent-vm/greet-creator.sh' ||",
+          "  echo 'greet-creator.sh failed: the agent works without its first message'",
+        ]
+      : []),
     '',
   ].join('\n')
 
@@ -67,11 +78,15 @@ export function buildPayload(input: PayloadInput): BootstrapPayload {
   if (!FULL_COMMIT_RE.test(input.commit)) {
     throw new Error('commit must be a full 40-character commit hash')
   }
+  if (input.creator !== undefined && !USER_ID_RE.test(input.creator)) {
+    throw new Error('creator must be a Matrix user ID')
+  }
   const secrets: [string, string][] = [
     ['HAVEN_API_KEY', input.havenApiKey],
     ['HAVEN_MODEL', input.havenModel],
   ]
   if (input.githubToken) secrets.push(['GH_TOKEN', input.githubToken])
+  if (input.creator !== undefined) secrets.push(['FABRIUM_CREATOR', input.creator])
 
   const file = (path: string, content: string): BootstrapFile => ({
     path,
@@ -85,6 +100,6 @@ export function buildPayload(input: PayloadInput): BootstrapPayload {
       file(`${ZOOID_DIR}/workforce/zooid.yaml`, input.yaml),
       file(SECRETS_PATH, secrets.map(([key, value]) => `${key}=${shellQuote(value)}\n`).join('')),
     ],
-    script: setupScript(input.commit),
+    script: setupScript(input.commit, input.creator !== undefined),
   }
 }

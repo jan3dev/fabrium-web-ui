@@ -15,8 +15,8 @@ const input = {
   commit,
 }
 
-// The script of contracts section 3, one array entry per line.
-const expectedScript = (ref: string) =>
+// The script of contracts section 3, one array entry per line. With a creator, a greeting step ends it.
+const expectedScript = (ref: string, greet = false) =>
   [
     '#!/bin/bash',
     'set -euo pipefail',
@@ -32,6 +32,12 @@ const expectedScript = (ref: string) =>
     "trap 'rm -f /run/fabrium-agent-secrets.env' EXIT",
     `as_ubuntu bash -lc 'bash ~/fabrium-web-ui/deploy/agent-vm/provision.sh --ref ${ref}'`,
     "as_ubuntu bash -lc 'set -a; . /run/fabrium-agent-secrets.env; set +a; bash ~/fabrium-web-ui/deploy/agent-vm/configure-agent.sh'",
+    ...(greet
+      ? [
+          "as_ubuntu bash -lc 'set -a; . /run/fabrium-agent-secrets.env; set +a; bash ~/fabrium-web-ui/deploy/agent-vm/greet-creator.sh' ||",
+          "  echo 'greet-creator.sh failed: the agent works without its first message'",
+        ]
+      : []),
     '',
   ].join('\n')
 
@@ -61,6 +67,21 @@ describe('buildPayload', () => {
   it('builds the script of contracts section 3 with the commit', () => {
     expect(buildPayload(input).script).toBe(expectedScript(commit))
   })
+
+  it('adds the creator to the secrets and a greeting step that cannot fail the setup', () => {
+    const payload = buildPayload({ ...input, creator: '@ann:example.org' })
+    expect(payload.files[2]!.content).toBe(
+      "HAVEN_API_KEY='hk'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='gh'\nFABRIUM_CREATOR='@ann:example.org'\n",
+    )
+    expect(payload.script).toBe(expectedScript(commit, true))
+  })
+
+  it.each(['', 'ann', '@ann', '@Ann:example.org', "@ann:example.org'; id", '@ann:example.org\n'])(
+    'rejects the creator %j',
+    (creator) => {
+      expect(() => buildPayload({ ...input, creator })).toThrow(/creator/)
+    },
+  )
 
   it.each(['', 'abc123', 'main', `${'a'.repeat(40)};id`, 'A'.repeat(40)])(
     'rejects the commit %j',
