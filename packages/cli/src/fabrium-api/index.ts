@@ -4,6 +4,7 @@ import { Hono } from 'hono'
 import { createAdmission } from './admission.js'
 import { requireRole, type Caller } from './auth.js'
 import { listBundles } from './bundle.js'
+import type { FabriumApiConfig } from './config.js'
 import { createControlPlane, relay } from './control-plane.js'
 import { createVm, parseCreateRequest } from './create.js'
 import { ApiError, apiErrorHandler } from './errors.js'
@@ -11,19 +12,7 @@ import type { MatrixConn } from './matrix.js'
 import { FULL_COMMIT_RE } from './payload.js'
 import { agentsWithFree, fetchVms } from './vms.js'
 
-export interface FabriumApiDeps {
-  // From the environment (config.ts).
-  controlPlaneUrl: string
-  /** The tenant API key. It never leaves the daemon. */
-  controlPlaneKey: string
-  havenModel?: string
-  /** Rooms of a new agent: `#alias`, `#alias:server`, or `!id:server`. */
-  vmRooms: string[]
-  /** Full commit of the running image. */
-  zooidCommit?: string
-  /** Public URL of the homeserver, for the bundle of a VM. */
-  homeserverUrl: string
-  zooidHome: string
+export interface FabriumApiDeps extends FabriumApiConfig {
   // From the daemon.
   /** Internal homeserver URL and `fetch`. The control plane calls use the same `fetch`. */
   conn: MatrixConn
