@@ -97,3 +97,61 @@ export interface ArtifactVersion {
   author: ActorSummary;
   threadRootId: string | null;
 }
+
+// Fabrium service API (VM management). Field names match the wire format.
+export type VmState = "pending" | "running" | "stopping" | "stopped" | "shutting-down";
+export type VmSetup = "pending" | "delivered" | "expired";
+
+export interface Vm {
+  id: string;
+  name: string;
+  state: VmState;
+  instance_type: string;
+  sev_snp: boolean;
+  public_ip: string | null;
+  /** RFC 3339, UTC. EC2 resets it at each start. */
+  launched_at: string;
+  setup: VmSetup;
+  /** From the agent bundle of the VM; null when there is none. */
+  agent_id: string | null;
+}
+
+export interface VmInstanceType {
+  name: string;
+  vcpus: number;
+  memory_mib: number;
+  sev_snp: boolean;
+  default: boolean;
+}
+
+export interface VmAgent {
+  workstation: string;
+  agent_id: string;
+  preset: string;
+  /** No VM that is not terminated has this workstation name. */
+  free: boolean;
+}
+
+export interface VmAccess {
+  user_id: string;
+  role: "admin" | "owner";
+}
+
+/** What the New VM dialog offers. */
+export interface VmFormOptions {
+  instanceTypes: VmInstanceType[];
+  agents: VmAgent[];
+}
+
+export type CreateVmAgent =
+  | { mode: "new"; name: string; persona?: string; project?: string }
+  | { mode: "existing"; name: string };
+
+export interface CreateVmRequest {
+  /** The VM name, which is also the workstation name. */
+  name: string;
+  instance_type?: string;
+  agent: CreateVmAgent;
+  haven_api_key: string;
+  github_token?: string;
+}
