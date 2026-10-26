@@ -13,6 +13,17 @@ export interface ControlPlaneOptions {
   timeoutMs?: number
 }
 
+/**
+ * What a log may say about a failed request: the error name and its code. Never the message: when Node
+ * refuses a header, the message holds the header value, and that is the tenant key.
+ */
+export function describeFailure(err: unknown): string {
+  const { name, cause } = err as { name?: string; cause?: { code?: unknown } }
+  return [name ?? 'Error', typeof cause?.code === 'string' ? cause.code : undefined]
+    .filter(Boolean)
+    .join(' ')
+}
+
 export function createControlPlane(opts: ControlPlaneOptions): ControlPlane {
   const doFetch = opts.fetch ?? fetch
   return {
@@ -28,7 +39,7 @@ export function createControlPlane(opts: ControlPlaneOptions): ControlPlane {
           signal: AbortSignal.timeout(opts.timeoutMs ?? 15_000),
         })
       } catch (err) {
-        console.warn('[fabrium] control plane unreachable:', (err as Error).message)
+        console.warn(`[fabrium] control plane unreachable: ${describeFailure(err)}`)
         throw new ApiError(502, { error: 'control plane unreachable' })
       }
     },

@@ -52,6 +52,28 @@ describe('loadFabriumApiConfig', () => {
   })
 
   it.each([
+    ['a line break inside', 'sk-SECRETVALUE\nline-two\n'],
+    ['a space inside', 'sk-SECRETVALUE other'],
+    ['a tab inside', 'sk-SECRETVALUE\tother'],
+    ['a control character', 'sk-SECRETVALUE\u0001'],
+    ['a character that is not ASCII', 'sk-SECRETVALUE-é'],
+  ])('fails for a key file with %s, naming the variable and never the key (RF5)', (_name, content) => {
+    let message = ''
+    try {
+      loadFabriumApiConfig(base, reader(content))
+    } catch (err) {
+      message = (err as Error).message
+    }
+    expect(message).toMatch(/FABRIUM_CONTROL_PLANE_KEY_FILE.*\/run\/control-plane\.key/)
+    expect(message).not.toContain('SECRETVALUE')
+  })
+
+  it('accepts every printable ASCII character in the key', () => {
+    const key = '!"#$%&\'()*+,-./0123456789:;<=>?@AZ[\\]^_`az{|}~'
+    expect(loadFabriumApiConfig(base, reader(`${key}\n`))?.controlPlaneKey).toBe(key)
+  })
+
+  it.each([
     ['a URL that is not http or https', { FABRIUM_CONTROL_PLANE_URL: 'ftp://control.example.org' }],
     ['a URL that is not a URL', { FABRIUM_CONTROL_PLANE_URL: 'control' }],
     ['a room with a space', { FABRIUM_VM_ROOMS: '#a b' }],
