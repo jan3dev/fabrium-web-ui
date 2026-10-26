@@ -22,7 +22,7 @@ data/matrix/config/           tuwunel.toml + registrations/zooid.yaml     (rende
 web/config.json               UI runtime config                           (rendered by deploy.sh)
 app/context-mcp/              context-mcp bundle copied out of the image  (by deploy.sh)
 workstations/<ws>/            agent VM bundle: .env with the VM tokens, workforce/zooid.yaml (by add-workstation.sh or the VM API; the VM API adds .runtime-registration)
-control-plane.key             tenant API key of the control plane, mode 600 (VM management)  ← you create
+control-plane-api-key         tenant API key of the control plane, mode 600 (VM management)  ← you create
 backups/                      backup.sh output
 deploy.log                    one line per successful deploy
 ```
@@ -126,9 +126,11 @@ deploy/restore.sh zooid-<UTC>.tar.gz   # into an empty ZOOID_HOME, then run depl
 ```
 
 The backup contains `.env`, the Matrix DB/media/config, `zooid.yaml`, `workforce/data` (minus sockets),
-`home/`, the agent VM bundles (`workstations/`), and the agent workdirs minus `node_modules`, `.pnpm-store`,
-`.cache`, attachments and any git clone (a first-level directory with `.git`). Agents lose nothing that
-matters: the chat history is in Matrix, and an agent starts a fresh session on its next message.
+`home/`, the agent VM bundles (`workstations/`), the control plane key file (when `FABRIUM_CONTROL_PLANE_KEY_FILE`
+in `.env` points under `ZOOID_HOME`; see [VM management](#vm-management-from-the-web-ui)), and the agent
+workdirs minus `node_modules`, `.pnpm-store`, `.cache`, attachments and any git clone (a first-level directory
+with `.git`). Agents lose nothing that matters: the chat history is in Matrix, and an agent starts a fresh session
+on its next message.
 
 ## Moving the current prod instance to this layout
 
@@ -495,7 +497,7 @@ The API is off unless the control plane is configured. Then every path under `/_
 | Variable | Set in | Use |
 |---|---|---|
 | `FABRIUM_CONTROL_PLANE_URL` | `.env` | Base URL of the control plane, for example `https://control.example.org`. It must be `https`; plain `http` works only for `localhost`, because the create request carries the Haven and GitHub secrets. |
-| `FABRIUM_CONTROL_PLANE_KEY_FILE` | `.env` | Absolute path of a file that holds the tenant API key (mode 600), for example `~/zooid/control-plane.key`. `ZOOID_HOME` is mounted at the same path in the daemon, so the file needs no mount of its own. The key is in a file, not in `.env`, because agents inherit the environment of the daemon. The daemon reads the file once at start. |
+| `FABRIUM_CONTROL_PLANE_KEY_FILE` | `.env` | Absolute path of a file that holds the tenant API key and nothing else (mode 600), for example `/home/ubuntu/zooid/control-plane-api-key`. Write the whole path: neither `deploy.sh` nor compose expands `~` or `$HOME` in `.env`. `ZOOID_HOME` is mounted at the same path in the daemon, so the file needs no mount of its own, and `backup.sh` includes it when it is under `ZOOID_HOME`. The key is in a file, not in `.env`, because agents inherit the environment of the daemon. The daemon reads the file once at start. It stops when the file holds more than the key: the key is printable ASCII, with no space and no line break. |
 | `FABRIUM_HAVEN_MODEL` | `.env` | Haven model of new VMs, for example `glm-5-3`. Without it, create answers `503`. |
 | `FABRIUM_VM_ROOMS` | `.env` | Rooms of new agents, comma separated. Default `#general`. The rooms must exist. Put the value in single quotes: `FABRIUM_VM_ROOMS='#general,#dev'`. |
 | `HOMESERVER_URL` | `.env` | Exists already. The bundle of each VM gets it as the public URL of the homeserver. |
