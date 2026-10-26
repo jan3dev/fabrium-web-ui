@@ -167,7 +167,7 @@ export class MatrixClient {
   async createRoomRaw(opts: { asUserId: string; body: Record<string, unknown> }): Promise<string> {
     await this.omitCreatorPowerLevel(opts.body, opts.asUserId)
     const r = await this.postCreateRoom(opts.asUserId, opts.body)
-    if (!r.ok) throw new Error(`createRoomRaw failed: ${r.status}`)
+    if (!r.ok) throw new Error(`createRoomRaw failed: ${r.status} ${await r.text()}`)
     const j = (await r.json()) as { room_id: string }
     return j.room_id
   }
