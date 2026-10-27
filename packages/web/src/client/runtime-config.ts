@@ -6,8 +6,6 @@ export interface RuntimeConfig {
   vapid_public_key?: string;
   /** Alias localpart of the workforce space (no `#`, no server name). Defaults to `dev`. */
   workforce_space?: string;
-  /** Origin of the Fabrium service API. Defaults to the page's own origin. */
-  fabrium_api_url?: string;
 }
 
 export const DEFAULT_WORKFORCE_SPACE = "dev";
@@ -29,7 +27,6 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig | null> {
     if (typeof json.push_gateway_url === "string") out.push_gateway_url = json.push_gateway_url;
     if (typeof json.vapid_public_key === "string") out.vapid_public_key = json.vapid_public_key;
     if (typeof json.workforce_space === "string") out.workforce_space = json.workforce_space;
-    if (typeof json.fabrium_api_url === "string") out.fabrium_api_url = json.fabrium_api_url;
     return out;
   } catch {
     return null;

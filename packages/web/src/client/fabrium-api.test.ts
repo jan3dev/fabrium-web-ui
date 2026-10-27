@@ -12,7 +12,6 @@ import {
   isNoAccess,
   listVms,
   rebootVm,
-  setFabriumApiUrl,
   startVm,
   stopVm,
 } from "./fabrium-api";
@@ -23,7 +22,6 @@ const API = "/_fabrium/v1";
 
 afterEach(() => {
   vi.useRealTimers();
-  setFabriumApiUrl(undefined);
   MatrixClientPeg.reset();
 });
 
@@ -279,14 +277,16 @@ describe("routes", () => {
 });
 
 describe("base URL", () => {
-  it("is fabrium_api_url when set, without a trailing slash", async () => {
+  it("is the page's own origin", async () => {
     signInForVmApi();
-    setFabriumApiUrl("https://api.example.org/");
+    let url = "";
     mswServer.use(
-      http.get("https://api.example.org/_fabrium/v1/vms", () =>
-        HttpResponse.json([vm]),
-      ),
+      http.get(`${API}/vms`, ({ request }) => {
+        url = request.url;
+        return HttpResponse.json([vm]);
+      }),
     );
-    await expect(listVms()).resolves.toEqual([vm]);
+    await listVms();
+    expect(url).toBe(`${window.location.origin}${API}/vms`);
   });
 });

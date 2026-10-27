@@ -4,7 +4,6 @@ import { createRoot } from "react-dom/client";
 import { App, type AppConfig } from "./app";
 import { BootstrapError } from "@/components/bootstrap-error";
 import { ThemeProvider } from "@/components/theme-provider";
-import { setFabriumApiUrl } from "./client/fabrium-api";
 import { discoverHomeserver } from "./client/homeserver-discovery";
 import { resolveGlobalSearch, setGlobalSearchEnabled } from "./client/feature-flags";
 import { loadRuntimeConfig } from "./client/runtime-config";
@@ -19,7 +18,6 @@ async function bootstrap() {
       buildtime: import.meta.env.VITE_GLOBAL_SEARCH as string | undefined,
     }),
   );
-  setFabriumApiUrl(runtime?.fabrium_api_url);
   const homeserverUrl = await discoverHomeserver({
     mxid: null,
     runtimeConfig: runtime,

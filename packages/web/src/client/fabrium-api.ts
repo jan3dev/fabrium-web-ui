@@ -10,16 +10,10 @@ import type {
 } from "../model/types";
 import { MatrixClientPeg } from "./peg";
 
+// The page's own origin: the reverse proxy sends /_fabrium/* to the zooid daemon, which has no CORS.
 const PREFIX = "/_fabrium/v1";
 // A cached token is renewed this long before it expires.
 const EXPIRY_MARGIN_MS = 30_000;
-
-let baseUrl = "";
-
-/** Sets the API origin from `fabrium_api_url` in /config.json. Empty means the page's own origin. */
-export function setFabriumApiUrl(url: string | undefined): void {
-  baseUrl = (url ?? "").replace(/\/+$/, "");
-}
 
 export class FabriumApiError extends Error {
   readonly status: number;
@@ -78,7 +72,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   const client = MatrixClientPeg.safeGet();
   if (!client) throw new FabriumApiError(401, "Not signed in");
   const send = async (renew: boolean) =>
-    fetch(`${baseUrl}${PREFIX}${path}`, {
+    fetch(`${PREFIX}${path}`, {
       method,
       cache: "no-store",
       headers: {

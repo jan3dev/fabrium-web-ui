@@ -76,22 +76,6 @@ describe("loadRuntimeConfig", () => {
   });
 });
 
-describe("fabrium_api_url", () => {
-  it("passes a string value through", async () => {
-    mswServer.use(
-      http.get("/config.json", () =>
-        HttpResponse.json({ fabrium_api_url: "https://api.example.org" }),
-      ),
-    );
-    expect((await loadRuntimeConfig())?.fabrium_api_url).toBe("https://api.example.org");
-  });
-
-  it("leaves the key unset when it is not a string", async () => {
-    mswServer.use(http.get("/config.json", () => HttpResponse.json({ fabrium_api_url: 7 })));
-    expect((await loadRuntimeConfig())?.fabrium_api_url).toBeUndefined();
-  });
-});
-
 describe("workforce_space", () => {
   it("passes a string value through", async () => {
     mswServer.use(http.get("/config.json", () => HttpResponse.json({ workforce_space: "acme" })));
