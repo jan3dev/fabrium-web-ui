@@ -240,7 +240,18 @@ describe('a new agent', () => {
     setup()
     const res = await create(body({ name: 'ann' }))
     expect(res.status).toBe(409)
-    expect(api.controlPlane.requests).toEqual([])
+    expect(api.controlPlane.requests.filter((r) => r.method !== 'GET')).toEqual([])
+    expect(api.fake.messages).toEqual([])
+  })
+
+  it('refuses a new agent for the name of a VM that exists with 409 before the admission', async () => {
+    setup()
+    // The admission would take the VM's live agent for a resume and rewrite its roster entry.
+    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, [VM]))
+    const res = await create(body())
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'name in use' })
+    expect(api.controlPlane.requests.filter((r) => r.method === 'POST')).toEqual([])
     expect(api.fake.messages).toEqual([])
   })
 
