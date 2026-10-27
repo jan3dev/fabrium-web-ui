@@ -222,6 +222,20 @@ describe('a new agent', () => {
     expect(sent.bootstrap.script).toContain('greet-creator.sh')
   })
 
+  it('creates the VM without the greeting for a caller ID outside the strict grammar', async () => {
+    setup()
+    // A historical user ID, which servers still accept. It must not reach the VM, and it must not block the create.
+    const caller = '@Ann:example.org'
+    api.fake.joinSpace(caller, 90)
+    const res = await create(body(), api.fake.openIdToken(caller))
+    expect(res.status).toBe(201)
+    const sent = upstreamCreate()
+    expect(sent.bootstrap.files[2]?.content).toBe(
+      `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='${GITHUB}'\n`,
+    )
+    expect(sent.bootstrap.script).not.toContain('greet-creator.sh')
+  })
+
   it('omits instance_type and GH_TOKEN when they are absent or empty', async () => {
     setup()
     await create(body({ instance_type: undefined, github_token: '' }))
@@ -244,7 +258,18 @@ describe('a new agent', () => {
     setup()
     const res = await create(body({ name: 'ann' }))
     expect(res.status).toBe(409)
-    expect(api.controlPlane.requests).toEqual([])
+    expect(api.controlPlane.requests.filter((r) => r.method !== 'GET')).toEqual([])
+    expect(api.fake.messages).toEqual([])
+  })
+
+  it('refuses a new agent for the name of a VM that exists with 409 before the admission', async () => {
+    setup()
+    // The admission would take the VM's live agent for a resume and rewrite its roster entry.
+    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, [VM]))
+    const res = await create(body())
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'name in use' })
+    expect(api.controlPlane.requests.filter((r) => r.method === 'POST')).toEqual([])
     expect(api.fake.messages).toEqual([])
   })
 

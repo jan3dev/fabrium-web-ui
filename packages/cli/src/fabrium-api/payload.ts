@@ -27,6 +27,9 @@ export const FULL_COMMIT_RE = /^[0-9a-f]{40}$/
 // The creator goes into the secrets file and, on the VM, into a JSON body: only a plain user ID may pass.
 const USER_ID_RE = /^@[a-z0-9._=/+-]+:[A-Za-z0-9.-]+(:[0-9]+)?$/
 
+/** True for a user ID in the strict grammar, the only kind that may reach the VM. */
+export const isStrictUserId = (userId: string): boolean => USER_ID_RE.test(userId)
+
 // configure-agent.sh stores each secret as KEY=value in secrets.env, which systemd reads. It refuses a value
 // with a line break, a backslash, or a leading quote (the `for key in $VARS` loop of deploy/agent-vm/configure-agent.sh).
 const VM_REFUSES = /[\n\r\\]|^["']/
@@ -78,7 +81,7 @@ export function buildPayload(input: PayloadInput): BootstrapPayload {
   if (!FULL_COMMIT_RE.test(input.commit)) {
     throw new Error('commit must be a full 40-character commit hash')
   }
-  if (input.creator !== undefined && !USER_ID_RE.test(input.creator)) {
+  if (input.creator !== undefined && !isStrictUserId(input.creator)) {
     throw new Error('creator must be a Matrix user ID')
   }
   const secrets: [string, string][] = [
