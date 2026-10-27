@@ -123,8 +123,7 @@ export function NewVmDialog({
     setFailure(null);
   }, []);
 
-  // Nothing typed here outlives the dialog, whoever closes it. That includes
-  // the secrets.
+  // Nothing typed here, secrets included, outlives the dialog, whoever closes it.
   useEffect(() => {
     if (!open) reset();
   }, [open, reset]);

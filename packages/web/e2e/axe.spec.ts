@@ -7,8 +7,7 @@ import { HS_URL, expect, test } from "./fixtures/daemon-impersonator";
 const AXE_PATH = createRequire(import.meta.url).resolve("axe-core/axe.min.js");
 const BLOCKING = new Set(["serious", "critical"]);
 
-// One VM per look the /vm page has: each state tone, a Confidential type, an
-// expired setup, and no IP or agent.
+// One VM per look of /vm: each state tone, Confidential, expired setup, no IP or agent.
 const VMS = [
   makeVm(),
   makeVm({ id: "i-0123456789abcdef1", name: "kilo", state: "stopped", public_ip: null }),
@@ -104,8 +103,7 @@ for (const theme of ["light", "dark"] as const) {
       toolCallId: "tc-axe",
     });
 
-    // The fixture runs no Fabrium API. Stub it, and the OpenID request that
-    // signs its calls, so the rail shows VM and /vm shows a list.
+    // No Fabrium API in the fixture: stub it and its OpenID request, so the rail and /vm show VMs.
     await page.route("**/openid/request_token", (route) =>
       route.request().method() === "OPTIONS"
         ? route.fulfill({ status: 204, headers: CORS })

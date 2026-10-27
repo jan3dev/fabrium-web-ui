@@ -12,10 +12,8 @@ const RETRY_MS = [2_000, 5_000, 15_000, 30_000];
 const isTransient = (e: unknown) => !(e instanceof FabriumApiError) || e.status >= 500;
 
 /**
- * True once the API says this user can manage VMs. It stays false for a final
- * "no": 403 for a member, 404 when VM management is off, or no API at all. After
- * a transient failure the hook retries a few times, then again each time the
- * window regains focus, so the button does not stay hidden until a reload.
+ * True once the API says this user can manage VMs; a final "no" (403, 404, no API) keeps it false.
+ * A transient failure is retried a few times, then on each window focus, so no reload is needed.
  */
 export function useVmAccess(): boolean {
   const [allowed, setAllowed] = useState(false);

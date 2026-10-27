@@ -23,8 +23,7 @@ export function useVms() {
   const [snap, setSnap] = useState<Snapshot>({ vms: null, error: null });
   const seqRef = useRef(0);
 
-  // The timer and refresh() can overlap. Only the newest request may update the
-  // state, so an older answer that arrives late, a list or a failure, is dropped.
+  // The timer and refresh() can overlap: only the newest request may update the state.
   const load = useCallback(async () => {
     const seq = ++seqRef.current;
     try {

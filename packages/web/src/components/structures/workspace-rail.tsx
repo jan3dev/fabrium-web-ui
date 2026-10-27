@@ -181,9 +181,7 @@ function WorkspaceButton({
 /**
  * Vertical rail of workspaces on the far left: Home (every room) plus one
  * button per top-level space. Shows a mention badge or unread dot per
- * workspace; right-click marks a workspace read. Below Home, a VM button
- * opens the VM page for people who can manage VMs. One button is current at a
- * time: VM while its page is open, otherwise the button of `scope`.
+ * workspace; right-click marks a workspace read.
  */
 export function WorkspaceRail({
   scope,
@@ -193,7 +191,7 @@ export function WorkspaceRail({
 }: {
   scope: Scope;
   onSelect: (scope: Scope) => void;
-  /** Set only for people who can manage VMs. `active` marks the VM page as open. */
+  /** The VM button, below Home, for VM managers only. While `active`, no workspace is current. */
   vm?: { active: boolean; onSelect: () => void };
   className?: string;
 }) {

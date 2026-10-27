@@ -78,8 +78,7 @@ export function VmView({
   const [deleting, setDeleting] = useState<string | null>(null);
   const doomed = vms?.find((vm) => vm.id === deleting);
 
-  // A VM that left the list cannot be deleted. Forget it, so it cannot bring
-  // the confirmation back if it returns.
+  // Forget a VM that left the list, so its return cannot bring back the confirmation.
   useEffect(() => {
     if (deleting && !doomed) setDeleting(null);
   }, [deleting, doomed]);

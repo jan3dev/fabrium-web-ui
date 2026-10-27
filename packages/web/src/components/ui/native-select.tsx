@@ -2,8 +2,7 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-// A native <select> styled like Input. The browser supplies the menu and the
-// keyboard behavior, so there is nothing to wire for accessibility.
+// A native <select> styled like Input: the browser supplies the menu, keyboard, and accessibility.
 function NativeSelect({ className, ...props }: React.ComponentProps<"select">) {
   return (
     <select
