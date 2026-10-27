@@ -2077,12 +2077,9 @@ function isRemoteAgent(
   return knownAgentIds?.has(sender) === true || msgtype === 'm.notice'
 }
 
-// A tuwunel admin command: `!admin ...`, also with the backslash that runs it outside the admin room. In the
-// admin room tuwunel runs a message that starts with the mention of its server user the same way
-// (`is_admin_command` in tuwunel v1.9.3, src/service/admin/mod.rs). `conduit` is the default server user.
+// tuwunel admin commands: `!admin`, `\!admin`, or a leading `@conduit:` (is_admin_command, v1.9.3).
 const ADMIN_COMMAND = /^\s*(?:\\*!admin\b|@conduit:)/
-// tuwunel answers admin commands as its server user, and an answer can carry a secret: a new password, the
-// tokens of an appservice.
+// tuwunel answers admin commands as its server user, and an answer can carry a secret.
 const SERVER_USER = /^@conduit:/
 
 function logInbound(evt: MatrixEvent): void {

@@ -73,11 +73,10 @@ for p in .env data/matrix/db data/matrix/media data/matrix/config \
     warn "not found, skipped: $p"
   fi
 done
-# VM management keeps the control plane key in a file, and .env holds only its path. Back the file up when it
-# is under ZOOID_HOME: a restore without it leaves the daemon without its key. load_env exports every value,
-# so it runs in a subshell, and a .env that it cannot read falls back to the environment.
+# Back up the control plane key file under ZOOID_HOME: .env holds only its path.
 KEY_FILE="${FABRIUM_CONTROL_PLANE_KEY_FILE:-}"
 if [ -f "$ZOOID_HOME/.env" ]; then
+  # A subshell, as load_env exports every value; an unreadable .env falls back to the environment.
   KEY_FILE="$( (load_env "$ZOOID_HOME/.env" && printf '%s' "${FABRIUM_CONTROL_PLANE_KEY_FILE:-}") 2>/dev/null ||
     printf '%s' "$KEY_FILE" )"
 fi

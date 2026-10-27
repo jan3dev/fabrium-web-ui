@@ -220,8 +220,7 @@ if [ "$NO_BUILD" -eq 0 ]; then
   BUILD_ARGS=(--build-arg GIT_SHA="$GIT_SHA" --build-arg ZOOID_COMMIT="$ZOOID_COMMIT"
     --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH")
   compose build "${BUILD_ARGS[@]}"
-  # buildah (podman) can reuse a cached layer of `ENV ZOOID_COMMIT=...` that an earlier build made with
-  # another value, and the daemon would then answer 503 to every create. Check the image; rebuild if it is wrong.
+  # buildah may reuse a ZOOID_COMMIT layer of another commit (creates then answer 503): check the image.
   image_commit() {
     docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "fabrium-zooid:${GIT_SHA}" |
       sed -n 's/^ZOOID_COMMIT=//p'

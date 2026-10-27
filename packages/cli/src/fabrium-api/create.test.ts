@@ -128,8 +128,7 @@ describe('validation', () => {
   })
 })
 
-// configure-agent.sh stores each secret as KEY=value in secrets.env and refuses what that file cannot hold.
-// The API must refuse the same values, or the VM stops at its first boot. This runs the check of the script itself.
+// Refuse what configure-agent.sh refuses, or the VM stops at boot: this runs the script's own check.
 describe('secrets that the VM script refuses', () => {
   const script = readFileSync(
     new URL('../../../../deploy/agent-vm/configure-agent.sh', import.meta.url),

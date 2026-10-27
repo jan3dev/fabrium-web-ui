@@ -121,8 +121,7 @@ describe('shellQuote', () => {
     },
   )
 
-  // The API refuses these before they get here, because the VM script refuses them. If validation ever
-  // misses one, the file must still be safe to source: no shell code can run from a secret.
+  // Should validation ever miss one, the file must still be safe to source: no secret runs as code.
   it.each([`it's $HOME "x" \`id\` \\ end`, 'line one\nline two', "'", ''])(
     'is still safe to source when validation is bypassed: %j',
     (value) => {

@@ -81,8 +81,7 @@ for r in "${ROOMS[@]}"; do
   esac
 done
 
-# The VM API keeps the registration of its workstations in the tuwunel database. A registration
-# file with the same ID would make tuwunel stop loading the registrations after it at the next start.
+# Registered in the tuwunel database by the VM API: a file of the same ID breaks the next start.
 if [ -f "$ZOOID_HOME/workstations/$WS/.runtime-registration" ]; then
   die "workstation $WS was admitted by the VM API: its registration is in the tuwunel database. Remove the VM first (deploy/README.md, Remove a VM)"
 fi

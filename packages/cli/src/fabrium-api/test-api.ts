@@ -137,11 +137,8 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
       })
     },
     /**
-     * A bundle for `workstation`, as an earlier admission left it: marked, registered in the fake
-     * homeserver, with the agent in the workforce space and its roster entry published.
-     * `registered: false` is an admission that stopped before the registration loaded;
-     * `admitted: false` one that stopped after it, before the agent joined and the roster entry;
-     * `legacy: true` is a bundle of add-workstation.sh, which has no marker.
+     * A bundle for `workstation` as a finished admission leaves it. `registered: false` stops it before the
+     * registration loads, `admitted: false` before the join and the roster; `legacy: true` is add-workstation.sh's.
      */
     async bundle(
       workstation: string,

@@ -341,8 +341,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         }
       }
 
-      // The VM management API for the web UI. Off unless the control plane is
-      // configured. Mounted before serve() for the same reason as the routes above.
+      // The web UI's VM API, off unless configured; mounted before serve() like the routes above.
       const vmApi = loadFabriumApiConfig()
       if (vmApi) {
         mountFabriumApi(transport.app, {

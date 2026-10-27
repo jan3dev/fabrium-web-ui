@@ -1,23 +1,12 @@
 /**
- * Runtime admission of a new agent identity: a port of deploy/add-workstation.sh
- * that registers the appservice through the tuwunel admin room, so tuwunel does
- * not restart and the chat does not stop.
+ * Runtime admission of a new agent identity: a port of deploy/add-workstation.sh that registers the
+ * appservice through the tuwunel admin room, so tuwunel does not restart (deploy/README.md, "Make `@zooid`
+ * a tuwunel admin" and "Where the identity lives").
  *
- * Verified against tuwunel v1.9.3 (https://github.com/matrix-construct/tuwunel/blob/v1.9.3/):
- * - The admin room has the alias `#admins:<server_name>` (src/service/admin/mod.rs).
- * - The command is `!admin appservices register` on the first line. The
- *   registration YAML follows in a Markdown code block: the second line starts
- *   with three backticks, the last line is three backticks. Blank lines are
- *   dropped (src/admin/appservice/register.rs, src/service/admin/processor.rs).
- * - A user is a server admin when joined to the admin room. There is no power
- *   level check (`user_is_admin`). One-time setup: an existing admin sends
- *   `!admin users make-user-admin zooid` in that room (src/admin/user/make_user_admin.rs).
- * - The reply is an `m.notice` of the server user in the admin room, as a reply
- *   to the command: `Appservice registered with ID: <id>`, or `Command failed
- *   with error:` and a code block (src/service/admin/respond.rs).
- * - A registration ID that is loaded already fails with `Duplicate id`, so a
- *   retry checks `whoami` first (src/service/appservice/mod.rs).
- * - `!admin appservices unregister <id>` removes a registration made this way.
+ * Verified against tuwunel v1.9.3 (https://github.com/matrix-construct/tuwunel/blob/v1.9.3/): the command is
+ * `!admin appservices register` with the YAML in a code block (src/admin/appservice/register.rs); the reply is
+ * an `m.notice` of the server user, `Appservice registered with ID: <id>` or `Command failed with error:`
+ * (src/service/admin/respond.rs); a loaded ID fails with `Duplicate id` (src/service/appservice/mod.rs).
  */
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -106,14 +95,11 @@ export function createAdmission(deps: AdmissionDeps): { admitNew(agent: NewAgent
       if (other && other !== a.agent) throw conflict(`workstation ${ws} belongs to agent ${other}`)
       return true
     }
-    // The sender of the new appservice is always in its namespace. If @<ws> exists
-    // already, the VM token would act as that user.
+    // The appservice's sender is `@<ws>`: an existing user of that name would be taken over.
     if (!(await usernameAvailable(deps.conn, deps.asToken, ws))) {
       throw conflict(`@${ws}:${deps.serverName} is already a Matrix user; choose another name`)
     }
-    // The namespace of the new appservice is `@<ws>.*`: it acts as every user there. So the agent
-    // must be new, and no member of the workforce space may be under that prefix. The check sees the
-    // users of the space only: a user outside it with such a name is not found (deploy/README.md).
+    // The appservice owns `@<ws>.*`: no space member may live there (limits: deploy/README.md).
     const agentId = `@${ws}.${a.agent}:${deps.serverName}`
     if (!(await usernameAvailable(deps.conn, deps.asToken, `${ws}.${a.agent}`))) {
       throw conflict(`${agentId} is already a Matrix user; choose another name`)

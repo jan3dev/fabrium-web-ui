@@ -30,8 +30,7 @@ const USER_ID_RE = /^@[a-z0-9._=/+-]+:[A-Za-z0-9.-]+(:[0-9]+)?$/
 /** True for a user ID in the strict grammar, the only kind that may reach the VM. */
 export const isStrictUserId = (userId: string): boolean => USER_ID_RE.test(userId)
 
-// configure-agent.sh stores each secret as KEY=value in secrets.env, which systemd reads. It refuses a value
-// with a line break, a backslash, or a leading quote (the `for key in $VARS` loop of deploy/agent-vm/configure-agent.sh).
+// The secret values that configure-agent.sh refuses for secrets.env (its `for key in $VARS` loop).
 const VM_REFUSES = /[\n\r\\]|^["']/
 
 /** Why the VM script would refuse this secret, in the words of the script, or undefined. `name` is the field or variable. */

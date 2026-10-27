@@ -23,8 +23,7 @@ export interface CreateRequest {
 }
 
 const MAX_TEXT = 200
-// A control character would split a line of the secrets file. A key never has one.
-// (A line break is also covered by secretProblem, with the wording of the VM script.)
+// A control character would split a line of the secrets file (secretProblem words the line break).
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
 
 const bad = (error: string) => new ApiError(400, { error })
@@ -113,8 +112,7 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
   let files: BundleFiles
   let agentId: string
   if (req.agent.mode === 'new') {
-    // A VM of this name runs the workstation's agent: the admission would take it for a resume and rewrite
-    // its roster entry before the control plane refuses the name.
+    // Else the admission takes the running VM's agent for a resume and rewrites its roster entry.
     const listed = await fetchVms(deps.controlPlane)
     if ('failure' in listed) return listed.failure
     if (listed.vms.some((vm) => vm.name === req.name)) throw new ApiError(409, { error: 'name in use' })
@@ -146,8 +144,7 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
     agentId = entry.agent_id
   }
 
-  // The greeting is a courtesy. A caller ID outside the strict grammar (a historical localpart, an IP literal
-  // server name) skips it, rather than fail a create whose identity is already admitted.
+  // The greeting is a courtesy: a caller ID outside the strict grammar skips it instead of failing.
   const creator = isStrictUserId(deps.creator) ? deps.creator : undefined
   if (creator === undefined) {
     console.warn(`[fabrium] ${req.name}: no greeting, the caller's user ID is outside the strict grammar`)
@@ -167,8 +164,7 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
     bootstrap: payload,
   })
   if (!upstream.ok) return relay(upstream)
-  // The control plane went through with the create. If its answer is lost, the VM exists or may exist: say so,
-  // and do not report a failed create. The VM list shows the VM.
+  // The create went through: with its answer lost, the VM exists or may, so report no failure.
   let vm: unknown
   try {
     vm = JSON.parse(await upstream.text())

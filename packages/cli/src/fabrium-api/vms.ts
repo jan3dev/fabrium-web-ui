@@ -74,11 +74,8 @@ async function admissionFinished(
 }
 
 /**
- * The workstations whose identity is complete. A bundle of add-workstation.sh is: an operator ran the script
- * and saw it fail or finish. A bundle of the VM API is when tuwunel accepts its appservice token as its sender
- * and its admission reached the last step (see `admissionFinished`). An admission can fail at any step, and
- * the bundle then stays on disk with its marker.
- * Read-only. It never admits, because that would write the roster again without the persona and the project.
+ * The workstations whose identity is complete: every bundle of add-workstation.sh, and a VM API bundle once
+ * its admission finished (`admissionFinished`). Read-only: an admission would rewrite the roster entry.
  */
 export async function liveWorkstations(
   deps: LiveDeps,

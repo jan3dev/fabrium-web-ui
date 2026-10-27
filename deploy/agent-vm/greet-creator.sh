@@ -57,8 +57,7 @@ if [ -n "$OPENCODE_BIN" ] && [ -d "$AGENT_DIR" ]; then
     -p EnvironmentFile="$ENV_FILE" -p EnvironmentFile="$SECRETS_FILE" \
     -p RuntimeMaxSec="$GREET_TIMEOUT_SEC" \
     "$OPENCODE_BIN" run "$PROMPT" </dev/null 2>/dev/null)" || TEXT=""
-  # No terminal colors, no leading blank lines, and a bounded length. The cut is not a `head` in the pipe:
-  # `head` closes the pipe early on a long answer, and pipefail with set -e ends the script on that SIGPIPE.
+  # Drop colors and leading blank lines. Cut after the pipe: a `head` there dies of SIGPIPE.
   TEXT="$(printf '%s' "$TEXT" | sed -E 's/\x1b\[[0-9;?]*[A-Za-z]//g' | sed -e '/[^[:space:]]/,$!d')"
   TEXT="${TEXT:0:1500}"
 fi

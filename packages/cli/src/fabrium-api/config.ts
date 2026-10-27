@@ -77,8 +77,7 @@ export function loadFabriumApiConfig(
     throw new Error(`FABRIUM_CONTROL_PLANE_KEY_FILE: cannot read ${keyFile}: ${(err as Error).message}`)
   }
   if (!key) throw new Error(`FABRIUM_CONTROL_PLANE_KEY_FILE: ${keyFile} is empty`)
-  // The key goes into an Authorization header: anything but printable ASCII breaks it, and
-  // Node puts the whole header value into the message of that error.
+  // A header takes printable ASCII only, and Node's error for a bad value quotes it: the key.
   if (!KEY_RE.test(key)) {
     throw new Error(
       `FABRIUM_CONTROL_PLANE_KEY_FILE: ${keyFile} must hold the key only: printable ASCII, with no space and no line break`,
