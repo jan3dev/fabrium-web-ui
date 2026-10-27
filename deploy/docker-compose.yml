@@ -38,6 +38,8 @@ services:
       target: daemon
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
+        # Full commit; the image keeps it as ENV ZOOID_COMMIT for the VM management API.
+        ZOOID_COMMIT: ${ZOOID_COMMIT:-}
       # deploy.sh prunes only images with this label.
       labels:
         fabrium.image: "true"
@@ -57,6 +59,14 @@ services:
       - MATRIX_HS_TOKEN
       - GH_TOKEN
       - HAVEN_API_KEY
+      # VM management (see "VM management" in deploy/README.md). The API stays off without the first two.
+      # The key file is under ZOOID_HOME, which is mounted below: it needs no mount of its own.
+      - FABRIUM_CONTROL_PLANE_URL
+      - FABRIUM_CONTROL_PLANE_KEY_FILE
+      - FABRIUM_HAVEN_MODEL
+      - FABRIUM_VM_ROOMS
+      - HOMESERVER_URL
+      - ZOOID_HOME
       - ZOOID_NO_PREPULL
       - ZOOID_REFRESH_IMAGES
     volumes:

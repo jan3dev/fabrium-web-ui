@@ -12,6 +12,8 @@ Usage: deploy/add-workstation.sh <workstation> --agent <name> --room <alias> [--
                                  [--persona <text>] [--project <text>] [--preset <name>] [-h]
 
 Admits one agent VM. Idempotent: run it again to update the roster entry.
+Refuses a workstation that the VM API of the web UI admitted (its bundle has
+the file .runtime-registration): see "Remove a VM" in deploy/README.md.
 
   1. Writes the VM bundle ZOOID_HOME/workstations/<workstation>/: .env with new
      Matrix tokens, and workforce/zooid.yaml. Existing files are kept. Stops when
@@ -78,6 +80,11 @@ for r in "${ROOMS[@]}"; do
     *[[:space:]\'\",\\]*) die "--room must not contain spaces, quotes, commas or backslashes (got $r)" ;;
   esac
 done
+
+# Registered in the tuwunel database by the VM API: a file of the same ID breaks the next start.
+if [ -f "$ZOOID_HOME/workstations/$WS/.runtime-registration" ]; then
+  die "workstation $WS was admitted by the VM API: its registration is in the tuwunel database. Remove the VM first (deploy/README.md, Remove a VM)"
+fi
 
 require_cmd docker curl jq openssl perl
 ENV_FILE="$ZOOID_HOME/.env"

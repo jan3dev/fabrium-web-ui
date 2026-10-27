@@ -2077,6 +2077,11 @@ function isRemoteAgent(
   return knownAgentIds?.has(sender) === true || msgtype === 'm.notice'
 }
 
+// tuwunel admin commands: `!admin`, `\!admin`, or a leading `@conduit:` (is_admin_command, v1.9.3).
+const ADMIN_COMMAND = /^\s*(?:\\*!admin\b|@conduit:)/
+// tuwunel answers admin commands as its server user, and an answer can carry a secret.
+const SERVER_USER = /^@conduit:/
+
 function logInbound(evt: MatrixEvent): void {
   const sender = evt.sender ?? '?'
   const room = evt.room_id ?? '?'
@@ -2085,9 +2090,13 @@ function logInbound(evt: MatrixEvent): void {
     const body = evt.content?.body ?? ''
     const mentions = (evt.content?.['m.mentions'] as { user_ids?: string[] } | undefined)?.user_ids
     const mentionsStr = mentions?.length ? ` mentions=${JSON.stringify(mentions)}` : ''
-    console.log(
-      `[matrix] inbound msg in ${room} from ${sender}${mentionsStr}: ${truncate(body, 200)}`,
-    )
+    // An admin command can carry secrets: an appservice registration holds its tokens.
+    const shown = ADMIN_COMMAND.test(body)
+      ? '(admin command)'
+      : SERVER_USER.test(sender)
+        ? '(server user message)'
+        : truncate(body, 200)
+    console.log(`[matrix] inbound msg in ${room} from ${sender}${mentionsStr}: ${shown}`)
   } else {
     console.log(`[matrix] inbound ${type} in ${room} from ${sender}`)
   }

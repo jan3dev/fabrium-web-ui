@@ -28,12 +28,15 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 # ---- daemon: `zooid start` + docker CLI for sibling agent containers ----
 FROM node:22-slim AS daemon
 ARG GIT_SHA=unknown
+# The full commit, not the short GIT_SHA: the VM management API gives it to a new agent VM, which checks it out.
+ARG ZOOID_COMMIT=
 LABEL org.opencontainers.image.title="fabrium-zooid" \
       org.opencontainers.image.source="https://github.com/jan3dev/fabrium-web-ui" \
       org.opencontainers.image.revision="${GIT_SHA}"
 COPY --from=docker:29-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=prod /src /app
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    ZOOID_COMMIT=${ZOOID_COMMIT}
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.APPSERVICE_PORT||9000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 ENTRYPOINT ["node", "/app/packages/cli/dist/bin.js"]
