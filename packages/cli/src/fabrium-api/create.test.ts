@@ -222,6 +222,20 @@ describe('a new agent', () => {
     expect(sent.bootstrap.script).toContain('greet-creator.sh')
   })
 
+  it('creates the VM without the greeting for a caller ID outside the strict grammar', async () => {
+    setup()
+    // A historical user ID, which servers still accept. It must not reach the VM, and it must not block the create.
+    const caller = '@Ann:example.org'
+    api.fake.joinSpace(caller, 90)
+    const res = await create(body(), api.fake.openIdToken(caller))
+    expect(res.status).toBe(201)
+    const sent = upstreamCreate()
+    expect(sent.bootstrap.files[2]?.content).toBe(
+      `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='${GITHUB}'\n`,
+    )
+    expect(sent.bootstrap.script).not.toContain('greet-creator.sh')
+  })
+
   it('omits instance_type and GH_TOKEN when they are absent or empty', async () => {
     setup()
     await create(body({ instance_type: undefined, github_token: '' }))

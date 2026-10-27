@@ -10,7 +10,7 @@ import {
 } from './bundle.js'
 import { describeFailure, relay, type ControlPlane } from './control-plane.js'
 import { ApiError } from './errors.js'
-import { buildPayload, secretProblem } from './payload.js'
+import { buildPayload, isStrictUserId, secretProblem } from './payload.js'
 import { agentsWithFree, fetchVms, liveWorkstations, type LiveDeps } from './vms.js'
 
 export interface CreateRequest {
@@ -141,6 +141,12 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
     agentId = entry.agent_id
   }
 
+  // The greeting is a courtesy. A caller ID outside the strict grammar (a historical localpart, an IP literal
+  // server name) skips it, rather than fail a create whose identity is already admitted.
+  const creator = isStrictUserId(deps.creator) ? deps.creator : undefined
+  if (creator === undefined) {
+    console.warn(`[fabrium] ${req.name}: no greeting, the caller's user ID is outside the strict grammar`)
+  }
   const payload = buildPayload({
     env: files.env,
     yaml: files.yaml,
@@ -148,7 +154,7 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
     havenModel: deps.havenModel,
     githubToken: req.githubToken,
     commit: deps.commit,
-    creator: deps.creator,
+    creator,
   })
   const upstream = await deps.controlPlane.request('POST', '/v1/vms', {
     name: req.name,
