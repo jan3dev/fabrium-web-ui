@@ -538,6 +538,14 @@ that is joined to the admin room. Make `@zooid` one:
 Without this step, create answers `502` with `"step": "register_appservice"` and a message that names this setup.
 The registration survives a tuwunel restart: tuwunel keeps it in its database.
 
+The daemon relies on these tuwunel v1.9.3 behaviors (source: `https://github.com/matrix-construct/tuwunel/blob/v1.9.3/`):
+
+- The command is `!admin appservices register` with the YAML in a code block (`src/admin/appservice/register.rs`).
+- The reply is an `m.notice` of the server user: `Appservice registered with ID: <id>`, or `Command failed with error:` (`src/service/admin/respond.rs`).
+- A loaded ID fails with `Duplicate id` (`src/service/appservice/mod.rs`).
+- Admin commands start with `!admin`, `\!admin`, or `@conduit:` (`is_admin_command`). The daemon log hides them.
+- The OpenID check endpoint works with federation off (`register_server_misc_routes`).
+
 ### Where the identity lives
 
 A new agent gets `workstations/<ws>/` as `add-workstation.sh` makes it: `.env` with the VM tokens, and

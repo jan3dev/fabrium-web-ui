@@ -1,8 +1,6 @@
 /**
- * Test helper: a small in-memory homeserver behind a `fetch`. It answers the
- * calls of the VM API the way tuwunel 1.9.3 does for the cases the tests need,
- * including `!admin appservices register` in the admin room. Production code
- * never imports it.
+ * Test helper: an in-memory homeserver behind a `fetch`, answering like tuwunel 1.9.3 for the
+ * cases the tests need (including `!admin appservices register`). Production code never imports it.
  */
 import { parse } from 'yaml'
 

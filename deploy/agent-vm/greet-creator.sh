@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Send the first message of this VM's agent to the person who created the VM, in a new direct room:
-# it shows that the agent works. The VM management API of the central instance runs it once, as the
-# last step of the setup, with FABRIUM_CREATOR set. The agent's own model writes the message; a fixed
-# text replaces it when the model fails. Run it as the agent's user, after configure-agent.sh.
+# Greets the VM's creator in a new direct room. The VM API runs it once, last, with FABRIUM_CREATOR set;
+# run as the agent's user after configure-agent.sh. Behavior: deploy/README.md, "VM management".
 set -euo pipefail
 
 ZOOID_HOME="${ZOOID_HOME:-$HOME/zooid}"
@@ -43,7 +41,7 @@ matrix() {
       ${3:+--data "$3"} "${HOMESERVER_URL%/}$2${sep}user_id=$(uri "$AGENT_ID")"
 }
 
-# --- The message --------------------------------------------------------------
+# The message
 PROMPT="You are $AGENT_NAME, an AI agent that was just born: you came online for the first time, on your own virtual machine. Say hi to your creator, $CREATOR, so that they know you work. Write two or three short sentences in English, in your own words. Tell them that they can talk to you by mentioning you ($AGENT_ID) in a room of the workspace. Reply with the message only."
 TEXT=""
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
@@ -66,7 +64,7 @@ if [ -z "${TEXT//[[:space:]]/}" ]; then
   TEXT="Hi! I am $AGENT_NAME, and I just came online on my own virtual machine. Everything works. Mention me ($AGENT_ID) in a room of the workspace to talk to me."
 fi
 
-# --- The direct room --------------------------------------------------------------
+# The direct room
 BODY="$(jq -cn --arg u "$CREATOR" '{preset: "trusted_private_chat", is_direct: true, invite: [$u]}')"
 ROOM="$(matrix POST /_matrix/client/v3/createRoom "$BODY" | jq -r '.room_id // empty')"
 [ -n "$ROOM" ] || die "the homeserver gave no room for the direct chat"

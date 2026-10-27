@@ -1,12 +1,7 @@
 /**
  * Runtime admission of a new agent identity: a port of deploy/add-workstation.sh that registers the
- * appservice through the tuwunel admin room, so tuwunel does not restart (deploy/README.md, "Make `@zooid`
- * a tuwunel admin" and "Where the identity lives").
- *
- * Verified against tuwunel v1.9.3 (https://github.com/matrix-construct/tuwunel/blob/v1.9.3/): the command is
- * `!admin appservices register` with the YAML in a code block (src/admin/appservice/register.rs); the reply is
- * an `m.notice` of the server user, `Appservice registered with ID: <id>` or `Command failed with error:`
- * (src/service/admin/respond.rs); a loaded ID fails with `Duplicate id` (src/service/appservice/mod.rs).
+ * appservice through the tuwunel admin room, so tuwunel does not restart. The tuwunel v1.9.3 behavior
+ * it relies on is in deploy/README.md, "Make `@zooid` a tuwunel admin (once)".
  */
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
