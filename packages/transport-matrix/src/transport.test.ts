@@ -2925,18 +2925,18 @@ describe('users of this daemon’s own workstation', () => {
 })
 
 describe('inbound logging', () => {
-  const message = (eventId: string, body: string) => ({
+  const message = (eventId: string, body: string, sender = '@zooid:example.com') => ({
     type: 'm.room.message',
     event_id: eventId,
     room_id: '!admins:example.com',
-    sender: '@zooid:example.com',
+    sender,
     content: { msgtype: 'm.text', body },
   })
-  const logged = async (body: string) => {
+  const logged = async (body: string, sender?: string) => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     try {
       const { transport } = makeTransport()
-      await postTxn(transport.app, { events: [message(`$log${++txnCounter}`, body)] })
+      await postTxn(transport.app, { events: [message(`$log${++txnCounter}`, body, sender)] })
       return log.mock.calls.map((call) => call.join(' ')).join('\n')
     } finally {
       log.mockRestore()
@@ -2957,6 +2957,16 @@ describe('inbound logging', () => {
   ])('does not log the body of an admin command: %j', async (body) => {
     const out = await logged(body)
     expect(out).toContain('inbound msg in !admins:example.com from @zooid:example.com')
+    expect(out).not.toContain('secret')
+  })
+
+  it.each([
+    'Successfully reset the password for user @bob:example.com: `secret-password`',
+    'Config for lima:\n```yaml\nas_token: secret-as-token\nhs_token: secret-hs-token\n```',
+  ])('does not log the body of a message from the server user: %j', async (body) => {
+    // tuwunel answers admin commands as its server user, and an answer can carry a secret.
+    const out = await logged(body, '@conduit:example.com')
+    expect(out).toContain('inbound msg in !admins:example.com from @conduit:example.com')
     expect(out).not.toContain('secret')
   })
 

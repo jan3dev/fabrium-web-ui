@@ -113,6 +113,11 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
   let files: BundleFiles
   let agentId: string
   if (req.agent.mode === 'new') {
+    // A VM of this name runs the workstation's agent: the admission would take it for a resume and rewrite
+    // its roster entry before the control plane refuses the name.
+    const listed = await fetchVms(deps.controlPlane)
+    if ('failure' in listed) return listed.failure
+    if (listed.vms.some((vm) => vm.name === req.name)) throw new ApiError(409, { error: 'name in use' })
     const bundle = await deps.admission.admitNew({
       workstation: req.name,
       agent: req.agent.name,
