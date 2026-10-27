@@ -2081,6 +2081,9 @@ function isRemoteAgent(
 // admin room tuwunel runs a message that starts with the mention of its server user the same way
 // (`is_admin_command` in tuwunel v1.9.3, src/service/admin/mod.rs). `conduit` is the default server user.
 const ADMIN_COMMAND = /^\s*(?:\\*!admin\b|@conduit:)/
+// tuwunel answers admin commands as its server user, and an answer can carry a secret: a new password, the
+// tokens of an appservice.
+const SERVER_USER = /^@conduit:/
 
 function logInbound(evt: MatrixEvent): void {
   const sender = evt.sender ?? '?'
@@ -2091,7 +2094,11 @@ function logInbound(evt: MatrixEvent): void {
     const mentions = (evt.content?.['m.mentions'] as { user_ids?: string[] } | undefined)?.user_ids
     const mentionsStr = mentions?.length ? ` mentions=${JSON.stringify(mentions)}` : ''
     // An admin command can carry secrets: an appservice registration holds its tokens.
-    const shown = ADMIN_COMMAND.test(body) ? '(admin command)' : truncate(body, 200)
+    const shown = ADMIN_COMMAND.test(body)
+      ? '(admin command)'
+      : SERVER_USER.test(sender)
+        ? '(server user message)'
+        : truncate(body, 200)
     console.log(`[matrix] inbound msg in ${room} from ${sender}${mentionsStr}: ${shown}`)
   } else {
     console.log(`[matrix] inbound ${type} in ${room} from ${sender}`)

@@ -430,7 +430,7 @@ Do not add `triggers:` to the VM's `zooid.yaml`. At power level 0 the VM cannot 
 - The registration has no alias namespace: with one, the agent (which can read the VM token) could create any
   free `#alias`. The rooms must exist before admission.
 - One agent per VM.
-- When the web UI admits a VM, its registration goes through the tuwunel admin room. The room keeps that message, with the VM tokens. Only server admins are in that room, and the daemon does not log admin commands.
+- When the web UI admits a VM, its registration goes through the tuwunel admin room. The room keeps that message, with the VM tokens. Only server admins are in that room. The daemon logs neither admin commands nor the messages of the server user, whose answers can carry secrets (a new password, appservice tokens).
 
 ### Remove a VM
 
