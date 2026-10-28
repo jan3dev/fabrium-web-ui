@@ -7,7 +7,7 @@ Everything an instance runs comes from this repo as one Docker Compose project
 |---|---|---|
 | `tuwunel` | `ghcr.io/matrix-construct/tuwunel` pinned by digest | Matrix homeserver (chats, accounts, rooms). |
 | `zooid` | `fabrium-zooid:<git sha>`, built from `deploy/Dockerfile` | The daemon (`zooid start`). Starts one container per agent through the engine socket (podman's Docker-compatible socket on a box, Docker's on a laptop). |
-| `web` | `fabrium-web:<git sha>`, built from `deploy/Dockerfile` | Caddy serving `packages/web/dist`, `/config.json`, and proxying `/_matrix/*` to Tuwunel. HTTPS is automatic for a public domain. |
+| `web` | `fabrium-web:<git sha>`, built from `deploy/Dockerfile` | Caddy serving `packages/web/dist`, `/config.json`, and proxying `/_matrix/*` to Tuwunel and `/_fabrium/*` to the daemon ([VM management](#vm-management-from-the-web-ui)). HTTPS is automatic for a public domain. |
 
 Per-instance state lives outside the repo, under `ZOOID_HOME` (default `~/zooid`):
 
@@ -21,7 +21,8 @@ data/matrix/db, media         Tuwunel database and media                  ← th
 data/matrix/config/           tuwunel.toml + registrations/zooid.yaml     (rendered by deploy.sh)
 web/config.json               UI runtime config                           (rendered by deploy.sh)
 app/context-mcp/              context-mcp bundle copied out of the image  (by deploy.sh)
-workstations/<ws>/            agent VM bundle: .env with the VM tokens, workforce/zooid.yaml (by add-workstation.sh)
+workstations/<ws>/            agent VM bundle: .env with the VM tokens, workforce/zooid.yaml (by add-workstation.sh or the VM API; the VM API adds .runtime-registration)
+control-plane-api-key         tenant API key of the control plane, mode 600 (VM management)  ← you create
 backups/                      backup.sh output
 deploy.log                    one line per successful deploy
 ```
@@ -38,7 +39,7 @@ deploy.log                    one line per successful deploy
 | `deploy/backup.sh` | Stops `zooid` and `tuwunel`, tars the essential state (owner-only file), restarts them. |
 | `deploy/restore.sh` | Extracts a backup into an empty `ZOOID_HOME`. |
 | `deploy/compose.sh` | `docker compose` bound to this instance, for `logs`, `ps`, `stop`, `start`, `down`. |
-| `deploy/add-workstation.sh` | Admits an agent VM: writes its tokens and tuwunel registration, adds its users to the workforce space and its rooms, publishes its roster entry. See [Agent VM](#agent-vm-workstation). |
+| `deploy/add-workstation.sh` | Admits an agent VM: writes its tokens and tuwunel registration, adds its users to the workforce space and its rooms, publishes its roster entry. Refuses a workstation that the VM API admitted. See [Agent VM](#agent-vm-workstation). |
 | `deploy/agent-vm/prepare-image.sh` | Prepares a VM to become the agent VM image: installs Node 22, pnpm, opencode, gh and Docker CE, builds the zooid CLI at a commit. No bundle, no service. See [Build a VM image](#build-a-vm-image). |
 | `deploy/agent-vm/provision.sh` | Runs on an agent VM made from the image: checks the bundle and the VM token, builds the zooid CLI only when `--ref` is not the image's commit, runs it as a systemd user service. Installs nothing. Idempotent; also the update path. |
 | `deploy/agent-vm/configure-agent.sh` | Runs on an agent VM after `provision.sh`, for `preset: opencode`: stores the Haven and GitHub variables in `secrets.env`, writes `opencode.json`, checks one opencode turn on Haven, configures git, restarts the agent. See [Configure an opencode agent](#configure-an-opencode-agent). |
@@ -125,9 +126,11 @@ deploy/restore.sh zooid-<UTC>.tar.gz   # into an empty ZOOID_HOME, then run depl
 ```
 
 The backup contains `.env`, the Matrix DB/media/config, `zooid.yaml`, `workforce/data` (minus sockets),
-`home/`, the agent VM bundles (`workstations/`), and the agent workdirs minus `node_modules`, `.pnpm-store`,
-`.cache`, attachments and any git clone (a first-level directory with `.git`). Agents lose nothing that
-matters: the chat history is in Matrix, and an agent starts a fresh session on its next message.
+`home/`, the agent VM bundles (`workstations/`), the control plane key file (when `FABRIUM_CONTROL_PLANE_KEY_FILE`
+in `.env` points under `ZOOID_HOME`; see [VM management](#vm-management-from-the-web-ui)), and the agent
+workdirs minus `node_modules`, `.pnpm-store`, `.cache`, attachments and any git clone (a first-level directory
+with `.git`). Agents lose nothing that matters: the chat history is in Matrix, and an agent starts a fresh session
+on its next message.
 
 ## Moving the current prod instance to this layout
 
@@ -427,6 +430,7 @@ Do not add `triggers:` to the VM's `zooid.yaml`. At power level 0 the VM cannot 
 - The registration has no alias namespace: with one, the agent (which can read the VM token) could create any
   free `#alias`. The rooms must exist before admission.
 - One agent per VM.
+- When the web UI admits a VM, its registration goes through the tuwunel admin room. The room keeps that message, with the VM tokens. Only server admins are in that room. The daemon logs neither admin commands nor the messages of the server user, whose answers can carry secrets (a new password, appservice tokens).
 
 ### Remove a VM
 
@@ -449,6 +453,17 @@ Do not add `triggers:` to the VM's `zooid.yaml`. At power level 0 the VM cannot 
    Without the roster entry, the UI no longer marks `@vm1.coder` as an agent: its old messages show
    without the `agent` badge. To keep the badge on that history, skip the last command.
 
+**A VM that the web UI admitted** (its bundle has `.runtime-registration`) has no registration file and needs no
+tuwunel restart. Replace step 2:
+
+1. Delete the VM in the web UI, or stop the agent as in step 1.
+2. A server admin sends `!admin appservices unregister vm1` in `#admins:SERVER_NAME`. tuwunel answers
+   `Appservice unregistered.` and the VM token stops working at once. Then `rm -r ~/zooid/workstations/vm1`.
+3. Do step 3 above: remove the users from the rooms and the space, then empty the roster entry.
+
+Only a registration made with `!admin appservices register` can be removed this way. tuwunel refuses to
+unregister one from a file.
+
 ### Local simulation
 
 `deploy/agent-vm/sim/` runs the VM as a container next to the [local test](#local-test-macos-or-linux-docker-desktop-or-docker-ce)
@@ -467,3 +482,101 @@ approve, and the reply appears. To start the bundle's own config instead of the 
 directory of the bundle's agent. The bundle's `preset: claude` still needs harness credentials in
 `$ZOOID_HOME/vm-sim/home`, the `HOME` of the container. Tear down:
 `docker compose -p fabrium-vm-sim -f deploy/agent-vm/sim/compose.yml down && rm -rf $ZOOID_HOME/vm-sim`.
+
+## VM management from the web UI
+
+Admins and owners of the workspace create, list, start, stop, reboot, and delete agent VMs in the web UI.
+The browser calls the zooid daemon at `/_fabrium/v1` on its own origin: Caddy sends `/_fabrium/*` to `zooid`.
+The daemon checks the user, gives a new agent its Matrix identity, and builds the bootstrap payload (the bundle,
+the secrets, and a setup script). The Fabrium control plane, a separate service, starts the VM on AWS and hands
+the payload to it once. The VM then runs `provision.sh` and `configure-agent.sh`, as in
+[Agent VM](#agent-vm-workstation).
+
+When the agent works, `deploy/agent-vm/greet-creator.sh` sends its first message to the user who created the VM,
+in a new direct room. The agent's model writes the message; a fixed text replaces it when the model fails. The
+agent answers only in its configured rooms (when it is mentioned there), so the message tells the user to mention
+it in a room of the workspace. A failed greeting does not fail the setup.
+
+The API is off unless the control plane is configured. Then every path under `/_fabrium/` answers `404`.
+
+| Variable | Set in | Use |
+|---|---|---|
+| `FABRIUM_CONTROL_PLANE_URL` | `.env` | Base URL of the control plane, for example `https://control.example.org`. It must be `https`; plain `http` works only for `localhost`, because the create request carries the Haven and GitHub secrets. |
+| `FABRIUM_CONTROL_PLANE_KEY_FILE` | `.env` | Absolute path of a file that holds the tenant API key and nothing else (mode 600), for example `/home/ubuntu/zooid/control-plane-api-key`. Write the whole path: neither `deploy.sh` nor compose expands `~` or `$HOME` in `.env`. `ZOOID_HOME` is mounted at the same path in the daemon, so the file needs no mount of its own, and `backup.sh` includes it when it is under `ZOOID_HOME`. The key is in a file, not in `.env`, because agents inherit the environment of the daemon. The daemon reads the file once at start. It stops when the file holds more than the key: the key is printable ASCII, with no space and no line break. |
+| `FABRIUM_HAVEN_MODEL` | `.env` | Haven model of new VMs, for example `glm-5-3`. Without it, create answers `503`. It must not have a line break, a backslash, or a leading quote: `configure-agent.sh` refuses such a value, and the daemon stops at start. |
+| `FABRIUM_VM_ROOMS` | `.env` | Rooms of new agents, comma separated. Default `#general`. The rooms must exist. Put the value in single quotes: `FABRIUM_VM_ROOMS='#general,#dev'`. |
+| `HOMESERVER_URL` | `.env` | Exists already. The bundle of each VM gets it as the public URL of the homeserver. |
+| `ZOOID_HOME` | compose | Exists already. The daemon finds `workstations/` and the registration files under it. |
+| `ZOOID_COMMIT` | image | The full commit of the image, set by `deploy.sh` at build time. A new VM checks out this commit from GitHub, so deploy a commit that is pushed. Without it, create answers `503`. |
+
+On podman, buildah can reuse a cached image layer that was built with another `ZOOID_COMMIT`. After the build,
+`deploy.sh` reads `ZOOID_COMMIT` from the `fabrium-zooid` image. When it is not the commit of the checkout,
+`deploy.sh` warns and rebuilds only the zooid image without cache, and it stops if the value is still wrong. The
+first deploy that brings this check runs the old `deploy.sh` (bash keeps reading the script that it started
+with), so it can leave an image without the commit. Run `deploy/deploy.sh --no-pull` once more: the check
+repairs the image.
+
+A setting that is wrong (a key file that cannot be read, is empty, or holds more than the key; a bad URL; a bad
+room; a Haven model that the VM script refuses) stops the daemon at start with a message that names the variable.
+The message never holds the key.
+
+### Make `@zooid` a tuwunel admin (once)
+
+The daemon registers the appservice of each new VM at run time, so tuwunel does not restart. It sends
+`!admin appservices register` to the tuwunel admin room, `#admins:SERVER_NAME`, as `@zooid`. The registration
+YAML follows in a code block. tuwunel runs an admin command only for a server admin, and a server admin is a user
+that is joined to the admin room. Make `@zooid` one:
+
+1. An existing server admin sends this message in `#admins:SERVER_NAME`:
+   ```
+   !admin users make-user-admin zooid
+   ```
+   tuwunel answers `@zooid:SERVER_NAME has been granted admin privileges.`
+2. If no user is a server admin, start tuwunel once with the argument `--execute "users make_user_admin zooid"`.
+   The tuwunel documentation describes it under "Lost access to admin room".
+
+Without this step, create answers `502` with `"step": "register_appservice"` and a message that names this setup.
+The registration survives a tuwunel restart: tuwunel keeps it in its database.
+
+The daemon relies on these tuwunel v1.9.3 behaviors (source: `https://github.com/matrix-construct/tuwunel/blob/v1.9.3/`):
+
+- The command is `!admin appservices register` with the YAML in a code block (`src/admin/appservice/register.rs`).
+- The reply is an `m.notice` of the server user: `Appservice registered with ID: <id>`, or `Command failed with error:` (`src/service/admin/respond.rs`).
+- A loaded ID fails with `Duplicate id` (`src/service/appservice/mod.rs`).
+- Admin commands start with `!admin`, `\!admin`, or `@conduit:` (`is_admin_command`). The daemon log hides them.
+- The OpenID check endpoint works with federation off (`register_server_misc_routes`).
+
+### Where the identity lives
+
+A new agent gets `workstations/<ws>/` as `add-workstation.sh` makes it: `.env` with the VM tokens, and
+`workforce/zooid.yaml`. The VM API adds the file `.runtime-registration`. It marks a workstation whose registration
+is in the tuwunel database, not in `data/matrix/config/registrations/`. `add-workstation.sh` refuses such a
+workstation: a registration file with the same ID makes tuwunel abort the loading of the registrations at the next
+start (it logs `Duplicate id`). To remove a VM of this kind, see [Remove a VM](#remove-a-vm).
+
+Deleting a VM in the web UI ends the VM only. The identity stays in `workstations/<ws>/`, and the agent can move
+to a new VM: choose the existing agent in the New VM dialog.
+
+A failed create can be sent again with the same body. The daemon continues from the step that failed (`bundle`,
+`register_appservice`, `whoami`, `register_user`, `join`, `roster`), with the same tokens, and sends the
+registration only when tuwunel does not know the VM token yet: tuwunel 1.9.3 refuses a second `register` of a
+loaded ID.
+
+An agent whose admission did not finish is not free. The admission is finished when tuwunel accepts the token of
+the bundle (`whoami`), the agent is in the workforce space, and the roster entry of the workstation lists the
+agent. A failure at any step of a first admission (`register_appservice`, `whoami`, `register_user`, `join`, or
+`roster`) leaves the bundle on disk with at least one of these facts missing. `GET /agents` lists such an agent
+with `free: false`, and a create for the existing agent answers `409`. Send the new-agent request again, with the
+same VM name and agent name: it finishes the admission. For an existing agent the daemon only reads from
+tuwunel, with the three checks above. It never runs the admission, because that would write the roster entry
+again without the persona and the project. A bundle of `add-workstation.sh` has no `.runtime-registration`
+marker and gets no check.
+
+The Haven key and the GitHub token must not have a line break, a backslash, or a leading quote.
+`configure-agent.sh` stores each secret as `KEY=value` in `secrets.env` and refuses such a value, so the API
+answers `400` before it creates anything.
+
+The appservice of a VM acts as every user whose name starts with `<ws>.`. Before it admits a new VM, the daemon
+refuses the name (`409`) when a member of the workforce space has such a name, or when `@<ws>.<agent>` exists
+already. It cannot see a user who is not in the workforce space. A user outside the space with a name such as
+`lima.bob` still falls under a VM named `lima`: do not name a VM like the start of such a name.

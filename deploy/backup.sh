@@ -73,6 +73,25 @@ for p in .env data/matrix/db data/matrix/media data/matrix/config \
     warn "not found, skipped: $p"
   fi
 done
+# Back up the control plane key file under ZOOID_HOME: .env holds only its path.
+KEY_FILE="${FABRIUM_CONTROL_PLANE_KEY_FILE:-}"
+if [ -f "$ZOOID_HOME/.env" ]; then
+  # A subshell, as load_env exports every value; an unreadable .env falls back to the environment.
+  KEY_FILE="$( (load_env "$ZOOID_HOME/.env" && printf '%s' "${FABRIUM_CONTROL_PLANE_KEY_FILE:-}") 2>/dev/null ||
+    printf '%s' "$KEY_FILE" )"
+fi
+case "$KEY_FILE" in
+  '') ;;
+  "$ZOOID_HOME"/?*)
+    KEY_REL="${KEY_FILE#"$ZOOID_HOME"/}"
+    if [ -f "$ZOOID_HOME/$KEY_REL" ]; then
+      INCLUDES+=("$KEY_REL")
+    else
+      warn "not found, skipped: $KEY_REL (FABRIUM_CONTROL_PLANE_KEY_FILE)"
+    fi
+    ;;
+  *) warn "FABRIUM_CONTROL_PLANE_KEY_FILE is outside ZOOID_HOME: the key file is not in the backup" ;;
+esac
 [ ${#INCLUDES[@]} -gt 0 ] || die "nothing to back up in $ZOOID_HOME"
 
 EXCLUDES=(
