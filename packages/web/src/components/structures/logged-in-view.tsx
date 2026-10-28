@@ -27,6 +27,7 @@ import { useAppShortcuts } from "../../hooks/use-app-shortcuts";
 import { useJoinedSpaces } from "../../hooks/use-joined-spaces";
 import { markAllRead } from "../../hooks/use-mark-read";
 import { useMatrixClient } from "../../hooks/use-matrix-client";
+import { useVmAccess } from "../../hooks/use-vm-access";
 import { WorkforceSpaceContext } from "../../hooks/use-workforce";
 import { useIsMobile } from "../../hooks/use-mobile";
 import { LeftPanel } from "./left-panel";
@@ -100,6 +101,8 @@ export function LoggedInView({
   useServiceWorkerMessages();
   const roomMatch = useMatch("/room/:roomId");
   const roomId = roomMatch?.params.roomId ?? null;
+  const canManageVms = useVmAccess();
+  const vmPageOpen = useMatch("/vm") !== null;
   useClearRoomNotifications(roomId);
   const [searchParams, setSearchParams] = useSearchParams();
   // One right pane at a time: an open thread wins over `?pane=`.
@@ -192,7 +195,21 @@ export function LoggedInView({
     onMarkAllRead: () => markAllRead(),
   });
 
-  const rail = <WorkspaceRail scope={activeScope} onSelect={setScope} />;
+  const rail = (
+    <WorkspaceRail
+      scope={activeScope}
+      onSelect={(next) => {
+        setScope(next);
+        // Home and the workspaces are other destinations than the VM page.
+        if (vmPageOpen) navigate("/");
+      }}
+      vm={
+        canManageVms
+          ? { active: vmPageOpen, onSelect: () => navigate("/vm") }
+          : undefined
+      }
+    />
+  );
 
   return (
     <WorkforceSpaceContext.Provider value={spaceId}>

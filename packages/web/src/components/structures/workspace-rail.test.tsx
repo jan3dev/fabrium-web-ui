@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NotificationCountType, type Room } from "matrix-js-sdk";
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   injectStateEvent,
@@ -64,10 +65,21 @@ function seed() {
   MatrixClientPeg.injectClientForTest(client);
 }
 
-function renderRail(scope: Scope, onSelect = vi.fn()) {
-  render(<WorkspaceRail scope={scope} onSelect={onSelect} />);
+function renderRail(
+  scope: Scope,
+  onSelect = vi.fn(),
+  vm?: ComponentProps<typeof WorkspaceRail>["vm"],
+) {
+  render(<WorkspaceRail scope={scope} onSelect={onSelect} vm={vm} />);
   return onSelect;
 }
+
+/** Every rail button marked current, by label. */
+const currentButtons = () =>
+  within(screen.getByRole("navigation", { name: "Workspaces" }))
+    .getAllByRole("button")
+    .filter((b) => b.getAttribute("aria-current") === "true")
+    .map((b) => b.getAttribute("aria-label"));
 
 describe("<WorkspaceRail>", () => {
   it("lists Home and each top-level workspace, not projects", () => {
@@ -101,6 +113,54 @@ describe("<WorkspaceRail>", () => {
     await userEvent.click(screen.getByRole("button", { name: "Home" }));
     expect(onSelect).toHaveBeenCalledWith({ kind: "home" });
   });
+
+  it("has no VM button unless the vm prop is set", () => {
+    seed();
+    renderRail({ kind: "home" });
+    expect(screen.queryByRole("button", { name: "VM" })).toBeNull();
+  });
+
+  it("puts the VM button directly below Home and opens it on click", async () => {
+    seed();
+    const open = vi.fn();
+    renderRail({ kind: "home" }, vi.fn(), { active: false, onSelect: open });
+
+    const nav = screen.getByRole("navigation", { name: "Workspaces" });
+    const labels = within(nav)
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("aria-label"));
+    expect(labels.slice(0, 2)).toEqual(["Home", "VM"]);
+    expect(labels).toHaveLength(4); // Home, VM, and the two workspaces
+
+    await userEvent.click(screen.getByRole("button", { name: "VM" }));
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["Home", { kind: "home" } as Scope],
+    ["a workspace", { kind: "space", spaceId: acme } as Scope],
+  ])(
+    "marks only the VM button current while the VM page is open, over %s",
+    (_, scope) => {
+      seed();
+      renderRail(scope, vi.fn(), { active: true, onSelect: vi.fn() });
+      expect(currentButtons()).toEqual(["VM"]);
+    },
+  );
+
+  it.each([
+    ["Home", { kind: "home" } as Scope, "Home"],
+    ["a workspace", { kind: "space", spaceId: acme } as Scope, /^Acme Corp/],
+  ])(
+    "marks the scope, not VM, current while the VM page is closed: %s",
+    (_, scope, label) => {
+      seed();
+      renderRail(scope, vi.fn(), { active: false, onSelect: vi.fn() });
+      expect(currentButtons()).toEqual([
+        typeof label === "string" ? label : expect.stringMatching(label),
+      ]);
+    },
+  );
 
   it("badges mentions and dots plain unread", () => {
     seed();

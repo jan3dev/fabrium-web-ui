@@ -3,7 +3,7 @@ import { type Room } from "matrix-js-sdk";
 import type * as React from "react";
 import { useMemo } from "react";
 
-import { CircleCheckIcon, HomeIcon } from "@/components/icons";
+import { CircleCheckIcon, CpuIcon, HomeIcon } from "@/components/icons";
 import { useRoomAvatarMxc } from "@/components/room-avatar";
 import {
   ContextMenu,
@@ -186,13 +186,17 @@ function WorkspaceButton({
 export function WorkspaceRail({
   scope,
   onSelect,
+  vm,
   className,
 }: {
   scope: Scope;
   onSelect: (scope: Scope) => void;
+  /** The VM button, below Home, for VM managers only. While `active`, no workspace is current. */
+  vm?: { active: boolean; onSelect: () => void };
   className?: string;
 }) {
   const workspaces = useWorkspaces();
+  const scopeCurrent = !vm?.active;
 
   return (
     <nav
@@ -204,11 +208,16 @@ export function WorkspaceRail({
     >
       <RailButton
         label="Home"
-        isActive={scope.kind === "home"}
+        isActive={scopeCurrent && scope.kind === "home"}
         onSelect={() => onSelect({ kind: "home" })}
       >
         <HomeIcon aria-hidden />
       </RailButton>
+      {vm ? (
+        <RailButton label="VM" isActive={vm.active} onSelect={vm.onSelect}>
+          <CpuIcon aria-hidden />
+        </RailButton>
+      ) : null}
       {workspaces.length > 0 ? (
         <span aria-hidden className="h-px w-6 shrink-0 bg-sidebar-border" />
       ) : null}
@@ -216,7 +225,11 @@ export function WorkspaceRail({
         <WorkspaceButton
           key={space.roomId}
           space={space}
-          isActive={scope.kind === "space" && scope.spaceId === space.roomId}
+          isActive={
+            scopeCurrent &&
+            scope.kind === "space" &&
+            scope.spaceId === space.roomId
+          }
           onSelect={() => onSelect({ kind: "space", spaceId: space.roomId })}
         />
       ))}

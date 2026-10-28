@@ -7,6 +7,11 @@
 		reverse_proxy zooid:{$APPSERVICE_PORT:9000}
 	}
 
+	# The VM management API of the zooid daemon, on the same origin as the web UI.
+	handle /_fabrium/* {
+		reverse_proxy zooid:{$APPSERVICE_PORT:9000}
+	}
+
 	handle /_matrix/* {
 		reverse_proxy tuwunel:8448
 	}

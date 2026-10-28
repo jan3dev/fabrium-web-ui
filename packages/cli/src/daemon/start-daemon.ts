@@ -41,6 +41,8 @@ import {
 import { provisionVms, type VmsHandle } from '../provision-vms.js'
 import { installPiExtensions } from '../pi-extension-install.js'
 import { resolvePiExtensionBundle } from '@zooid/pi-extension'
+import { loadFabriumApiConfig } from '../fabrium-api/config.js'
+import { mountFabriumApi } from '../fabrium-api/index.js'
 import { prepullImages } from '../prepull-images.js'
 import { mountPushGateway } from '../push-gateway/index.js'
 import { makeSyncCursorStore } from './sync-cursors.js'
@@ -355,6 +357,22 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         for (const [name] of webhookTriggers) {
           console.log(`[webhook] POST ${WEBHOOK_ROUTE_PREFIX}/${name}`)
         }
+      }
+
+      // The web UI's VM API, off unless configured; mounted before serve() like the routes above.
+      const vmApi = loadFabriumApiConfig()
+      if (vmApi) {
+        mountFabriumApi(transport.app, {
+          ...vmApi,
+          conn: { homeserver: matrix.transport.homeserver, fetch: opts.fetch ?? fetch },
+          client,
+          asToken: matrix.transport.as_token,
+          asUserId,
+          serverName,
+          workforceSpace: matrix.transport.space ?? 'dev',
+          getSpaceRoomId: () => spaceRoomId,
+        })
+        console.log('[fabrium] VM management API at /_fabrium/v1')
       }
 
       // Bind 0.0.0.0 explicitly — @hono/node-server defaults to IPv6-only on

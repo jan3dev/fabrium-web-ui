@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -10,6 +10,7 @@ import {
   stubStartClient,
   stubSyncWithRooms,
 } from "../../../test/setup";
+import { makeVm } from "../../../test/vm-fixtures";
 
 const HS = "https://h.example";
 const me = "@alice:h.example";
@@ -21,6 +22,30 @@ const activeWorkspace = () => {
   );
   return el?.getAttribute("aria-label") ?? "";
 };
+
+/** Every rail button marked current, by label. */
+const currentInRail = () =>
+  Array.from(
+    document.querySelectorAll(
+      'nav[aria-label="Workspaces"] [aria-current="true"]',
+    ),
+    (el) => el.getAttribute("aria-label"),
+  );
+
+/** A joined space, as the sync stub describes it. */
+const space = (roomId: string, name: string) => ({
+  roomId,
+  myUserId: me,
+  state: [
+    {
+      type: "m.room.create",
+      sender: me,
+      stateKey: "",
+      content: { type: "m.space" },
+    },
+    { type: "m.room.name", sender: me, stateKey: "", content: { name } },
+  ],
+});
 
 describe("<LoggedInView /> sidebar polish", () => {
   beforeEach(() => {
@@ -333,19 +358,6 @@ describe("<LoggedInView /> sidebar polish", () => {
 });
 
 describe("<LoggedInView /> workforce space from runtime config", () => {
-  const space = (roomId: string, name: string) => ({
-    roomId,
-    myUserId: me,
-    state: [
-      {
-        type: "m.room.create",
-        sender: me,
-        stateKey: "",
-        content: { type: "m.space" },
-      },
-      { type: "m.room.name", sender: me, stateKey: "", content: { name } },
-    ],
-  });
   const aliases: Record<string, string> = {
     "#dev:h.example": "!dev:h.example",
     "#ops:h.example": "!ops:h.example",
@@ -458,5 +470,126 @@ describe("<LoggedInView /> workforce space from runtime config", () => {
   it("falls back to Home when the value is invalid and several spaces are joined", async () => {
     await renderWith("a b");
     await waitFor(() => expect(activeWorkspace()).toBe("Home"));
+  });
+});
+
+describe("<LoggedInView /> VM button", () => {
+  beforeEach(() => {
+    relaxUnhandled();
+    stubStartClient(HS);
+    localStorage.setItem(
+      "zoon:session",
+      JSON.stringify({
+        homeserverUrl: HS,
+        accessToken: "tok",
+        userId: me,
+        deviceId: "DEV1",
+      }),
+    );
+    mswServer.use(
+      http.post(`${HS}/_matrix/client/v3/user/:userId/openid/request_token`, () =>
+        HttpResponse.json({
+          access_token: "openid-tok",
+          token_type: "Bearer",
+          matrix_server_name: "h.example",
+          expires_in: 3600,
+        }),
+      ),
+    );
+  });
+  afterEach(() => {
+    MatrixClientPeg.reset();
+    localStorage.clear();
+  });
+
+  /** The API says this user is an admin, and lists one VM. */
+  const grantAccess = () =>
+    mswServer.use(
+      http.get("/_fabrium/v1/access", () =>
+        HttpResponse.json({ user_id: me, role: "admin" }),
+      ),
+      http.get("/_fabrium/v1/vms", () => HttpResponse.json([makeVm()])),
+    );
+
+  it("shows the VM button when the API grants access, and opens the VM page", async () => {
+    grantAccess();
+    const user = userEvent.setup();
+    render(<App config={{ homeserverUrl: HS }} />);
+
+    const button = await screen.findByRole("button", { name: "VM" });
+    expect(button).not.toHaveAttribute("aria-current");
+    await user.click(button);
+
+    expect(await screen.findByRole("heading", { name: "VMs" })).toBeInTheDocument();
+    expect(await screen.findByRole("rowheader", { name: "lima" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "VM" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+  });
+
+  it("marks only VM current on the VM page, and Home leaves the page", async () => {
+    grantAccess();
+    const user = userEvent.setup();
+    render(<App config={{ homeserverUrl: HS }} />);
+
+    await user.click(await screen.findByRole("button", { name: "VM" }));
+    expect(await screen.findByRole("heading", { name: "VMs" })).toBeInTheDocument();
+    expect(currentInRail()).toEqual(["VM"]);
+
+    await user.click(screen.getByRole("button", { name: "Home" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "VMs" })).toBeNull(),
+    );
+    expect(currentInRail()).toEqual(["Home"]);
+  });
+
+  it("leaves the VM page through a workspace, which becomes the current one", async () => {
+    stubSyncWithRooms(HS, [
+      space("!ops:h.example", "Ops"),
+      space("!eng:h.example", "Eng"),
+    ]);
+    grantAccess();
+    const user = userEvent.setup();
+    render(<App config={{ homeserverUrl: HS }} />);
+
+    await user.click(await screen.findByRole("button", { name: "VM" }));
+    expect(await screen.findByRole("heading", { name: "VMs" })).toBeInTheDocument();
+    expect(currentInRail()).toEqual(["VM"]);
+
+    await user.click(await screen.findByRole("button", { name: /^Eng/ }));
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "VMs" })).toBeNull(),
+    );
+    expect(currentInRail()).toEqual([expect.stringMatching(/^Eng/)]);
+  });
+
+  it.each([
+    ["a 403", () => HttpResponse.json({ error: "forbidden" }, { status: 403 })],
+    ["a 404", () => HttpResponse.json({ error: "not found" }, { status: 404 })],
+    [
+      "a 200 that is not JSON",
+      () =>
+        new HttpResponse("<!doctype html><html></html>", {
+          headers: { "content-type": "text/html" },
+        }),
+    ],
+  ])("has no VM button after %s", async (_, reply) => {
+    let answered!: () => void;
+    const done = new Promise<void>((resolve) => (answered = resolve));
+    mswServer.use(
+      http.get("/_fabrium/v1/access", () => {
+        answered();
+        return reply();
+      }),
+    );
+    render(<App config={{ homeserverUrl: HS }} />);
+
+    await screen.findByTestId("logged-in-view");
+    await done;
+    // The view reacts a few ticks after the answer; give it the time.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "VM" })).toBeNull();
   });
 });
