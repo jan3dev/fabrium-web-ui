@@ -117,11 +117,11 @@ export default function createExtension(pi: ExtensionAPI, deps: Deps = {}): void
 
   registerRead('zooid_get_history', 'Read room history', 'Read every message in the current room chronologically. Supports limit and before pagination.', 'getRoomHistory')
   registerRead('zooid_get_recent_threads', 'Read recent threads', 'Scan the current room for top-level messages and thread roots, newest first.', 'getRecentThreads')
-  registerRead('zooid_get_thread_history', 'Read thread', 'Read a thread root and all its replies in chronological order.', 'getThreadHistory', {
+  registerRead('zooid_get_thread_history', 'Read thread', 'Read a thread root and all its replies in chronological order. Reads the current room unless `room` names another room this agent is a member of.', 'getThreadHistory', {
     ...pageParameters,
-    properties: { ...pageParameters.properties, thread_id: { type: 'string' } },
+    properties: { ...pageParameters.properties, room: { type: 'string' }, thread_id: { type: 'string' } },
     required: ['thread_id'],
-  }, (params) => ({ threadId: params.thread_id, ...page(params) }))
+  }, (params) => ({ threadId: params.thread_id, ...(typeof params.room === 'string' && params.room ? { room: params.room } : {}), ...page(params) }))
   registerRead('zooid_get_members', 'List room members', 'List the humans and agents in the current room.', 'getChannelMembers', noParameters, () => ({}))
   registerRead('zooid_get_room_info', 'Get room information', 'Describe the current room: id, display name, and transport kind.', 'getRoomInfo', noParameters, () => ({}))
   registerRead('zooid_get_rooms', 'List rooms', 'List the rooms this agent is a member of. Valid targets for zooid_send_message.', 'getRooms', noParameters, () => ({}))

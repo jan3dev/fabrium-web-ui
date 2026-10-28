@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { buildContextMcpServer } from './mcp-server.js'
-import { callDaemon } from './daemon-socket.js'
+import { callDaemon, isTransportError } from './daemon-socket.js'
 import type {
   ArtifactResult,
   StartTasksOutput,
@@ -14,6 +14,7 @@ import type {
 
 const spawnIdIdx = process.argv.indexOf('--spawn-id')
 const spawnId = spawnIdIdx >= 0 ? process.argv[spawnIdIdx + 1] : undefined
+const canSendAttachment = process.argv.includes('--send-attachment')
 const sockPath = process.env.ZOOID_DAEMON_SOCK
 if (!spawnId || !sockPath) {
   process.stderr.write('zooid-context-mcp: --spawn-id and ZOOID_DAEMON_SOCK are required\n')
@@ -36,11 +37,13 @@ const remoteProvider: TransportContextProvider = {
       method: 'getRecentThreads',
       params: (opts ?? {}) as Record<string, unknown>,
     }) as Promise<Awaited<ReturnType<TransportContextProvider['getRecentThreads']>>>,
-  getThreadHistory: (_channelId, threadId, opts) =>
+  // An empty channel means the ambient room; anything else is the agent's
+  // explicit `room` selector, which the daemon resolves and checks.
+  getThreadHistory: (channelId, threadId, opts) =>
     callDaemon(sockPath, {
       spawnId,
       method: 'getThreadHistory',
-      params: { ...(opts ?? {}), threadId } as Record<string, unknown>,
+      params: { ...(opts ?? {}), threadId, ...(channelId ? { room: channelId } : {}) } as Record<string, unknown>,
     }) as Promise<Awaited<ReturnType<TransportContextProvider['getThreadHistory']>>>,
   getChannelMembers: () =>
     callDaemon(sockPath, {
@@ -54,6 +57,12 @@ const remoteProvider: TransportContextProvider = {
       method: 'getRoomInfo',
       params: {},
     }) as Promise<Awaited<ReturnType<TransportContextProvider['getRoomInfo']>>>,
+  sendAttachment: (_channelId, _threadId, input) =>
+    callDaemon(sockPath, {
+      spawnId,
+      method: 'sendAttachment',
+      params: input as unknown as Record<string, unknown>,
+    }) as Promise<Awaited<ReturnType<NonNullable<TransportContextProvider['sendAttachment']>>>>,
   getRooms: () =>
     callDaemon(sockPath, {
       spawnId,
@@ -101,17 +110,30 @@ const remoteTasks: TaskActions = {
     }) as Promise<HandoffOutput>,
 }
 
-// A failed role query yields undefined, which registers neither task tool —
-// the safe direction for MCP: the tools are additive, and a spawn that
-// cannot reach the daemon cannot usefully call them anyway ([[ZOD084]]).
-const role = await callDaemon(sockPath, { spawnId, method: 'describeRole', params: {} })
-  .then((r) => r as TaskRole)
-  .catch(() => undefined)
+// A failed role query registers neither task tool — the safe direction for
+// MCP, since a spawn that cannot reach the daemon cannot usefully call them
+// ([[ZOD084]]). Every failure is logged. Only a transport failure (the socket
+// is dead) is surfaced to the agent via roleError; a daemon that answered with
+// an error, such as "task actions unavailable", is reachable and keeps the
+// plain no-task-tools behaviour.
+let role: TaskRole | undefined
+let roleError: string | undefined
+try {
+  role = (await callDaemon(sockPath, { spawnId, method: 'describeRole', params: {} })) as TaskRole
+} catch (err) {
+  const message = err instanceof Error ? err.message : String(err)
+  if (isTransportError(err)) roleError = message
+  process.stderr.write(
+    `zooid-context-mcp: describeRole failed (sock=${sockPath}): ${message}; task tools disabled\n`,
+  )
+}
 
 const server = buildContextMcpServer({
   resolve: async () => remoteProvider,
   resolveTasks: async () => remoteTasks,
   role,
+  roleError,
+  canSendAttachment,
 })
 await server.connect(new StdioServerTransport())
 process.stderr.write(`zooid-context-mcp: ready (spawnId=${spawnId})\n`)

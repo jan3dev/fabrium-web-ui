@@ -64,19 +64,22 @@ export function buildContextServerSpec(opts: {
    * not appear in the emitted command. Absent → host-runtime spec (unchanged).
    */
   containerize?: boolean
+  /** Append `--send-attachment` so the MCP server registers zooid_send_attachment ([[ZOD068]]). */
+  sendAttachment?: boolean
 }): ZooidContextServerSpec {
+  const flags = opts.sendAttachment ? ['--send-attachment'] : []
   if (opts.containerize) {
     return {
       name: 'zooid-context',
       command: 'node',
-      args: [CONTEXT_CONTAINER_BIN, '--spawn-id', opts.spawnId],
+      args: [CONTEXT_CONTAINER_BIN, '--spawn-id', opts.spawnId, ...flags],
       env: [{ name: 'ZOOID_DAEMON_SOCK', value: CONTEXT_CONTAINER_SOCK }],
     }
   }
   return {
     name: 'zooid-context',
     command: process.execPath,
-    args: [opts.binPath ?? getDefaultBin(), '--spawn-id', opts.spawnId],
+    args: [opts.binPath ?? getDefaultBin(), '--spawn-id', opts.spawnId, ...flags],
     env: [{ name: 'ZOOID_DAEMON_SOCK', value: opts.sockPath }],
   }
 }

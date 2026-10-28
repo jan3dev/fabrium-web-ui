@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { buildContextMcpServer } from './mcp-server.js'
+import { SEND_ATTACHMENT_DESCRIPTION } from './tool-text.js'
 import type { TaskActions, TransportContextProvider } from '@zooid/core'
 
 function makeProvider(over: Partial<TransportContextProvider> = {}): TransportContextProvider {
@@ -122,6 +123,34 @@ describe('buildContextMcpServer', () => {
     expect(names).not.toContain('zooid_start_task_threads')
   })
 
+  it('explains the missing task tools when the role query failed', async () => {
+    const server = buildContextMcpServer({
+      resolve: async () => makeProvider(),
+      resolveTasks: async () => makeTasks(),
+      roleError: 'connect ENOENT /run/context-a.sock',
+    })
+    const client = await connect(server)
+    const names = (await client.listTools()).tools.map((t) => t.name)
+    expect(names).toContain('zooid_context_status')
+    expect(names).not.toContain('zooid_handoff')
+    expect(client.getInstructions()).toContain('context daemon is unreachable')
+    const res = (await client.callTool({ name: 'zooid_context_status', arguments: {} })) as {
+      isError?: boolean
+      content: { text: string }[]
+    }
+    expect(res.isError).toBe(true)
+    expect(res.content[0].text).toContain('connect ENOENT /run/context-a.sock')
+  })
+
+  it('has no status tool when the role resolved', async () => {
+    const server = buildContextMcpServer({
+      resolve: async () => makeProvider(),
+      role: { is_task_assignee: false, can_start_task_threads: true },
+    })
+    const names = (await (await connect(server)).listTools()).tools.map((t) => t.name)
+    expect(names).not.toContain('zooid_context_status')
+  })
+
   it('start_task_threads returns the delivery contract verbatim', async () => {
     const server = buildContextMcpServer({
       resolve: async () => makeProvider(),
@@ -163,6 +192,89 @@ describe('buildContextMcpServer', () => {
       arguments: { room: '!a:localhost', thread_id: '$t', text: 'noted' },
     })
     expect(sent).toEqual([{ room: '!a:localhost', thread_id: '$t', text: 'noted' }])
+  })
+
+  describe('zooid_send_attachment', () => {
+    const stub = async () => ({ event_id: '$m', mxc_uri: 'mxc://hs/a' })
+
+    it('is registered with the flag', async () => {
+      const server = buildContextMcpServer({
+        resolve: async () => makeProvider({ sendAttachment: stub }),
+        canSendAttachment: true,
+      })
+      const client = await connect(server)
+      const tool = (await client.listTools()).tools.find((t) => t.name === 'zooid_send_attachment')
+      expect(tool?.description).toBe(SEND_ATTACHMENT_DESCRIPTION)
+    })
+
+    it('is absent without the flag', async () => {
+      const server = buildContextMcpServer({
+        resolve: async () => makeProvider({ sendAttachment: stub }),
+      })
+      const client = await connect(server)
+      expect((await client.listTools()).tools.map((t) => t.name)).not.toContain(
+        'zooid_send_attachment',
+      )
+    })
+
+    it('forwards input with an empty scope and returns the result as JSON text', async () => {
+      const calls: unknown[][] = []
+      const server = buildContextMcpServer({
+        resolve: async () =>
+          makeProvider({
+            sendAttachment: async (...args) => {
+              calls.push(args)
+              return stub()
+            },
+          }),
+        canSendAttachment: true,
+      })
+      const client = await connect(server)
+      const res = await client.callTool({
+        name: 'zooid_send_attachment',
+        arguments: { path: 'a.png', name: 'A.png', caption: 'hi' },
+      })
+      expect(calls).toEqual([['', '', { path: 'a.png', name: 'A.png', caption: 'hi' }]])
+      expect((res.content as Array<{ text: string }>)[0].text).toBe(
+        '{"event_id":"$m","mxc_uri":"mxc://hs/a"}',
+      )
+    })
+
+    it('surfaces a failure as an isError result', async () => {
+      const server = buildContextMcpServer({
+        resolve: async () =>
+          makeProvider({
+            sendAttachment: async () => {
+              throw new Error('attachment_failed: cannot read a.png: ENOENT')
+            },
+          }),
+        canSendAttachment: true,
+      })
+      const client = await connect(server)
+      const res = await client.callTool({ name: 'zooid_send_attachment', arguments: { path: 'a.png' } })
+      expect(res.isError).toBe(true)
+      expect((res.content as Array<{ text: string }>)[0].text).toContain(
+        'attachment_failed: cannot read a.png: ENOENT',
+      )
+    })
+
+    it('rejects an empty path without calling the provider', async () => {
+      let called = false
+      const server = buildContextMcpServer({
+        resolve: async () =>
+          makeProvider({
+            sendAttachment: async () => {
+              called = true
+              return stub()
+            },
+          }),
+        canSendAttachment: true,
+      })
+      const client = await connect(server)
+      const res = await client.callTool({ name: 'zooid_send_attachment', arguments: { path: '' } })
+      expect(res.isError).toBe(true)
+      expect(called).toBe(false)
+    })
   })
 
   it('zooid_get_rooms returns the provider payload', async () => {
@@ -311,6 +423,38 @@ describe('buildContextMcpServer', () => {
       threadId: '$root',
       opts: { limit: 10, before: undefined },
     })
+  })
+
+  it('zooid_get_thread_history passes room through as the target room, and the ambient room when omitted', async () => {
+    const targets: string[] = []
+    const provider = makeProvider({
+      getThreadHistory: async (channelId) => {
+        targets.push(channelId)
+        return { messages: [], has_more: false }
+      },
+    })
+    const client = await connect(buildContextMcpServer({ resolve: async () => provider }))
+    await client.callTool({
+      name: 'zooid_get_thread_history',
+      arguments: { room: '!other:localhost', thread_id: '$root' },
+    })
+    await client.callTool({ name: 'zooid_get_thread_history', arguments: { thread_id: '$root' } })
+    expect(targets).toEqual(['!other:localhost', ''])
+  })
+
+  it('zooid_get_thread_history surfaces not_in_room from the provider as a tool error', async () => {
+    const provider = makeProvider({
+      getThreadHistory: async () => {
+        throw new Error('not_in_room: this agent is not a member of !elsewhere:localhost')
+      },
+    })
+    const client = await connect(buildContextMcpServer({ resolve: async () => provider }))
+    const res = await client.callTool({
+      name: 'zooid_get_thread_history',
+      arguments: { room: '!elsewhere:localhost', thread_id: '$root' },
+    })
+    expect(res.isError).toBe(true)
+    expect(JSON.stringify(res.content)).toContain('not_in_room')
   })
 
   it('zooid_get_thread_history surfaces a validation error when thread_id is missing', async () => {

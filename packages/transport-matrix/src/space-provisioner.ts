@@ -106,6 +106,51 @@ export async function ensureDefaultChannel(opts: EnsureDefaultChannelOpts): Prom
   return roomId
 }
 
+export interface EnsureAdminsInvitedOpts {
+  client: Pick<MatrixClient, 'invite' | 'fetchRoomState'>
+  /** AS bot: sends the invites, and is a PL 100 member of every room it created. */
+  asUserId: string
+  admins: string[]
+  roomIds: string[]
+}
+
+/**
+ * Invite every admin to every room, existing rooms included. Rooms only get
+ * their admins at creation, so an admin added to `zooid.yaml` later (or a
+ * workforce created before `admins:` existed) would otherwise never see them.
+ *
+ * Idempotent and quiet: a user already joined, invited or banned in a room is
+ * skipped, so a restart writes no new membership events. A failure on one
+ * room/admin is logged and does not stop the rest. Never kicks or demotes.
+ */
+export async function ensureAdminsInvited(opts: EnsureAdminsInvitedOpts): Promise<void> {
+  const admins = [...new Set(opts.admins)]
+  if (admins.length === 0) return
+  for (const roomId of new Set(opts.roomIds)) {
+    let membership = new Map<string, string>()
+    try {
+      const state = await opts.client.fetchRoomState(roomId, opts.asUserId)
+      for (const ev of state) {
+        const m = (ev.content as { membership?: string } | undefined)?.membership
+        if (ev.type === 'm.room.member' && ev.state_key && m) membership.set(ev.state_key, m)
+      }
+    } catch {
+      // Unreadable state: fall through and invite; the client treats
+      // "already joined/invited" as success.
+      membership = new Map()
+    }
+    for (const admin of admins) {
+      const current = membership.get(admin)
+      if (current === 'join' || current === 'invite' || current === 'ban') continue
+      try {
+        await opts.client.invite({ roomId, asUserId: opts.asUserId, targetUserId: admin })
+      } catch (err) {
+        console.warn(`[matrix] invite ${admin} → ${roomId} failed: ${(err as Error).message}`)
+      }
+    }
+  }
+}
+
 export function serverNameFromMxid(mxid: string): string {
   const colon = mxid.indexOf(':')
   if (colon < 0) {

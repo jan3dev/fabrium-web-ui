@@ -1,6 +1,6 @@
 {
   "name": "zooid",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "An open-source, self-hostable chat app for collaborating with AI agents alongside your team. Any model, any CLI.",
   "type": "module",
   "license": "MIT",
@@ -31,6 +31,7 @@
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:infra": "node ../../scripts/test-tier.mjs --no-file-parallelism tests/typing-lease.integration.test.ts tests/admin-invites.integration.test.ts",
     "typecheck": "tsc --noEmit",
     "release": "release-it"
   },
@@ -43,6 +44,7 @@
     "@zooid/pi-extension": "workspace:^",
     "@zooid/runtime-docker": "workspace:^",
     "@zooid/runtime-local": "workspace:^",
+    "@zooid/runtime-vm": "workspace:^",
     "@zooid/transport-http": "workspace:^",
     "@zooid/transport-matrix": "workspace:^",
     "cac": "^6.7.14",
