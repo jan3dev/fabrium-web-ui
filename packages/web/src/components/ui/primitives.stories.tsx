@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/context-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { Kbd } from "@/components/ui/kbd";
+import { NativeSelect } from "@/components/ui/native-select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 
 const meta = {
@@ -115,6 +116,23 @@ function SegmentedDemo() {
 }
 
 export const Segmented: Story = { render: () => <SegmentedDemo /> };
+
+export const NativeSelects: Story = {
+  render: () => (
+    <div className="flex w-72 flex-col gap-3">
+      <NativeSelect aria-label="Instance type" defaultValue="t3a.medium">
+        <option value="t3a.medium">t3a.medium · 2 vCPU · 4 GiB</option>
+        <option value="c6a.large">c6a.large · 2 vCPU · 4 GiB · Confidential</option>
+      </NativeSelect>
+      <NativeSelect aria-label="Instance type, disabled" disabled>
+        <option>t3a.medium · 2 vCPU · 4 GiB</option>
+      </NativeSelect>
+      <NativeSelect aria-label="Agent, invalid" aria-invalid defaultValue="">
+        <option value="">Select an agent</option>
+      </NativeSelect>
+    </div>
+  ),
+};
 
 export const ContextMenuOnRightClick: Story = {
   render: () => (

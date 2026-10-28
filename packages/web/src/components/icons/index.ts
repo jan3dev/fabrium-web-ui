@@ -27,6 +27,7 @@ export {
   Compass as CompassIcon,
   Component as ComponentIcon,
   Copy as CopyIcon,
+  Cpu as CpuIcon,
   DoorOpen as DoorOpenIcon,
   Download as DownloadIcon,
   Ellipsis as EllipsisIcon,
