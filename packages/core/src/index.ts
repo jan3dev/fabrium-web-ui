@@ -33,7 +33,6 @@ export type {
   MountConfig,
   ZooidContainerConfig,
   RuntimeKind,
-  VmConfig,
   MatrixBinding,
   RoomBinding,
   HttpBinding,

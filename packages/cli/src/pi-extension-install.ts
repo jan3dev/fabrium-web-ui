@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
-import { resolveAgentRuntime, type ZooidConfig } from '@zooid/core'
+import type { ZooidConfig } from '@zooid/core'
 
 export interface InstallPiExtensionResult {
   status: 'installed' | 'unchanged' | 'skipped'
@@ -57,9 +57,7 @@ export function installPiExtension(opts: {
 }
 
 /**
- * Install the zooid-tasks extension for every pi agent. vm agents are
- * skipped: the extension dials the context socket, which a guest doesn't
- * have, and their agent dir lives in the guest anyway. [ZOD128]
+ * Install the zooid-tasks extension for every pi agent.
  */
 export function installPiExtensions(opts: {
   config: ZooidConfig
@@ -79,10 +77,6 @@ export function installPiExtensions(opts: {
   // extensions dir; an absolute value (or none) collapses them into one.
   const installed = new Set<string>()
   for (const name of piAgents) {
-    if (resolveAgentRuntime(config.agents[name]!, config) === 'vm') {
-      opts.log(`[pi] agent=${name} status=skipped reason=runtime-vm`)
-      continue
-    }
     const { dir, scope } = resolvePiAgentDir({
       agentWorkdir: resolve(opts.configDir, config.agents[name]!.workdir),
       daemonHome: opts.daemonHome,

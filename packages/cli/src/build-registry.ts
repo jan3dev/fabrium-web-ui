@@ -2,7 +2,6 @@ import type { ElicitationCorrelator } from '@zooid/core'
 import { isAbsolute, resolve as pathResolve } from 'node:path'
 import { LocalAcpRuntime } from '@zooid/runtime-local'
 import { DockerAcpRuntime } from '@zooid/runtime-docker'
-import { VM_GUEST_WORKDIR, VmAcpRuntime, vmMachineName } from '@zooid/runtime-vm'
 import {
   AcpAgentRegistry,
   isContainerRuntime,
@@ -92,17 +91,11 @@ export function presetOf(agent: AgentConfig): PresetName | undefined {
 }
 
 /**
- * Container agents: agent.container.image > workforce container.image > preset.
- * vm agents: agent.vm.image > preset — never the workforce container image,
- * which belongs to the container engine. [ZOD109]
+ * agent.container.image > workforce container.image > preset.
  */
 export function resolveAgentImage(agent: AgentConfig, cfg: ZooidConfig): ResolvedImage {
-  if (resolveAgentRuntime(agent, cfg) === 'vm') {
-    if (agent.vm?.image) return { image: agent.vm.image, source: 'agent' }
-  } else {
-    if (agent.container?.image) return { image: agent.container.image, source: 'agent' }
-    if (cfg.container?.image) return { image: cfg.container.image, source: 'workforce' }
-  }
+  if (agent.container?.image) return { image: agent.container.image, source: 'agent' }
+  if (cfg.container?.image) return { image: cfg.container.image, source: 'workforce' }
   const preset = presetOf(agent)
   const presetImage = preset ? PRESETS[preset]?.image : undefined
   if (presetImage && preset) return { image: presetImage, source: `preset:${preset}` }
@@ -132,8 +125,6 @@ function composeAgentMounts(
 ): ComposedMounts {
   const kind = resolveAgentRuntime(agent, cfg)
   if (kind === 'local') return { mounts: [], mkdirs: [], cwd: agent.workdir }
-  // vm: the workdir mount is made once, at machine create (provision-vms).
-  if (kind === 'vm') return { mounts: [], mkdirs: [], cwd: VM_GUEST_WORKDIR }
 
   const disabled = new Set(agent.container?.disable_mounts ?? [])
   const knownIds = new Set<string>(['workspace'])
@@ -219,7 +210,6 @@ function composeAgentMounts(
  *   - `local`   → `LocalAcpRuntime`
  *   - `docker`  → `DockerAcpRuntime` (engine: docker)
  *   - `podman`  → `DockerAcpRuntime` (engine: podman)
- *   - `vm`      → `VmAcpRuntime`, one per agent (its own machine)
  *
  * Compose layers (docker/podman only): workspace auto-mount → preset-declared
  * canonical-id mounts (filtered by `container.disable_mounts`) → user mounts.
@@ -248,14 +238,6 @@ export function buildAcpRegistry(
       ({ name, preset }) =>
         `  - ${name}${preset ? ` (preset: ${preset})` : ''} — no preset-default image`,
     )
-    if (kind === 'vm') {
-      throw new Error(
-        `runtime: vm requires an image for each agent. Unresolved:\n` +
-          lines.join('\n') +
-          `\nSet agents.<name>.vm.image, or use a preset that ships a default image ` +
-          `(claude, codex, opencode, pi).`,
-      )
-    }
     throw new Error(
       `runtime: ${kind} requires a container image for each agent. Unresolved:\n` +
         lines.join('\n') +
@@ -266,7 +248,7 @@ export function buildAcpRegistry(
 
   const runtimeOpts = opts.runtime
     ? { runtime: opts.runtime }
-    : { runtimeByAgent: runtimesByAgent(cfg, pathResolve(opts.configDir ?? process.cwd())) }
+    : { runtimeByAgent: runtimesByAgent(cfg) }
   const env: Record<string, Record<string, string>> = {}
   const image: Record<string, string | undefined> = {}
   const mountsByAgent: Record<string, AcpMount[]> = {}
@@ -276,8 +258,6 @@ export function buildAcpRegistry(
 
   for (const [name, agent] of Object.entries(cfg.agents)) {
     env[name] = agent.container?.env ?? {}
-    // A vm agent has no container block; its env is vm.env, and nothing else. [ZOD109]
-    if (resolveAgentRuntime(agent, cfg) === 'vm') env[name] = agent.vm?.env ?? {}
     const { image: resolvedImage, source } = resolveAgentImage(agent, cfg)
     image[name] = resolvedImage
     const composed = composeAgentMounts(name, agent, cfg, opts)
@@ -291,11 +271,9 @@ export function buildAcpRegistry(
     const kind = resolveAgentRuntime(agent, cfg)
     if (resolvedImage && kind !== 'local') {
       const mountSummary =
-        kind === 'vm'
-          ? `runtime=vm machine=${vmMachineName(name, pathResolve(opts.configDir ?? process.cwd()))}`
-          : composed.mounts.length === 0
-            ? 'mounts=[]'
-            : `mounts=[${composed.mounts.map((m) => m.id ?? m.target).join(',')}]`
+        composed.mounts.length === 0
+          ? 'mounts=[]'
+          : `mounts=[${composed.mounts.map((m) => m.id ?? m.target).join(',')}]`
       log(
         `[zooid] agent ${name.padEnd(12)} image=${resolvedImage}  source=${source}  ${mountSummary}`,
       )
@@ -387,8 +365,7 @@ function buildContextSpawns(
   for (const [name, agent] of Object.entries(cfg.agents)) {
     const sockPath = opts.daemonSockPaths[name]
     const kind = resolveAgentRuntime(agent, cfg)
-    // No host socket reaches a vm guest; see contextUnavailableAgents.
-    if (kind !== 'vm' && agent.matrix && matrixClients.has(agent.matrix.transport) && sockPath) {
+    if (agent.matrix && matrixClients.has(agent.matrix.transport) && sockPath) {
       const client = matrixClients.get(agent.matrix.transport)!
       // What the agent sees its workspace as ([[ZOD068]]). Absent = the agent
       // has no workspace the daemon can map, so it gets no attach tool.
@@ -432,7 +409,8 @@ function buildContextSpawns(
   return result
 }
 
-function matrixBoundAgents(cfg: ZooidConfig): string[] {
+/** Agents on configured Matrix transports get a context listener and binding. */
+export function contextEligibleAgents(cfg: ZooidConfig): string[] {
   const matrixTransports = new Set(
     Object.entries(cfg.transports)
       .filter(([, transport]) => transport.type === 'matrix')
@@ -443,20 +421,6 @@ function matrixBoundAgents(cfg: ZooidConfig): string[] {
     .map(([name]) => name)
 }
 
-/** Agents on configured Matrix transports get a context listener and binding — except vm agents. */
-export function contextEligibleAgents(cfg: ZooidConfig): string[] {
-  return matrixBoundAgents(cfg).filter(
-    (name) => resolveAgentRuntime(cfg.agents[name]!, cfg) !== 'vm',
-  )
-}
-
-/** Matrix-bound vm agents: no host socket can reach the guest, so no context tools. [ZOD109] */
-export function contextUnavailableAgents(cfg: ZooidConfig): string[] {
-  return matrixBoundAgents(cfg).filter(
-    (name) => resolveAgentRuntime(cfg.agents[name]!, cfg) === 'vm',
-  )
-}
-
 /** Agents whose images the container engine must prepull. */
 export function containerAgentNames(cfg: ZooidConfig): string[] {
   return Object.entries(cfg.agents)
@@ -464,10 +428,10 @@ export function containerAgentNames(cfg: ZooidConfig): string[] {
     .map(([name]) => name)
 }
 
-/** One runtime per agent: local/docker/podman share an instance per kind, each vm agent gets its own. */
-function runtimesByAgent(cfg: ZooidConfig, configDir: string): Record<string, AcpRuntime> {
+/** One runtime per agent: agents of the same kind share an instance. */
+function runtimesByAgent(cfg: ZooidConfig): Record<string, AcpRuntime> {
   const shared = new Map<RuntimeKind, AcpRuntime>()
-  const sharedFor = (kind: 'local' | 'docker' | 'podman'): AcpRuntime => {
+  const sharedFor = (kind: RuntimeKind): AcpRuntime => {
     let rt = shared.get(kind)
     if (!rt) {
       rt =
@@ -480,9 +444,7 @@ function runtimesByAgent(cfg: ZooidConfig, configDir: string): Record<string, Ac
   }
   const out: Record<string, AcpRuntime> = {}
   for (const [name, agent] of Object.entries(cfg.agents)) {
-    const kind = resolveAgentRuntime(agent, cfg)
-    out[name] =
-      kind === 'vm' ? new VmAcpRuntime({ machine: vmMachineName(name, configDir) }) : sharedFor(kind)
+    out[name] = sharedFor(resolveAgentRuntime(agent, cfg))
   }
   return out
 }

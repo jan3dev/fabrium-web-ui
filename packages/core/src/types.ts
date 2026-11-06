@@ -45,31 +45,7 @@ export interface MountConfig {
 }
 
 /** Where an agent's ACP process runs. Resolved per agent: agent > workforce > 'docker'. [ZOD109] */
-export type RuntimeKind = 'local' | 'docker' | 'podman' | 'vm'
-
-/**
- * Per-agent VM settings, valid only when the agent resolves to `runtime: vm`.
- * Sizes are normalised at parse time (`memory: 8GiB` → `memory_mib: 8192`).
- * Mounts and sizes are fixed when the machine is created; changing them
- * recreates the machine. [ZOD109]
- */
-export interface VmConfig {
-  /** OCI image booted as the microVM. Defaults to the preset's image. */
-  image?: string
-  cpus?: number
-  memory_mib?: number
-  disk_gib?: number
-  /** Hosts the guest may reach. Absent means no network at all. [ZOD128] */
-  allow_hosts?: string[]
-  /** Env for the agent's ACP process in the guest. Same rules as `container.env`. */
-  env?: Record<string, string>
-  /**
-   * Host directories mounted into the guest, beyond the read-only workdir.
-   * Same entries as `container.mounts`, minus `id`. Directories only: smolvm
-   * can't mount a single file. A credential mounted here is readable by the guest.
-   */
-  mounts?: MountConfig[]
-}
+export type RuntimeKind = 'local' | 'docker' | 'podman'
 
 /**
  * Per-agent container configuration. Holds runtime-neutral container
@@ -216,9 +192,7 @@ export interface AgentConfig {
    * read it through `resolveAgentRuntime`, never directly. [ZOD109]
    */
   runtime?: RuntimeKind
-  /** VM settings. Rejected at parse time unless the resolved runtime is vm. */
-  vm?: VmConfig
-  /** Container config. Rejected at parse time when the resolved runtime is vm; image/env rejected when local. */
+  /** Container config. image/env rejected when local. */
   container?: ContainerConfig
   /** Exactly one of matrix / http is set per agent. */
   matrix?: MatrixBinding

@@ -20,7 +20,6 @@ import type {
   TransportConfig,
   TriggerConfig,
   TriggerMessage,
-  VmConfig,
   WebhookTriggerConfig,
   ZooidConfig,
   ZooidContainerConfig,
@@ -163,7 +162,7 @@ function parseSessionIdleTimeout(name: string, raw: unknown): number {
   return milliseconds
 }
 
-/** A `container.env` / `vm.env` mapping: strings only, `${VAR}`-interpolated, no `ZOOID_*`. */
+/** A `container.env` mapping: strings only, `${VAR}`-interpolated, no `ZOOID_*`. */
 function parseEnvMapping(
   raw: unknown,
   processEnv: NodeJS.ProcessEnv,
@@ -216,9 +215,8 @@ function parseMountList(
   raw: unknown,
   processEnv: NodeJS.ProcessEnv,
   configDir: string | undefined,
-  block: 'container' | 'vm' = 'container',
 ): MountConfig[] {
-  const field = `agents.${agentName}.${block}.mounts`
+  const field = `agents.${agentName}.container.mounts`
   if (!Array.isArray(raw)) {
     throw new Error(`${field} must be an array`)
   }
@@ -253,11 +251,6 @@ function parseMountList(
       )
     }
     let id: string | undefined
-    if (e.id !== undefined && block === 'vm') {
-      throw new Error(
-        `${field}[${i}].id is not supported: a vm agent has no preset mounts, so there is nothing to subtract by id`,
-      )
-    }
     if (e.id !== undefined) {
       if (typeof e.id !== 'string' || e.id.length === 0) {
         throw new Error(
@@ -288,9 +281,6 @@ function parseMountList(
     }
     const host = resolveHostPath(field, i, interpolateString(e.host, processEnv), configDir)
     const target = interpolateString(e.target, processEnv)
-    if (block === 'vm' && target.replace(/\/+$/, '') === VM_WORKDIR) {
-      throw new Error(`${field}[${i}].target: ${VM_WORKDIR} is the agent's read-only workdir`)
-    }
     const m: MountConfig = { host, target, mode }
     if (id !== undefined) m.id = id
     if (create !== undefined) m.create = create
@@ -345,79 +335,6 @@ function parseDisableMounts(agentName: string, raw: unknown): string[] {
       )
     }
     out.push(v)
-  }
-  return out
-}
-
-const VM_FIELDS = ['image', 'cpus', 'memory', 'disk', 'allow_hosts', 'env', 'mounts'] as const
-/** The guest path runtime-vm mounts the workdir at (VM_GUEST_WORKDIR there). */
-const VM_WORKDIR = '/workspace'
-const HOST_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i
-
-/** `8GiB` / `512MiB` → MiB. Binary units only, so there is one way to write a size. */
-function parseSizeMib(raw: unknown, field: string): number {
-  const m = typeof raw === 'string' ? /^(\d+)\s*(MiB|GiB)$/.exec(raw.trim()) : null
-  if (!m) throw new Error(`${field} must be a size like "8GiB" or "512MiB" (got ${JSON.stringify(raw)})`)
-  const n = Number(m[1])
-  if (n <= 0) throw new Error(`${field} must be greater than zero`)
-  return m[2] === 'GiB' ? n * 1024 : n
-}
-
-function parseVmBlock(
-  name: string,
-  raw: unknown,
-  processEnv: NodeJS.ProcessEnv,
-  configDir: string | undefined,
-): VmConfig {
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(`agents.${name}.vm must be a mapping`)
-  }
-  const v = raw as Record<string, unknown>
-  for (const k of Object.keys(v)) {
-    if (!(VM_FIELDS as readonly string[]).includes(k)) {
-      throw new Error(
-        `agents.${name}.vm.${k} is not a recognised field (${VM_FIELDS.join(', ')}). See [ZOD109].`,
-      )
-    }
-  }
-  const out: VmConfig = {}
-  if (v.image !== undefined) {
-    if (typeof v.image !== 'string' || v.image.length === 0) {
-      throw new Error(`agents.${name}.vm.image must be a non-empty string`)
-    }
-    out.image = v.image
-  }
-  if (v.cpus !== undefined) {
-    if (typeof v.cpus !== 'number' || !Number.isInteger(v.cpus) || v.cpus < 1) {
-      throw new Error(`agents.${name}.vm.cpus must be a positive integer`)
-    }
-    out.cpus = v.cpus
-  }
-  if (v.memory !== undefined) out.memory_mib = parseSizeMib(v.memory, `agents.${name}.vm.memory`)
-  if (v.disk !== undefined) {
-    const mib = parseSizeMib(v.disk, `agents.${name}.vm.disk`)
-    if (mib % 1024 !== 0) throw new Error(`agents.${name}.vm.disk must be a whole number of GiB`)
-    out.disk_gib = mib / 1024
-  }
-  if (v.allow_hosts !== undefined) {
-    const hosts = v.allow_hosts
-    const bad = !Array.isArray(hosts)
-      ? hosts
-      : hosts.length === 0
-        ? hosts
-        : hosts.find((h) => typeof h !== 'string' || !HOST_NAME.test(h))
-    if (bad !== undefined) {
-      throw new Error(
-        `agents.${name}.vm.allow_hosts must be a non-empty list of host names like "github.com" (got ${JSON.stringify(bad)})`,
-      )
-    }
-    out.allow_hosts = hosts as string[]
-  }
-  if (v.env !== undefined && v.env !== null) {
-    out.env = parseEnvMapping(v.env, processEnv, `agents.${name}.vm.env`)
-  }
-  if (v.mounts !== undefined) {
-    out.mounts = parseMountList(name, v.mounts, processEnv, configDir, 'vm')
   }
   return out
 }
@@ -901,13 +818,6 @@ function parseAgents(
         : parseRuntimeValue(entry.runtime, `agents.${name}.runtime`)
     const resolvedRuntime = agentRuntime ?? runtime
 
-    if (entry.container !== undefined && entry.container !== null && resolvedRuntime === 'vm') {
-      throw new Error(
-        `agents.${name}.container is not valid when runtime is 'vm'. A vm agent has no container; ` +
-          `set its image, env and mounts under agents.${name}.vm. See [ZOD109].`,
-      )
-    }
-
     let containerBlock: ContainerConfig | undefined
     if (entry.container !== undefined && entry.container !== null) {
       if (resolvedRuntime === 'local') {
@@ -933,16 +843,6 @@ function parseAgents(
       containerBlock = parseAgentContainer(name, entry.container, processEnv, configDir)
     }
 
-    let vmBlock: VmConfig | undefined
-    if (entry.vm !== undefined && entry.vm !== null) {
-      if (resolvedRuntime !== 'vm') {
-        throw new Error(
-          `agents.${name}.vm is only valid when the agent's runtime is 'vm' (resolved: '${resolvedRuntime}'). See [ZOD109].`,
-        )
-      }
-      vmBlock = parseVmBlock(name, entry.vm, processEnv, configDir)
-    }
-
     const binding = parseTransportBinding(name, entry, transports)
 
     const agentCfg: AgentConfig = {
@@ -962,7 +862,6 @@ function parseAgents(
       agentCfg[k] = v.trim()
     }
     if (agentRuntime) agentCfg.runtime = agentRuntime
-    if (vmBlock) agentCfg.vm = vmBlock
     if (containerBlock) agentCfg.container = containerBlock
     if (binding.matrix) agentCfg.matrix = binding.matrix
     if (binding.http) agentCfg.http = binding.http
@@ -1335,11 +1234,11 @@ function parseWebhookTrigger(
   return config
 }
 
-const RUNTIME_KINDS: readonly RuntimeKind[] = ['local', 'docker', 'podman', 'vm']
+const RUNTIME_KINDS: readonly RuntimeKind[] = ['local', 'docker', 'podman']
 
 function parseRuntimeValue(raw: unknown, field: string): RuntimeKind {
   if (typeof raw !== 'string' || !(RUNTIME_KINDS as readonly string[]).includes(raw)) {
-    throw new Error(`${field} must be "local", "docker", "podman", or "vm" (got "${String(raw)}")`)
+    throw new Error(`${field} must be "local", "docker", or "podman" (got "${String(raw)}")`)
   }
   return raw as RuntimeKind
 }

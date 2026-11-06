@@ -36,9 +36,7 @@ import {
   buildAcpRegistry,
   containerAgentNames,
   contextEligibleAgents,
-  contextUnavailableAgents,
 } from '../build-registry.js'
-import { provisionVms, type VmsHandle } from '../provision-vms.js'
 import { installPiExtensions } from '../pi-extension-install.js'
 import { resolvePiExtensionBundle } from '@zooid/pi-extension'
 import { loadFabriumApiConfig } from '../fabrium-api/config.js'
@@ -176,7 +174,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     log: (line) => console.log(line),
   })
 
-  // Only container agents' images go through the engine; vm images are pulled by smolvm. [ZOD109]
+  // Only container agents' images go through the engine. [ZOD109]
   const engine = containerEngineOf(config)
   if (engine) {
     const containerAgents = containerAgentNames(config)
@@ -194,22 +192,10 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       },
     )
   }
-  const vms: VmsHandle = await provisionVms({
-    cfg: config,
-    configDir,
-    agentsDir: opts.agentsDir,
-    daemonHome: process.env.HOME,
-    log: opts.prepullLog,
-  })
 
   console.log(`[context] runDir=${runDir}`)
-  const noContext = new Set(contextUnavailableAgents(config))
   for (const name of agentNames) {
-    const socket =
-      contextSockets.paths[name] ??
-      (noContext.has(name)
-        ? '(unavailable: runtime vm has no host socket, so this agent has no zooid_* context tools; see ZOD109)'
-        : '(disabled)')
+    const socket = contextSockets.paths[name] ?? '(disabled)'
     console.log(`[context] agent=${name} socket=${socket}`)
   }
 
@@ -258,7 +244,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       // Resolve workspace dirs for media attachment routing.
       const workspaceDir = isAbsolute(a.workdir) ? a.workdir : resolve(configDir, a.workdir)
       binding.workspaceDir = workspaceDir
-      // Containers and vm guests both see the workdir at /workspace.
+      // Containers see the workdir at /workspace.
       binding.agentWorkspacePath =
         resolveAgentRuntime(a, config) === 'local' ? workspaceDir : '/workspace'
       bindings.push(binding)
@@ -534,11 +520,6 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       await registry.stopAll()
     } catch (err) {
       console.error('stopAll:', err)
-    }
-    try {
-      await vms.stop()
-    } catch (err) {
-      console.error('vm stop:', err)
     }
     try {
       await contextSockets.close()

@@ -36,100 +36,25 @@ describe('ZOD109: runtime resolves per agent', () => {
 
   it('an agent runtime overrides the workforce value', () => {
     const cfg = loadZooidConfig(
-      yaml('runtime: local', agent('lead'), agent('smoke', '    runtime: vm\n')),
+      yaml('runtime: local', agent('lead'), agent('smoke', '    runtime: podman\n')),
     )
-    expect(cfg.agents.smoke!.runtime).toBe('vm')
-    expect(resolveAgentRuntime(cfg.agents.smoke!, cfg)).toBe('vm')
+    expect(cfg.agents.smoke!.runtime).toBe('podman')
+    expect(resolveAgentRuntime(cfg.agents.smoke!, cfg)).toBe('podman')
     expect(resolveAgentRuntime(cfg.agents.lead!, cfg)).toBe('local')
   })
 
   it('rejects an unknown agent runtime with the field path', () => {
     expect(() =>
       loadZooidConfig(yaml('runtime: local', agent('x', '    runtime: firecracker\n'))),
-    ).toThrow(/agents\.x\.runtime must be "local", "docker", "podman", or "vm"/)
+    ).toThrow(/agents\.x\.runtime must be "local", "docker", or "podman"/)
   })
 
-  it('accepts runtime: vm at the workforce level', () => {
-    const cfg = loadZooidConfig(yaml('runtime: vm', agent('smoke')))
-    expect(resolveAgentRuntime(cfg.agents.smoke!, cfg)).toBe('vm')
-  })
-})
-
-describe('ZOD109: vm block', () => {
-  it('parses image, cpus, memory and disk', () => {
-    const cfg = loadZooidConfig(
-      yaml(
-        'runtime: local',
-        agent(
-          'smoke',
-          `    runtime: vm
-    vm:
-      image: node:22-alpine
-      cpus: 4
-      memory: 8GiB
-      disk: 32GiB
-`,
-        ),
-      ),
-    )
-    expect(cfg.agents.smoke!.vm).toEqual({
-      image: 'node:22-alpine',
-      cpus: 4,
-      memory_mib: 8192,
-      disk_gib: 32,
-    })
-  })
-
-  it('accepts MiB for memory', () => {
-    const cfg = loadZooidConfig(
-      yaml('runtime: vm', agent('smoke', '    vm: { memory: 1536MiB }\n')),
-    )
-    expect(cfg.agents.smoke!.vm?.memory_mib).toBe(1536)
-  })
-
-  it('rejects a malformed size', () => {
-    expect(() =>
-      loadZooidConfig(yaml('runtime: vm', agent('smoke', '    vm: { memory: 8GB }\n'))),
-    ).toThrow(/agents\.smoke\.vm\.memory/)
-  })
-
-  it('rejects a disk that is not whole GiB', () => {
-    expect(() =>
-      loadZooidConfig(yaml('runtime: vm', agent('smoke', '    vm: { disk: 1536MiB }\n'))),
-    ).toThrow(/agents\.smoke\.vm\.disk/)
-  })
-
-  it('rejects a non-positive-integer cpus', () => {
-    expect(() =>
-      loadZooidConfig(yaml('runtime: vm', agent('smoke', '    vm: { cpus: 0 }\n'))),
-    ).toThrow(/agents\.smoke\.vm\.cpus/)
-  })
-
-  it('rejects unknown vm fields', () => {
-    expect(() =>
-      loadZooidConfig(yaml('runtime: vm', agent('smoke', '    vm: { volumes: [] }\n'))),
-    ).toThrow(/agents\.smoke\.vm\.volumes is not a recognised field/)
-  })
-
-  it('rejects vm on an agent whose resolved runtime is not vm', () => {
-    expect(() =>
-      loadZooidConfig(yaml('runtime: local', agent('lead', '    vm: { image: x }\n'))),
-    ).toThrow(/agents\.lead\.vm is only valid when the agent's runtime is 'vm'/)
+  it('rejects runtime: vm', () => {
+    expect(() => loadZooidConfig(yaml('runtime: vm', agent('smoke')))).toThrow(/runtime must be/)
   })
 })
 
 describe('ZOD109: container validity moves to the resolved runtime', () => {
-  it('rejects any container block on a vm agent, mounts included', () => {
-    expect(() =>
-      loadZooidConfig(
-        yaml(
-          'runtime: local',
-          agent('smoke', '    runtime: vm\n    container: { disable_mounts: [workspace] }\n'),
-        ),
-      ),
-    ).toThrow(/agents\.smoke\.container is not valid when runtime is 'vm'/)
-  })
-
   it('accepts container.image on a docker agent inside a local workforce', () => {
     const cfg = loadZooidConfig(
       yaml('runtime: local', agent('coder', '    runtime: docker\n    container: { image: img:1 }\n')),
@@ -172,7 +97,7 @@ describe('ZOD109: container validity moves to the resolved runtime', () => {
         yaml(
           'runtime: local\ncontainer: { image: base:1 }',
           agent('lead'),
-          agent('smoke', '    runtime: vm\n'),
+          agent('smoke', '    runtime: local\n'),
         ),
       ),
     ).toThrow(/container is only valid when runtime is 'docker' or 'podman'/)
@@ -195,7 +120,7 @@ describe('ZOD109: container validity moves to the resolved runtime', () => {
       yaml('runtime: local', agent('lead'), agent('coder', '    runtime: podman\n    container: { image: i }\n')),
     )
     expect(containerEngineOf(mixed)).toBe('podman')
-    const none = loadZooidConfig(yaml('runtime: local', agent('lead'), agent('s', '    runtime: vm\n')))
+    const none = loadZooidConfig(yaml('runtime: local', agent('lead'), agent('s', '    runtime: local\n')))
     expect(containerEngineOf(none)).toBeUndefined()
   })
 })
@@ -206,7 +131,6 @@ describe('ZOD109: --runtime sets the workforce default only', () => {
       yaml(
         'runtime: docker\ncontainer: { image: base:1 }',
         agent('lead'),
-        agent('smoke', '    runtime: vm\n'),
         agent('coder', '    runtime: docker\n'),
       ),
     )
@@ -214,17 +138,11 @@ describe('ZOD109: --runtime sets the workforce default only', () => {
   it('moves inheriting agents and leaves overrides alone', () => {
     const merged = mergeCliFlags(base(), { runtime: 'local' })
     expect(resolveAgentRuntime(merged.agents.lead!, merged)).toBe('local')
-    expect(resolveAgentRuntime(merged.agents.smoke!, merged)).toBe('vm')
     expect(resolveAgentRuntime(merged.agents.coder!, merged)).toBe('docker')
   })
 
   it('keeps the workforce container block while an agent still resolves to a container runtime', () => {
     const merged = mergeCliFlags(base(), { runtime: 'local' })
     expect(merged.container?.image).toBe('base:1')
-  })
-
-  it('accepts --runtime vm', () => {
-    const merged = mergeCliFlags(base(), { runtime: 'vm' })
-    expect(resolveAgentRuntime(merged.agents.lead!, merged)).toBe('vm')
   })
 })
