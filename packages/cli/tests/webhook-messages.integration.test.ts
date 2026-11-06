@@ -20,7 +20,7 @@ agents:
     matrix: { rooms: ["#product:example.org"] }
   architect:
     acp: { preset: opencode }
-    matrix: { rooms: ["#dev:example.org"] }
+    matrix: { rooms: ["#engineering:example.org"] }
 triggers:
   github:
     webhook:

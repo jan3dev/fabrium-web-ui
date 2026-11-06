@@ -17,5 +17,6 @@ export {
   ARTIFACT_KINDS,
   HANDOFF_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
+  SEND_ATTACHMENT_DESCRIPTION,
 } from './tool-text.js'
 export type { SpawnBinding, ZooidContextServerSpec } from './types.js'

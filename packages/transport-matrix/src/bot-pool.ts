@@ -131,6 +131,7 @@ export class BotPool {
           // router (which matches on event.room_id) sees a hit when Tuwunel
           // pushes events. The declared powerLevel was a creation-time
           // seed — it has no role after bootstrap.
+          binding.configuredAlias ??= binding.alias
           binding.alias = resolved
           await this.client.joinRoom(resolved, a.userId)
 

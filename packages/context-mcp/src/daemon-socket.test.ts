@@ -1,10 +1,10 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createConnection } from 'node:net'
 import { SpawnRegistry } from './spawn-registry.js'
-import { startDaemonSocketServer, callDaemon } from './daemon-socket.js'
+import { startDaemonSocketServer, callDaemon, MAX_LINE_LENGTH } from './daemon-socket.js'
 import type { TaskActions, TransportContextProvider } from '@zooid/core'
 
 function fakeProvider(over: Partial<TransportContextProvider> = {}): TransportContextProvider {
@@ -323,6 +323,57 @@ describe('daemon-socket', () => {
     ])
   })
 
+  describe('sendAttachment', () => {
+    const start = async (provider: TransportContextProvider, agentName = 'a') => {
+      const registry = new SpawnRegistry()
+      const spawnId = registry.register({
+        agentName: 'a',
+        threadRef: { channelId: '!r:hs', threadId: '$root' },
+        provider,
+      })
+      const sockPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
+      const server = await startDaemonSocketServer({ sockPath, registry, agentName })
+      cleanup.push(() => server.close())
+      return { spawnId, sockPath }
+    }
+
+    it('routes with the binding scope and ignores room / thread_id params', async () => {
+      const calls: unknown[][] = []
+      const { spawnId, sockPath } = await start(
+        fakeProvider({
+          sendAttachment: async (...args) => {
+            calls.push(args)
+            return { event_id: '$m', mxc_uri: 'mxc://hs/a' }
+          },
+        }),
+      )
+      const res = await callDaemon(sockPath, {
+        spawnId,
+        method: 'sendAttachment',
+        params: { path: 'a.png', room: '!other:hs', thread_id: '$x' },
+      })
+      expect(calls).toEqual([['!r:hs', '$root', { path: 'a.png' }]])
+      expect(res).toEqual({ event_id: '$m', mxc_uri: 'mxc://hs/a' })
+    })
+
+    it('refuses when the provider cannot send attachments', async () => {
+      const { spawnId, sockPath } = await start(fakeProvider())
+      await expect(
+        callDaemon(sockPath, { spawnId, method: 'sendAttachment', params: { path: 'a.png' } }),
+      ).rejects.toThrow('attachment_unsupported: this transport cannot send attachments')
+    })
+
+    it('refuses another agent’s binding', async () => {
+      const { spawnId, sockPath } = await start(
+        fakeProvider({ sendAttachment: async () => ({ event_id: '$m', mxc_uri: 'x' }) }),
+        'bob',
+      )
+      await expect(
+        callDaemon(sockPath, { spawnId, method: 'sendAttachment', params: { path: 'a.png' } }),
+      ).rejects.toThrow('binding not owned by caller')
+    })
+  })
+
   it('refuses sendMessage into a room the caller is not bound to', async () => {
     const provider = fakeProvider({
       sendMessage: async () => {
@@ -346,6 +397,59 @@ describe('daemon-socket', () => {
         params: { room: '!elsewhere:localhost', text: 'hi' },
       }),
     ).rejects.toThrow(/not_in_room/)
+  })
+})
+
+describe('line length cap', () => {
+  async function connect(sockPath: string) {
+    const client = createConnection(sockPath)
+    client.setEncoding('utf8')
+    await new Promise<void>((resolve, reject) => {
+      client.once('connect', () => resolve())
+      client.once('error', reject)
+    })
+    return client
+  }
+
+  it('replies with an error and closes the connection when a line outgrows the cap', async () => {
+    const sockPath = join(tmpdir(), `zooid-cap-${randomUUID()}.sock`)
+    const server = await startDaemonSocketServer({
+      sockPath,
+      registry: new SpawnRegistry(),
+      agentName: 'a',
+    })
+    cleanup.push(() => server.close())
+    const client = await connect(sockPath)
+    let received = ''
+    client.on('data', (c) => (received += c))
+    const closed = new Promise<void>((resolve) => client.once('close', () => resolve()))
+    client.on('error', () => {})
+
+    // No newline anywhere: the server must give up rather than keep buffering.
+    client.write('x'.repeat(MAX_LINE_LENGTH + 1))
+
+    const outcome = await Promise.race([
+      closed.then(() => 'closed' as const),
+      new Promise<'open'>((resolve) => setTimeout(() => resolve('open'), 2000)),
+    ])
+    client.destroy()
+    expect(outcome).toBe('closed')
+    expect(JSON.parse(received.trim())).toEqual({ ok: false, error: 'request line too long' })
+  })
+
+  it('still serves a request line just under the cap', async () => {
+    const registry = new SpawnRegistry()
+    const sockPath = join(tmpdir(), `zooid-cap-${randomUUID()}.sock`)
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'a' })
+    cleanup.push(() => server.close())
+
+    await expect(
+      callDaemon(sockPath, {
+        spawnId: 'nope',
+        method: 'getRooms',
+        params: { pad: 'x'.repeat(MAX_LINE_LENGTH - 1000) },
+      }),
+    ).rejects.toThrow('binding not owned by caller')
   })
 })
 
@@ -412,3 +516,76 @@ describe('daemon-socket caller identity', () => {
 })
 
 const NOT_OWNED = 'binding not owned by caller'
+
+describe('daemon-socket explicit-room getThreadHistory ([[ZOD084]])', () => {
+  const boundRooms: Record<string, string> = { '!joined:hs': '!joined:hs', '#joined:hs': '!joined:hs' }
+
+  async function serve(provider: TransportContextProvider) {
+    const registry = new SpawnRegistry()
+    const spawnId = registry.register({
+      agentName: 'a',
+      threadRef: { channelId: '!ambient:hs', threadId: 't' },
+      provider,
+    })
+    const sockPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'a' })
+    cleanup.push(() => server.close())
+    return { spawnId, sockPath }
+  }
+
+  it('reads the named room, resolving an alias to its canonical ID', async () => {
+    const getThreadHistory = vi.fn(async (_c: string, threadId: string) => ({
+      messages: [{ id: threadId, sender: 'alice', text: 'root', timestamp: 'T', is_agent: false }],
+      has_more: false,
+    }))
+    const { spawnId, sockPath } = await serve(
+      fakeProvider({ getThreadHistory, resolveRoom: (s) => boundRooms[s] }),
+    )
+    const page = (await callDaemon(sockPath, {
+      spawnId,
+      method: 'getThreadHistory',
+      params: { threadId: '$root', room: '#joined:hs' },
+    })) as { messages: Array<{ id: string }> }
+    expect(page.messages[0]!.id).toBe('$root')
+    expect(getThreadHistory).toHaveBeenCalledTimes(1)
+    expect(getThreadHistory.mock.calls[0]![0]).toBe('!joined:hs')
+    expect(getThreadHistory.mock.calls[0]![1]).toBe('$root')
+  })
+
+  it('returns not_in_room and never reaches the provider for a room the agent has not joined', async () => {
+    const getThreadHistory = vi.fn(async () => ({ messages: [], has_more: false }))
+    const { spawnId, sockPath } = await serve(
+      fakeProvider({ getThreadHistory, resolveRoom: (s) => boundRooms[s] }),
+    )
+    await expect(
+      callDaemon(sockPath, {
+        spawnId,
+        method: 'getThreadHistory',
+        params: { threadId: '$root', room: '!elsewhere:hs' },
+      }),
+    ).rejects.toThrow('not_in_room: this agent is not a member of !elsewhere:hs')
+    expect(getThreadHistory).not.toHaveBeenCalled()
+  })
+
+  it('refuses an explicit room when the provider cannot resolve rooms', async () => {
+    const getThreadHistory = vi.fn(async () => ({ messages: [], has_more: false }))
+    const { spawnId, sockPath } = await serve(fakeProvider({ getThreadHistory }))
+    await expect(
+      callDaemon(sockPath, {
+        spawnId,
+        method: 'getThreadHistory',
+        params: { threadId: '$root', room: '!joined:hs' },
+      }),
+    ).rejects.toThrow(/not_in_room/)
+    expect(getThreadHistory).not.toHaveBeenCalled()
+  })
+
+  it('keeps reading the ambient room when room is omitted', async () => {
+    const getThreadHistory = vi.fn(async () => ({ messages: [], has_more: false }))
+    const resolveRoom = vi.fn()
+    const { spawnId, sockPath } = await serve(fakeProvider({ getThreadHistory, resolveRoom }))
+    await callDaemon(sockPath, { spawnId, method: 'getThreadHistory', params: { threadId: '$root' } })
+    expect(getThreadHistory.mock.calls[0]![0]).toBe('!ambient:hs')
+    expect(resolveRoom).not.toHaveBeenCalled()
+  })
+})

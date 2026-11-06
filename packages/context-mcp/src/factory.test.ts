@@ -113,4 +113,22 @@ describe('contextContainerMounts', () => {
     expect(existsSync(`${binMount.path}/bin.js`)).toBe(true)
     expect(dirname(`${binMount.path}/bin.js`)).toBe(binMount.path)
   })
+
+  describe('sendAttachment flag', () => {
+    const base = { spawnId: 'sid', sockPath: '/tmp/x.sock', binPath: '/b/bin.js' }
+    it('appends --send-attachment on the host shape', () => {
+      const spec = buildContextServerSpec({ ...base, sendAttachment: true })
+      expect(spec.args).toEqual(['/b/bin.js', '--spawn-id', 'sid', '--send-attachment'])
+    })
+    it('appends --send-attachment on the container shape', () => {
+      const spec = buildContextServerSpec({ ...base, sendAttachment: true, containerize: true })
+      expect(spec.args).toEqual([CONTEXT_CONTAINER_BIN, '--spawn-id', 'sid', '--send-attachment'])
+    })
+    it('is off by default', () => {
+      expect(buildContextServerSpec(base).args).not.toContain('--send-attachment')
+      expect(buildContextServerSpec({ ...base, containerize: true }).args).not.toContain(
+        '--send-attachment',
+      )
+    })
+  })
 })

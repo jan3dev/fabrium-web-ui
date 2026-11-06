@@ -4,6 +4,7 @@ import { parse } from 'yaml'
 import type { AcpAgentSpec } from './acp-types.js'
 import { isPreset } from '@zooid/acp-client'
 import { interpolateEnv, interpolateString } from './env-interpolation.js'
+import { isContainerRuntime, resolveAgentRuntime } from './runtime-resolve.js'
 import { compileMatch } from './match-expression.js'
 import type {
   AgentConfig,
@@ -15,6 +16,7 @@ import type {
   MatrixTransportConfig,
   MountConfig,
   RoomBinding,
+  RuntimeKind,
   TransportConfig,
   TriggerConfig,
   TriggerMessage,
@@ -160,6 +162,25 @@ function parseSessionIdleTimeout(name: string, raw: unknown): number {
   return milliseconds
 }
 
+/** A `container.env` mapping: strings only, `${VAR}`-interpolated, no `ZOOID_*`. */
+function parseEnvMapping(
+  raw: unknown,
+  processEnv: NodeJS.ProcessEnv,
+  field: string,
+): Record<string, string> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`${field} must be a mapping`)
+  }
+  const stringEnv: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v !== 'string') {
+      throw new Error(`${field}.${k}: must be a string (got ${typeof v})`)
+    }
+    stringEnv[k] = v
+  }
+  return interpolateEnv(stringEnv, processEnv, field)
+}
+
 function parseAgentContainer(
   name: string,
   raw: unknown,
@@ -178,20 +199,7 @@ function parseAgentContainer(
     out.image = r.image
   }
   if (r.env !== undefined && r.env !== null) {
-    if (typeof r.env !== 'object' || Array.isArray(r.env)) {
-      throw new Error(`agents.${name}.container.env must be a mapping`)
-    }
-    const rawEnv = r.env as Record<string, unknown>
-    const stringEnv: Record<string, string> = {}
-    for (const [k, v] of Object.entries(rawEnv)) {
-      if (typeof v !== 'string') {
-        throw new Error(
-          `agents.${name}.container.env.${k}: must be a string (got ${typeof v})`,
-        )
-      }
-      stringEnv[k] = v
-    }
-    out.env = interpolateEnv(stringEnv, processEnv, `agents.${name}.container.env`)
+    out.env = parseEnvMapping(r.env, processEnv, `agents.${name}.container.env`)
   }
   if (r.mounts !== undefined) {
     out.mounts = parseMountList(name, r.mounts, processEnv, configDir)
@@ -208,54 +216,55 @@ function parseMountList(
   processEnv: NodeJS.ProcessEnv,
   configDir: string | undefined,
 ): MountConfig[] {
+  const field = `agents.${agentName}.container.mounts`
   if (!Array.isArray(raw)) {
-    throw new Error(`agents.${agentName}.container.mounts must be an array`)
+    throw new Error(`${field} must be an array`)
   }
   const out: MountConfig[] = []
   const seenIds = new Set<string>()
   for (let i = 0; i < raw.length; i++) {
     const entry = raw[i]
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
-      throw new Error(`agents.${agentName}.container.mounts[${i}] must be a mapping`)
+      throw new Error(`${field}[${i}] must be a mapping`)
     }
     const e = entry as Record<string, unknown>
     if (e.host === undefined) {
-      throw new Error(`agents.${agentName}.container.mounts[${i}].host is required`)
+      throw new Error(`${field}[${i}].host is required`)
     }
     if (e.target === undefined) {
-      throw new Error(`agents.${agentName}.container.mounts[${i}].target is required`)
+      throw new Error(`${field}[${i}].target is required`)
     }
     if (typeof e.host !== 'string' || e.host.length === 0) {
       throw new Error(
-        `agents.${agentName}.container.mounts[${i}].host must be a non-empty string`,
+        `${field}[${i}].host must be a non-empty string`,
       )
     }
     if (typeof e.target !== 'string' || e.target.length === 0) {
       throw new Error(
-        `agents.${agentName}.container.mounts[${i}].target must be a non-empty string`,
+        `${field}[${i}].target must be a non-empty string`,
       )
     }
     const mode = e.mode ?? 'rw'
     if (mode !== 'ro' && mode !== 'rw') {
       throw new Error(
-        `agents.${agentName}.container.mounts[${i}].mode must be "ro" or "rw" (got ${JSON.stringify(e.mode)})`,
+        `${field}[${i}].mode must be "ro" or "rw" (got ${JSON.stringify(e.mode)})`,
       )
     }
     let id: string | undefined
     if (e.id !== undefined) {
       if (typeof e.id !== 'string' || e.id.length === 0) {
         throw new Error(
-          `agents.${agentName}.container.mounts[${i}].id must be a non-empty string`,
+          `${field}[${i}].id must be a non-empty string`,
         )
       }
       if (e.id === 'workspace') {
         throw new Error(
-          `agents.${agentName}.container.mounts[${i}].id: "workspace" is a reserved id (set by the workspace auto-mount). Use a different id or rely on disable_mounts to subtract.`,
+          `${field}[${i}].id: "workspace" is a reserved id (set by the workspace auto-mount). Use a different id or rely on disable_mounts to subtract.`,
         )
       }
       if (seenIds.has(e.id)) {
         throw new Error(
-          `agents.${agentName}.container.mounts: duplicate id "${e.id}"`,
+          `${field}: duplicate id "${e.id}"`,
         )
       }
       seenIds.add(e.id)
@@ -265,17 +274,12 @@ function parseMountList(
     if (e.create !== undefined) {
       if (typeof e.create !== 'boolean') {
         throw new Error(
-          `agents.${agentName}.container.mounts[${i}].create must be a boolean`,
+          `${field}[${i}].create must be a boolean`,
         )
       }
       create = e.create
     }
-    const host = resolveHostPath(
-      agentName,
-      i,
-      interpolateString(e.host, processEnv),
-      configDir,
-    )
+    const host = resolveHostPath(field, i, interpolateString(e.host, processEnv), configDir)
     const target = interpolateString(e.target, processEnv)
     const m: MountConfig = { host, target, mode }
     if (id !== undefined) m.id = id
@@ -286,7 +290,7 @@ function parseMountList(
 }
 
 function resolveHostPath(
-  agentName: string,
+  field: string,
   index: number,
   host: string,
   configDir: string | undefined,
@@ -295,7 +299,7 @@ function resolveHostPath(
     const home = process.env.HOME
     if (!home) {
       throw new Error(
-        `agents.${agentName}.container.mounts[${index}].host: cannot expand ~ — $HOME is not set`,
+        `${field}[${index}].host: cannot expand ~ — $HOME is not set`,
       )
     }
     return `${home}/${host.slice(2)}`
@@ -304,7 +308,7 @@ function resolveHostPath(
     const home = process.env.HOME
     if (!home) {
       throw new Error(
-        `agents.${agentName}.container.mounts[${index}].host: cannot expand ~ — $HOME is not set`,
+        `${field}[${index}].host: cannot expand ~ — $HOME is not set`,
       )
     }
     return home
@@ -312,7 +316,7 @@ function resolveHostPath(
   if (isAbsolute(host)) return host
   if (!configDir) {
     throw new Error(
-      `agents.${agentName}.container.mounts[${index}]: relative host path "${host}" requires configDir (zooid.yaml directory) — pass it via loadZooidConfig(yaml, { configDir })`,
+      `${field}[${index}]: relative host path "${host}" requires configDir (zooid.yaml directory) — pass it via loadZooidConfig(yaml, { configDir })`,
     )
   }
   return pathResolve(configDir, host)
@@ -519,6 +523,22 @@ function parseTransport(
       }
       out.space = r.space
     }
+
+    if (r.admins !== undefined) {
+      if (!Array.isArray(r.admins)) {
+        throw new Error(
+          `transports.${name}.admins must be an array of Matrix user IDs (got ${JSON.stringify(r.admins)})`,
+        )
+      }
+      r.admins.forEach((a, i) => {
+        if (typeof a !== 'string' || !MATRIX_USER_ID_RE.test(a)) {
+          throw new Error(
+            `transports.${name}.admins[${i}] must look like @localpart:server (got ${JSON.stringify(a)})`,
+          )
+        }
+      })
+      out.admins = [...new Set(r.admins as string[])]
+    }
     return out
   }
   // type: 'http'
@@ -654,7 +674,17 @@ function parseTransportBinding(
     }
     const rooms: RoomBinding[] = []
     for (let i = 0; i < block.rooms.length; i++) {
-      rooms.push(parseRoomBinding(`agents.${name}.matrix.rooms[${i}]`, block.rooms[i], serverName))
+      const binding = parseRoomBinding(`agents.${name}.matrix.rooms[${i}]`, block.rooms[i], serverName)
+      // An alias equal to the space's resolves to the space itself, so the
+      // agent would be bound to the space instead of a chat room.
+      const spaceLocalpart = refTransport.space ?? 'dev'
+      if (binding.alias === `#${spaceLocalpart}:${serverName}`) {
+        throw new Error(
+          `agents.${name}.matrix.rooms[${i}]: "#${spaceLocalpart}" collides with the workforce space alias ` +
+            `(transports.${refName}.space = "${spaceLocalpart}"); rename the room or set transports.${refName}.space`,
+        )
+      }
+      rooms.push(binding)
     }
 
     let displayName: string | undefined
@@ -695,7 +725,7 @@ function parseTransportBinding(
 
 function parseAgents(
   raw: unknown,
-  runtime: 'local' | 'docker' | 'podman',
+  runtime: RuntimeKind,
   transports: Record<string, TransportConfig>,
   daemonHooks: { pre_turn?: string; post_turn?: string },
   processEnv: NodeJS.ProcessEnv,
@@ -782,9 +812,15 @@ function parseAgents(
       }
     }
 
+    const agentRuntime =
+      entry.runtime === undefined
+        ? undefined
+        : parseRuntimeValue(entry.runtime, `agents.${name}.runtime`)
+    const resolvedRuntime = agentRuntime ?? runtime
+
     let containerBlock: ContainerConfig | undefined
     if (entry.container !== undefined && entry.container !== null) {
-      if (runtime === 'local') {
+      if (resolvedRuntime === 'local') {
         // Under runtime: local, the parser only accepts mounts/disable_mounts
         // (which the compose layer ignores). image/env stay rejected because
         // they would silently lie: there's no container and the host inherits
@@ -825,6 +861,7 @@ function parseAgents(
       }
       agentCfg[k] = v.trim()
     }
+    if (agentRuntime) agentCfg.runtime = agentRuntime
     if (containerBlock) agentCfg.container = containerBlock
     if (binding.matrix) agentCfg.matrix = binding.matrix
     if (binding.http) agentCfg.http = binding.http
@@ -1197,12 +1234,17 @@ function parseWebhookTrigger(
   return config
 }
 
-function parseRuntime(raw: unknown): 'local' | 'docker' | 'podman' {
-  const runtime = raw ?? 'docker'
-  if (runtime !== 'local' && runtime !== 'docker' && runtime !== 'podman') {
-    throw new Error(`runtime must be "local", "docker", or "podman" (got "${runtime}")`)
+const RUNTIME_KINDS: readonly RuntimeKind[] = ['local', 'docker', 'podman']
+
+function parseRuntimeValue(raw: unknown, field: string): RuntimeKind {
+  if (typeof raw !== 'string' || !(RUNTIME_KINDS as readonly string[]).includes(raw)) {
+    throw new Error(`${field} must be "local", "docker", or "podman" (got "${String(raw)}")`)
   }
-  return runtime
+  return raw as RuntimeKind
+}
+
+function parseRuntime(raw: unknown): RuntimeKind {
+  return parseRuntimeValue(raw ?? 'docker', 'runtime')
 }
 
 function zooidHooks(raw: Record<string, unknown>): { pre_turn?: string; post_turn?: string } {
@@ -1276,6 +1318,17 @@ export function loadZooidConfig(
     opts.configDir,
   )
 
+  const engines = new Set(
+    Object.values(agents)
+      .map((a) => resolveAgentRuntime(a, { runtime }))
+      .filter(isContainerRuntime),
+  )
+  if (engines.size > 1) {
+    throw new Error(
+      "agents resolve to both 'docker' and 'podman'; a workforce runs one container engine. See [ZOD109].",
+    )
+  }
+
   const cfg: ZooidConfig = {
     runtime,
     transports,
@@ -1285,10 +1338,10 @@ export function loadZooidConfig(
   }
   if (workstation !== undefined) cfg.workstation = workstation
   if (r.container !== undefined && r.container !== null) {
-    if (runtime === 'local') {
+    if (engines.size === 0) {
       throw new Error(
         "container is only valid when runtime is 'docker' or 'podman'. " +
-          'runtime: local does not run agents in containers; image is ignored. See [ZOD043].',
+          'No agent in this workforce runs in a container, so image would be ignored. See [ZOD043], [ZOD109].',
       )
     }
     cfg.container = parseZooidContainer(r.container)
@@ -1356,16 +1409,9 @@ export function findConfigFile(cwd: string): FoundConfigFile | null {
 }
 
 export function mergeCliFlags(base: ZooidConfig, flags: CliFlags): ZooidConfig {
-  const runtimeFlag = flags.runtime as 'local' | 'docker' | 'podman' | undefined
-  if (
-    runtimeFlag !== undefined &&
-    runtimeFlag !== 'local' &&
-    runtimeFlag !== 'docker' &&
-    runtimeFlag !== 'podman'
-  ) {
-    throw new Error(`runtime must be "local", "docker", or "podman" (got "${flags.runtime}")`)
-  }
-  const runtime = runtimeFlag ?? base.runtime
+  // Agents keep their explicit runtime, so the flag moves only the inheritors. [ZOD109]
+  const runtime =
+    flags.runtime === undefined ? base.runtime : parseRuntimeValue(flags.runtime, 'runtime')
   const merged: ZooidConfig = {
     runtime,
     transports: base.transports,
@@ -1373,7 +1419,10 @@ export function mergeCliFlags(base: ZooidConfig, flags: CliFlags): ZooidConfig {
     hooks: { ...base.hooks },
     triggers: base.triggers,
   }
-  if (runtime === 'docker' || runtime === 'podman') {
+  const anyContainer = Object.values(base.agents).some((a) =>
+    isContainerRuntime(resolveAgentRuntime(a, { runtime })),
+  )
+  if (anyContainer) {
     const image = flags.image ?? base.container?.image
     if (image !== undefined) {
       merged.container = { image }

@@ -7,6 +7,7 @@ import {
   ARTIFACT_INSTRUCTIONS,
   ARTIFACT_KINDS,
   HANDOFF_DESCRIPTION,
+  SEND_ATTACHMENT_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
 } from './tool-text.js'
 
@@ -28,6 +29,18 @@ export interface BuildContextMcpServerOpts {
    * usefully call them anyway ([[ZOD084]]).
    */
   role?: TaskRole
+  /**
+   * Set when the role query failed (daemon socket unreachable). The task tools
+   * stay unregistered, but the agent is told why: the instructions carry a
+   * notice and `zooid_context_status` reports the error, so "context daemon
+   * unreachable" is distinguishable from "tool missing".
+   */
+  roleError?: string
+  /**
+   * Register `zooid_send_attachment`. Set by the spawn (`--send-attachment`)
+   * when the bound provider can send attachments ([[ZOD068]]).
+   */
+  canSendAttachment?: boolean
 }
 // The socket substitutes its authenticated spawn binding; models never supply an address.
 const CALLER_FROM_BINDING: TaskCallerRef = {
@@ -37,13 +50,29 @@ const CALLER_FROM_BINDING: TaskCallerRef = {
   sessionKey: '',
 }
 
+function unreachableNotice(error: string): string {
+  return `The zooid context daemon is unreachable (${error}), so zooid_handoff, zooid_start_task_threads and zooid_complete_task are unavailable in this session. Tell the user the context daemon needs a restart rather than reporting the tools as missing.`
+}
+
 export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServer {
   const server = new McpServer(
     { name: 'zooid-context', version: '0.0.1' },
     {
-      instructions: `${AGENT_NOTIFY_INSTRUCTIONS}\n\n${ARTIFACT_INSTRUCTIONS}`,
+      instructions: opts.roleError
+        ? `${AGENT_NOTIFY_INSTRUCTIONS}\n\n${ARTIFACT_INSTRUCTIONS}\n\n${unreachableNotice(opts.roleError)}`
+        : `${AGENT_NOTIFY_INSTRUCTIONS}\n\n${ARTIFACT_INSTRUCTIONS}`,
     },
   )
+
+  if (opts.roleError) {
+    const notice = unreachableNotice(opts.roleError)
+    server.tool(
+      'zooid_context_status',
+      'Report whether the zooid context daemon is reachable. Call this when zooid_handoff, zooid_start_task_threads or zooid_complete_task is missing.',
+      {},
+      async () => ({ content: [{ type: 'text', text: notice }], isError: true }),
+    )
+  }
 
   server.tool(
     'zooid_get_history',
@@ -129,16 +158,17 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
 
   server.tool(
     'zooid_get_thread_history',
-    'Drill into a specific thread: the root message followed by all replies in chronological order. Pass the `thread_id` from a `zooid_get_recent_threads` entry or a `Message.thread_id` from `zooid_get_history`.',
+    'Drill into a specific thread: the root message followed by all replies in chronological order. Pass the `thread_id` from a `zooid_get_recent_threads` entry or a `Message.thread_id` from `zooid_get_history`. Reads the current room unless `room` (room ID or alias, as listed by `zooid_get_rooms`) names another room this agent is a member of; a room it is not in returns `not_in_room`.',
     {
+      room: z.string().optional(),
       thread_id: z.string(),
       limit: z.number().int().positive().optional(),
       before: z.string().optional(),
     },
-    async ({ thread_id, limit, before }) => {
+    async ({ room, thread_id, limit, before }) => {
       const provider = await opts.resolve()
       const clamped = Math.min(limit ?? DEFAULT_LIMIT, MAX_LIMIT)
-      const page = await provider.getThreadHistory('', thread_id, {
+      const page = await provider.getThreadHistory(room ?? '', thread_id, {
         limit: clamped,
         before,
       })
@@ -215,6 +245,26 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
       return { content: [{ type: 'text', text: JSON.stringify(result) }] }
     },
   )
+  if (opts.canSendAttachment) {
+    server.tool(
+      'zooid_send_attachment',
+      SEND_ATTACHMENT_DESCRIPTION,
+      {
+        path: z.string().min(1),
+        name: z.string().optional(),
+        caption: z.string().optional(),
+      },
+      async ({ path, name, caption }) => {
+        const provider = await opts.resolve()
+        if (!provider.sendAttachment) {
+          throw new Error('attachment_unsupported: this transport cannot send attachments')
+        }
+        // The socket fills room and thread from the spawn binding.
+        const result = await provider.sendAttachment('', '', { path, name, caption })
+        return { content: [{ type: 'text', text: JSON.stringify(result) }] }
+      },
+    )
+  }
 
   return server
 }

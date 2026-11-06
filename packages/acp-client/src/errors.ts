@@ -11,6 +11,7 @@ export type ErrorCode =
   | 'acp_protocol'
   | 'permission_denied'
   | 'media_failed'
+  | 'attachment_failed'
   | 'internal'
 
 export interface Classified {

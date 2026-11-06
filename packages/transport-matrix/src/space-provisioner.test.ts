@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { MatrixClient } from './matrix-client.js'
-import { ensureDefaultChannel, ensureWorkforceSpace, serverNameFromMxid } from './space-provisioner.js'
+import {
+  ensureAdminsInvited,
+  ensureDefaultChannel,
+  ensureWorkforceSpace,
+  serverNameFromMxid,
+} from './space-provisioner.js'
 
 function clientWithFetches(...handlers: Array<(url: string, init?: RequestInit) => Response>) {
   let i = 0
@@ -327,5 +332,73 @@ describe('serverNameFromMxid', () => {
 
   it('throws on an mxid without a server', () => {
     expect(() => serverNameFromMxid('@zooid')).toThrow(/server/)
+  })
+})
+
+describe('ensureAdminsInvited', () => {
+  const AS = '@zooid:hs'
+  const member = (user: string, membership: string) => ({
+    type: 'm.room.member',
+    state_key: user,
+    content: { membership },
+  })
+  const mk = (states: Record<string, unknown[]>) => {
+    const invite = vi.fn(async (_o: { roomId: string; asUserId: string; targetUserId: string }) => {})
+    const fetchRoomState = vi.fn(async (roomId: string) => (states[roomId] ?? []) as never)
+    return { client: { invite, fetchRoomState }, invite }
+  }
+
+  it('invites each admin to each room, deduping admins and rooms', async () => {
+    const { client, invite } = mk({})
+    await ensureAdminsInvited({
+      client,
+      asUserId: AS,
+      admins: ['@a:hs', '@b:hs', '@a:hs'],
+      roomIds: ['!1:hs', '!2:hs', '!1:hs'],
+    })
+    expect(invite.mock.calls.map(([o]) => `${o.roomId} ${o.targetUserId}`)).toEqual([
+      '!1:hs @a:hs',
+      '!1:hs @b:hs',
+      '!2:hs @a:hs',
+      '!2:hs @b:hs',
+    ])
+    expect(invite.mock.calls.every(([o]) => o.asUserId === AS)).toBe(true)
+  })
+
+  it('skips admins already joined, invited or banned, and invites those who left', async () => {
+    const { client, invite } = mk({
+      '!1:hs': [member('@j:hs', 'join'), member('@i:hs', 'invite'), member('@x:hs', 'ban'), member('@l:hs', 'leave')],
+    })
+    await ensureAdminsInvited({
+      client,
+      asUserId: AS,
+      admins: ['@j:hs', '@i:hs', '@x:hs', '@l:hs', '@new:hs'],
+      roomIds: ['!1:hs'],
+    })
+    expect(invite.mock.calls.map(([o]) => o.targetUserId)).toEqual(['@l:hs', '@new:hs'])
+  })
+
+  it('does nothing without admins', async () => {
+    const { client, invite } = mk({})
+    await ensureAdminsInvited({ client, asUserId: AS, admins: [], roomIds: ['!1:hs'] })
+    expect(client.fetchRoomState).not.toHaveBeenCalled()
+    expect(invite).not.toHaveBeenCalled()
+  })
+
+  it('keeps going when one invite fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { client, invite } = mk({})
+    invite.mockRejectedValueOnce(new Error('403 nope'))
+    await ensureAdminsInvited({ client, asUserId: AS, admins: ['@a:hs'], roomIds: ['!1:hs', '!2:hs'] })
+    expect(invite).toHaveBeenCalledTimes(2)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('invite @a:hs → !1:hs failed'))
+    warn.mockRestore()
+  })
+
+  it('invites anyway when room state is unreadable', async () => {
+    const { client, invite } = mk({})
+    client.fetchRoomState.mockRejectedValueOnce(new Error('boom'))
+    await ensureAdminsInvited({ client, asUserId: AS, admins: ['@a:hs'], roomIds: ['!1:hs'] })
+    expect(invite).toHaveBeenCalledTimes(1)
   })
 })

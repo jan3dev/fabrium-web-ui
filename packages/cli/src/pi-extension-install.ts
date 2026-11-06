@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
+import type { ZooidConfig } from '@zooid/core'
 
 export interface InstallPiExtensionResult {
   status: 'installed' | 'unchanged' | 'skipped'
@@ -53,4 +54,40 @@ export function installPiExtension(opts: {
   if (existsSync(target) && readFileSync(target).equals(source)) return { status: 'unchanged', target }
   writeFileSync(target, source)
   return { status: 'installed', target }
+}
+
+/**
+ * Install the zooid-tasks extension for every pi agent.
+ */
+export function installPiExtensions(opts: {
+  config: ZooidConfig
+  configDir: string
+  daemonHome: string
+  env: { PI_CODING_AGENT_DIR?: string | undefined }
+  /** A path, or a resolver called only when some agent needs it. */
+  bundlePath: string | (() => string)
+  log: (line: string) => void
+}): void {
+  const { config } = opts
+  const piAgents = Object.keys(config.agents).filter(
+    (name) => (config.agents[name]!.acp as { preset?: string } | undefined)?.preset === 'pi',
+  )
+  let bundlePath: string | undefined
+  // PI_CODING_AGENT_DIR is normally relative, so each agent gets its own
+  // extensions dir; an absolute value (or none) collapses them into one.
+  const installed = new Set<string>()
+  for (const name of piAgents) {
+    const { dir, scope } = resolvePiAgentDir({
+      agentWorkdir: resolve(opts.configDir, config.agents[name]!.workdir),
+      daemonHome: opts.daemonHome,
+      env: opts.env,
+    })
+    if (installed.has(dir)) continue
+    installed.add(dir)
+    bundlePath ??= typeof opts.bundlePath === 'function' ? opts.bundlePath() : opts.bundlePath
+    const result = installPiExtension({ agentDir: dir, bundlePath, createMissing: scope === 'project' })
+    const where = result.target ? ` extension=${result.target}` : ''
+    const why = result.reason ? ` reason=${result.reason}` : ''
+    opts.log(`[pi] agent=${name}${where} status=${result.status}${why}`)
+  }
 }

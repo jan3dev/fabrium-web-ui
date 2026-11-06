@@ -44,6 +44,9 @@ export interface MountConfig {
   create?: boolean
 }
 
+/** Where an agent's ACP process runs. Resolved per agent: agent > workforce > 'docker'. [ZOD109] */
+export type RuntimeKind = 'local' | 'docker' | 'podman'
+
 /**
  * Per-agent container configuration. Holds runtime-neutral container
  * concerns — image, env, mounts. `image` / `env` are rejected at parse time
@@ -90,6 +93,12 @@ export interface ZooidContainerConfig {
 export interface RoomBinding {
   /** Room alias (typical) or room ID. */
   alias: string
+  /**
+   * The alias/ID as configured, kept by `bot-pool` when it rewrites `alias`
+   * to the canonical room ID at bootstrap. Lets `zooid_send_message` accept
+   * the room by the name the agent's config uses (ZOD084).
+   */
+  configuredAlias?: string
   /**
    * Power level the agent should hold in this room at the moment it is
    * created. Omitted = `users_default` (effectively 0). Not reconciled
@@ -178,7 +187,12 @@ export interface AgentConfig {
   persona?: string
   /** Project the agent works on, e.g. "Payments". */
   project?: string
-  /** Container config. Rejected at parse time when runtime: local. */
+  /**
+   * Explicit per-agent runtime. Unset means "inherit the workforce value";
+   * read it through `resolveAgentRuntime`, never directly. [ZOD109]
+   */
+  runtime?: RuntimeKind
+  /** Container config. image/env rejected when local. */
   container?: ContainerConfig
   /** Exactly one of matrix / http is set per agent. */
   matrix?: MatrixBinding
@@ -242,6 +256,12 @@ export interface MatrixTransportConfig {
    * @default 'dev'
    */
   space?: string
+  /**
+   * Human operators (full MXIDs, e.g. `@alice:example.org`) invited to the
+   * workforce space, every agent room and `#general` on every start. Merged
+   * with `--admin-user`. Invite-only: dropping an entry does not remove them.
+   */
+  admins?: string[]
 }
 
 /**
@@ -264,7 +284,8 @@ export type TransportConfig = MatrixTransportConfig | HttpTransportConfig
  * each agent must reference one by name.
  */
 export interface ZooidConfig {
-  runtime: 'local' | 'docker' | 'podman'
+  /** Workforce default runtime; agents may override it. [ZOD109] */
+  runtime: RuntimeKind
   /**
    * Workstation identity. A short, lowercase, hyphen-separated name that
    * uniquely identifies this daemon instance (e.g. `laptop`, `ec2-prod`).
@@ -272,7 +293,7 @@ export interface ZooidConfig {
    * `user_namespace` from it, enabling exclusive per-workstation AS namespaces.
    */
   workstation?: string
-  /** Workforce-wide container defaults. Image only — no workforce-level env. Rejected when runtime: local. */
+  /** Workforce-wide container defaults. Image only — no workforce-level env. Rejected when no agent resolves to docker or podman. */
   container?: ZooidContainerConfig
   /** Required. Map of operator-chosen names → transport config. At least one entry. */
   transports: Record<string, TransportConfig>

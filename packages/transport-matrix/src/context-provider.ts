@@ -8,12 +8,15 @@ import type {
   RoomInfo,
   SendMessageInput,
   SendMessageResult,
+  SendAttachmentInput,
+  SendAttachmentResult,
   Message,
   ThreadOverview,
   ThreadOverviewPage,
 } from '@zooid/core'
+import { readFile, stat } from 'node:fs/promises'
+import { basename } from 'node:path'
 import type { MatrixClient } from './matrix-client.js'
-import type { MediaClient } from './media-client.js'
 import {
   ARTIFACT_EVENT_TYPE,
   MAX_ARTIFACT_BYTES,
@@ -24,6 +27,11 @@ import {
   validateArtifactInput,
   type StoredArtifact,
 } from './artifacts.js'
+import type { MediaClientLike } from './transport.js'
+import { INLINE_IMAGE_MIMES, MAX_DOWNLOAD_BYTES, MAX_INLINE_IMAGE_BYTES } from './media-client.js'
+import { resolveAttachmentPath } from './attachment-path.js'
+import { mimeFromFilename } from './mime.js'
+import { toErrorBody } from './event-encoders.js'
 import type { RoomBinding } from '@zooid/core'
 
 interface MatrixMessageEvent {
@@ -72,8 +80,30 @@ export interface MatrixContextProviderOpts {
    * don't exercise either method).
    */
   rooms?: RoomBinding[]
-  /** Stores artifact bodies over 48 KB. Absent = such artifacts are refused. */
-  media?: Pick<MediaClient, 'download' | 'upload'>
+  /**
+   * Uploads as asUserId and stores artifact bodies over 48 KB. Absent =
+   * sendAttachment throws attachment_failed and big artifacts are refused.
+   */
+  media?: MediaClientLike
+  /**
+   * Host workdir, the prefix the agent sees it at, and whether the agent is
+   * confined to it (container runtimes). Absent = sendAttachment throws attachment_failed.
+   */
+  workspace?: { hostDir: string; agentPath: string; confined: boolean }
+}
+
+/** Events fetched per round when collecting recent threads. */
+const RECENT_THREADS_BATCH = 50
+/** Max /messages rounds per getRecentThreads call (peeks not counted). */
+const RECENT_THREADS_MAX_ROUNDS = 5
+
+/** Index of the nth non-null item (1-based n), or -1 if there are fewer. */
+function indexOfNth<T>(items: Array<T | null>, n: number): number {
+  let seen = 0
+  for (let i = 0; i < items.length; i++) {
+    if (items[i] !== null && ++seen === n) return i
+  }
+  return -1
 }
 
 /** Pages of thread relations searched for an artifact's latest version. */
@@ -87,12 +117,13 @@ export class MatrixContextProvider implements TransportContextProvider {
     // burn the page budget on reactions, `dev.zooid.*` custom events, typing
     // notifications, etc., and routinely return empty pages with a stale
     // `has_more` cursor.
+    const filter = { types: ['m.room.message'] }
     const { chunk, end } = await this.opts.client.fetchRoomMessages({
       roomId: channelId,
       asUserId: this.opts.asUserId,
       limit: hopts.limit,
       from: hopts.before,
-      filter: { types: ['m.room.message'] },
+      filter,
     })
     const messages: Message[] = []
     for (let i = chunk.length - 1; i >= 0; i--) {
@@ -100,10 +131,11 @@ export class MatrixContextProvider implements TransportContextProvider {
       const msg = this.toMessage(ev)
       if (msg) messages.push(msg)
     }
+    const hasMore = await this.hasMessagesPast(channelId, end, filter)
     return {
       messages,
-      next_before: end,
-      has_more: end !== undefined,
+      next_before: hasMore ? end : undefined,
+      has_more: hasMore,
     }
   }
 
@@ -111,50 +143,120 @@ export class MatrixContextProvider implements TransportContextProvider {
     channelId: string,
     hopts: HistoryOptions,
   ): Promise<ThreadOverviewPage> {
-    // Server-side filter: `m.room.message` only, and exclude thread replies
-    // (`not_rel_types: ['m.thread']`) so the overview shows top-level entries
-    // and thread roots, not the reply noise underneath them.
-    const { chunk, end } = await this.opts.client.fetchRoomMessages({
+    // Server-side filter: `m.room.message` only, and ask to exclude thread
+    // replies (`not_rel_types: ['m.thread']`). Tuwunel honors `types` but
+    // ignores `not_rel_types` (zooid-ai/zooid#123), so replies still arrive
+    // and are dropped by toThreadOverview(). A page of `limit` events can
+    // then hold few or no entries. Instead, fetch in batches and keep going
+    // until `limit` entries are collected, history runs out, or the round
+    // budget is spent.
+    const filter = { types: ['m.room.message'], not_rel_types: ['m.thread'] }
+    const limit = hopts.limit ?? 50
+    const threads: ThreadOverview[] = []
+    let cursor = hopts.before
+    for (let round = 0; round < RECENT_THREADS_MAX_ROUNDS; round++) {
+      const remaining = limit - threads.length
+      const page = await this.opts.client.fetchRoomMessages({
+        roomId: channelId,
+        asUserId: this.opts.asUserId,
+        limit: Math.max(remaining, RECENT_THREADS_BATCH),
+        from: cursor,
+        filter,
+      })
+      // /messages returns newest-first; keep that order for the overview.
+      const entries = (page.chunk as unknown as MatrixMessageEvent[]).map((ev) =>
+        this.toThreadOverview(ev),
+      )
+      const cut = indexOfNth(entries, remaining)
+      if (cut !== -1) {
+        // The batch holds more entries than we need. A Matrix cursor can't
+        // point inside a page, so returning the first `remaining` entries
+        // with `page.end` would skip the rest. Re-request exactly the events
+        // through the last entry kept so `end` lands right after it.
+        let end = page.end
+        let kept = entries.slice(0, cut + 1)
+        if (cut < entries.length - 1) {
+          const exact = await this.opts.client.fetchRoomMessages({
+            roomId: channelId,
+            asUserId: this.opts.asUserId,
+            limit: cut + 1,
+            from: cursor,
+            filter,
+          })
+          end = exact.end
+          kept = (exact.chunk as unknown as MatrixMessageEvent[]).map((ev) =>
+            this.toThreadOverview(ev),
+          )
+        }
+        for (const t of kept) if (t) threads.push(t)
+        const hasMore = await this.hasMessagesPast(channelId, end, filter)
+        return { threads, next_before: hasMore ? end : undefined, has_more: hasMore }
+      }
+      for (const t of entries) if (t) threads.push(t)
+      // An empty batch or a missing cursor means history is exhausted. A
+      // non-empty batch doesn't prove the opposite (Tuwunel returns `end` on
+      // the oldest page), but the next round's fetch settles it.
+      if (page.chunk.length === 0 || page.end === undefined) {
+        return { threads, next_before: undefined, has_more: false }
+      }
+      cursor = page.end
+    }
+    // Round budget spent: return what we have and let the caller page on.
+    const hasMore = await this.hasMessagesPast(channelId, cursor, filter)
+    return { threads, next_before: hasMore ? cursor : undefined, has_more: hasMore }
+  }
+
+  /** A top-level entry or thread root for the overview; null for anything else. */
+  private toThreadOverview(ev: MatrixMessageEvent): ThreadOverview | null {
+    if (ev.type !== 'm.room.message') return null
+    // m.notice: agent prose sends as m.notice so
+    // .m.rule.suppress_notices silences the chunk storm server-side
+    // (ZNC025 §10) — a thread root sent by an agent must still surface here.
+    if (
+      (ev.content?.msgtype !== 'm.text' && ev.content?.msgtype !== 'm.notice') ||
+      typeof ev.content.body !== 'string'
+    )
+      return null
+    const relatesTo = ev.content['m.relates_to']
+    if (relatesTo?.rel_type === 'm.thread') return null // skip thread replies
+    const agent = this.opts.agentBots.get(ev.sender)
+    const bundled = ev.unsigned?.['m.relations']?.['m.thread']
+    const replyCount = bundled?.count ?? 0
+    const latestTs = bundled?.latest_event?.origin_server_ts ?? ev.origin_server_ts
+    return {
+      id: ev.event_id,
+      sender: ev.sender,
+      text: ev.content.body,
+      timestamp: new Date(ev.origin_server_ts).toISOString(),
+      is_agent: agent !== undefined,
+      ...(agent !== undefined ? { agent_name: agent } : {}),
+      reply_count: replyCount,
+      last_activity_at: new Date(latestTs).toISOString(),
+    }
+  }
+
+  /**
+   * Whether `/messages` has anything older than the cursor `end`. Cursor
+   * presence says nothing: Tuwunel returns a cursor even on an exhausted
+   * page (zooid-ai/zooid#21, #111), and a short page proves nothing either
+   * because the filter can thin a page while older events remain and the
+   * homeserver may clamp `limit`. So peek one event past the cursor with the
+   * same filter.
+   */
+  private async hasMessagesPast(
+    channelId: string,
+    end: string | undefined,
+    filter: { types?: string[]; not_rel_types?: string[] },
+  ): Promise<boolean> {
+    if (end === undefined) return false
+    const peek = await this.opts.client.fetchRoomMessages({
       roomId: channelId,
       asUserId: this.opts.asUserId,
-      limit: hopts.limit,
-      from: hopts.before,
-      filter: { types: ['m.room.message'], not_rel_types: ['m.thread'] },
+      limit: 1,
+      from: end,
+      filter,
     })
-    // /messages returns newest-first; keep that order for the overview.
-    const threads: ThreadOverview[] = []
-    for (const ev of chunk as unknown as MatrixMessageEvent[]) {
-      if (ev.type !== 'm.room.message') continue
-      // m.notice: agent prose sends as m.notice so
-      // .m.rule.suppress_notices silences the chunk storm server-side
-      // (ZNC025 §10) — a thread root sent by an agent must still surface here.
-      if (
-        (ev.content?.msgtype !== 'm.text' && ev.content?.msgtype !== 'm.notice') ||
-        typeof ev.content.body !== 'string'
-      )
-        continue
-      const relatesTo = ev.content['m.relates_to']
-      if (relatesTo?.rel_type === 'm.thread') continue // skip thread replies
-      const agent = this.opts.agentBots.get(ev.sender)
-      const bundled = ev.unsigned?.['m.relations']?.['m.thread']
-      const replyCount = bundled?.count ?? 0
-      const latestTs = bundled?.latest_event?.origin_server_ts ?? ev.origin_server_ts
-      threads.push({
-        id: ev.event_id,
-        sender: ev.sender,
-        text: ev.content.body,
-        timestamp: new Date(ev.origin_server_ts).toISOString(),
-        is_agent: agent !== undefined,
-        ...(agent !== undefined ? { agent_name: agent } : {}),
-        reply_count: replyCount,
-        last_activity_at: new Date(latestTs).toISOString(),
-      })
-    }
-    return {
-      threads,
-      next_before: end,
-      has_more: end !== undefined,
-    }
+    return peek.chunk.length > 0
   }
 
   async getThreadHistory(
@@ -186,10 +288,25 @@ export class MatrixContextProvider implements TransportContextProvider {
       const reply = this.toMessage(ev)
       if (reply) messages.push({ ...reply, thread_id: threadId })
     }
+    // Tuwunel returns `next_batch` even when the page is exhausted, so cursor
+    // presence says nothing about whether messages remain (zooid-ai/zooid#21).
+    // A short page doesn't prove exhaustion either: homeservers clamp `limit`
+    // on their side. So whenever a cursor is present, peek one event past it.
+    let hasMore = false
+    if (next_batch !== undefined) {
+      const peek = await this.opts.client.fetchThreadRelations({
+        roomId: channelId,
+        rootEventId: threadId,
+        asUserId: this.opts.asUserId,
+        limit: 1,
+        from: next_batch,
+      })
+      hasMore = peek.chunk.length > 0
+    }
     return {
       messages,
-      next_before: next_batch,
-      has_more: next_batch !== undefined,
+      next_before: hasMore ? next_batch : undefined,
+      has_more: hasMore,
     }
   }
 
@@ -262,13 +379,21 @@ export class MatrixContextProvider implements TransportContextProvider {
     )
   }
 
+  resolveRoom(selector: string): string | undefined {
+    return resolveBoundRoom(this.opts.rooms ?? [], selector)
+  }
+
   async sendMessage(input: SendMessageInput): Promise<SendMessageResult> {
     const rooms = this.opts.rooms ?? []
-    if (!rooms.some((r) => r.alias === input.room)) {
-      throw new Error(`not_in_room: this agent is not a member of ${input.room}`)
+    const roomId = this.resolveRoom(input.room)
+    if (!roomId) {
+      const bound = rooms.map((r) => r.alias).join(', ') || 'none'
+      throw new Error(
+        `not_in_room: this agent is not a member of ${input.room}. Rooms this agent is in: ${bound}`,
+      )
     }
     const { event_id } = await this.opts.client.sendMessage({
-      roomId: input.room,
+      roomId,
       asUserId: this.opts.asUserId,
       // m.notice, not m.text: agent prose sends as m.notice so
       // .m.rule.suppress_notices silences it server-side (ZNC025 §10).
@@ -368,4 +493,133 @@ export class MatrixContextProvider implements TransportContextProvider {
     }
     return new TextDecoder().decode(data)
   }
+  async sendAttachment(
+    channelId: string,
+    threadId: string,
+    input: SendAttachmentInput,
+  ): Promise<SendAttachmentResult> {
+    const { client, asUserId, media, workspace } = this.opts
+    let mediaEventId: string | undefined
+    try {
+      if (!media) throw new Error('this agent has no media client')
+      if (!workspace) throw new Error('this agent has no workspace to attach from')
+
+      const hostPath = resolveAttachmentPath({ path: input.path, ...workspace })
+      let info
+      try {
+        info = await stat(hostPath)
+      } catch (err) {
+        throw new Error(`cannot read ${input.path}: ${errMessage(err)}`)
+      }
+      if (!info.isFile()) throw new Error(`not a file: ${input.path}`)
+      if (info.size > MAX_DOWNLOAD_BYTES) {
+        throw new Error(`file too large: ${info.size} > ${MAX_DOWNLOAD_BYTES}`)
+      }
+      let data: Buffer
+      try {
+        data = await readFile(hostPath)
+      } catch (err) {
+        throw new Error(`cannot read ${input.path}: ${errMessage(err)}`)
+      }
+
+      const name = input.name || basename(input.path)
+      let mimetype = mimeFromFilename(name)
+      if (mimetype === 'application/octet-stream') mimetype = mimeFromFilename(input.path)
+      const { content_uri } = await media.upload({
+        data,
+        contentType: mimetype,
+        filename: name,
+        asUserId,
+      })
+      const msgtype =
+        INLINE_IMAGE_MIMES.includes(mimetype) && data.length <= MAX_INLINE_IMAGE_BYTES
+          ? 'm.image'
+          : 'm.file'
+      const sent = await client.sendMessage({
+        roomId: channelId,
+        asUserId,
+        threadRoot: threadId,
+        content: {
+          msgtype,
+          body: name,
+          filename: name,
+          url: content_uri,
+          info: { mimetype, size: data.length },
+        },
+      })
+      mediaEventId = sent.event_id
+
+      const caption = input.caption?.trim()
+      if (caption) {
+        try {
+          await client.sendMessage({
+            roomId: channelId,
+            asUserId,
+            threadRoot: threadId,
+            content: { msgtype: 'm.notice', body: input.caption as string },
+          })
+        } catch (err) {
+          throw new Error(
+            `caption failed after attachment ${mediaEventId} was sent: ${errMessage(err)}`,
+          )
+        }
+      }
+      return { event_id: mediaEventId, mxc_uri: content_uri }
+    } catch (err) {
+      const reason = errMessage(err)
+      await this.reportAttachmentError(channelId, threadId, reason)
+      throw new Error(`attachment_failed: ${reason}`)
+    }
+  }
+
+  /** Same shape as the transport's sendMediaError: visible in the thread, never throws. */
+  private async reportAttachmentError(
+    channelId: string,
+    threadId: string,
+    reason: string,
+  ): Promise<void> {
+    const { client, asUserId, agentBots } = this.opts
+    try {
+      await client.sendCustomEvent({
+        roomId: channelId,
+        asUserId,
+        eventType: 'dev.zooid.error',
+        content: toErrorBody(
+          {
+            kind: 'error' as const,
+            agentId: agentBots.get(asUserId) ?? asUserId,
+            sessionId: null,
+            turnId: null,
+            code: 'attachment_failed',
+            message: reason,
+            transient: false,
+          },
+          threadId,
+        ),
+      })
+    } catch (e) {
+      console.warn(`[matrix:${asUserId}] dev.zooid.error send failed:`, e)
+    }
+  }
+}
+
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * Resolve an agent-supplied room selector against the agent's own bindings,
+ * locally (ZOD084: no homeserver call). Matches the canonical room ID, the
+ * configured alias, or a bare `#localpart` of a configured `#localpart:server`
+ * alias. Returns the canonical ID, or undefined when nothing (or more than one
+ * distinct room) matches.
+ */
+function resolveBoundRoom(rooms: RoomBinding[], selector: string): string | undefined {
+  const exact = rooms.find((r) => r.alias === selector || r.configuredAlias === selector)
+  if (exact) return exact.alias
+  if (!selector.startsWith('#') || selector.includes(':')) return undefined
+  const hits = new Set(
+    rooms.filter((r) => r.configuredAlias?.startsWith(`${selector}:`)).map((r) => r.alias),
+  )
+  return hits.size === 1 ? [...hits][0] : undefined
 }

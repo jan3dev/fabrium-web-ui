@@ -1,7 +1,7 @@
 import { createServer, createConnection, type Server, type Socket } from 'node:net'
 import { unlink } from 'node:fs/promises'
 import type { SpawnRegistry } from './spawn-registry.js'
-import type { CompleteTaskInput, StartTasksInput, HandoffInput } from '@zooid/core'
+import type { CompleteTaskInput, StartTasksInput, HandoffInput, SendAttachmentInput } from '@zooid/core'
 import { agentSocketPath } from './socket-paths.js'
 
 export interface DaemonRequest {
@@ -16,6 +16,7 @@ export interface DaemonRequest {
     | 'getRooms'
     | 'sendMessage'
     | 'sendArtifact'
+    | 'sendAttachment'
     | 'startTasks'
     | 'completeTask'
     | 'describeRole'
@@ -46,6 +47,9 @@ export interface AgentSocketsHandle {
 /** Same wire error for absent and foreign bindings, so sockets are not an ID oracle. */
 const NOT_OWNED = 'binding not owned by caller'
 
+/** Longest request line, in characters, the listener buffers while waiting for a newline. */
+export const MAX_LINE_LENGTH = 1024 * 1024
+
 export async function startDaemonSocketServer(opts: {
   sockPath: string
   registry: SpawnRegistry
@@ -74,6 +78,15 @@ export async function startDaemonSocketServer(opts: {
         buf = buf.slice(idx + 1)
         if (!line) continue
         await handleLine(line, socket, opts.registry, opts.agentName)
+      }
+      // The client is an agent's process, so its input is untrusted: an
+      // unterminated line must not grow this buffer without bound.
+      if (buf.length > MAX_LINE_LENGTH) {
+        buf = ''
+        socket.end(
+          JSON.stringify({ ok: false, error: 'request line too long' } satisfies DaemonError) + '\n',
+        )
+        socket.destroySoon()
       }
     })
     socket.on('error', () => {})
@@ -154,7 +167,21 @@ async function handleLine(
       result = await binding.provider.getRecentThreads(channelId, req.params)
     } else if (req.method === 'getThreadHistory') {
       const threadId = String(req.params.threadId ?? '')
-      result = await binding.provider.getThreadHistory(channelId, threadId, req.params)
+      // An explicit room replaces the ambient one, but only after the
+      // caller's own bindings vouch for it, and before any transport read
+      // ([[ZOD084]]). Membership is the only application-level gate.
+      const room = typeof req.params.room === 'string' && req.params.room ? req.params.room : undefined
+      const target = room === undefined ? channelId : binding.provider.resolveRoom?.(room)
+      if (target === undefined) {
+        socket.write(
+          JSON.stringify({
+            ok: false,
+            error: `not_in_room: this agent is not a member of ${room}`,
+          } satisfies DaemonError) + '\n',
+        )
+        return
+      }
+      result = await binding.provider.getThreadHistory(target, threadId, req.params)
     } else if (req.method === 'getChannelMembers') {
       result = await binding.provider.getChannelMembers(channelId)
     } else if (req.method === 'getRoomInfo') {
@@ -172,6 +199,23 @@ async function handleLine(
         binding.threadRef.threadId,
         req.params as unknown as Parameters<NonNullable<typeof binding.provider.sendArtifact>>[2],
       )
+    } else if (req.method === 'sendAttachment') {
+      if (!binding.provider.sendAttachment) {
+        socket.write(
+          JSON.stringify({
+            ok: false,
+            error: 'attachment_unsupported: this transport cannot send attachments',
+          } satisfies DaemonError) + '\n',
+        )
+        return
+      }
+      // Scope comes from the binding; a room / thread_id in params is ignored.
+      const { path, name, caption } = req.params as unknown as SendAttachmentInput
+      result = await binding.provider.sendAttachment(channelId, binding.threadRef.threadId, {
+        path,
+        name,
+        caption,
+      })
     } else if (
       req.method === 'startTasks' ||
       req.method === 'completeTask' ||
@@ -284,4 +328,13 @@ export async function callDaemon(sockPath: string, req: DaemonRequest): Promise<
     })
     socket.write(JSON.stringify(req) + '\n')
   })
+}
+
+/**
+ * True when `err` came from the socket (ENOENT, ECONNREFUSED, ECONNRESET,
+ * ETIMEDOUT, ...) rather than from a reply the daemon sent. Node's socket
+ * errors carry a string `code`; daemon replies reject with a plain Error.
+ */
+export function isTransportError(err: unknown): boolean {
+  return err instanceof Error && typeof (err as NodeJS.ErrnoException).code === 'string'
 }
