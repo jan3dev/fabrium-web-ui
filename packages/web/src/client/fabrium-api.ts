@@ -102,7 +102,12 @@ export const listVms = () => call<Vm[]>("GET", "/vms");
 export const listInstanceTypes = () => call<VmInstanceType[]>("GET", "/instance-types");
 export const listAgents = () => call<VmAgent[]>("GET", "/agents");
 export const createVm = (req: CreateVmRequest) => call<Vm>("POST", "/vms", req);
-export const startVm = (id: string) => call<Vm>("POST", vmPath(id, "/start"));
+export const startVm = (id: string, autoStopHours?: number) =>
+  call<Vm>(
+    "POST",
+    vmPath(id, "/start"),
+    autoStopHours === undefined ? undefined : { auto_stop_hours: autoStopHours },
+  );
 export const stopVm = (id: string) => call<Vm>("POST", vmPath(id, "/stop"));
 export const rebootVm = (id: string) => call<Vm>("POST", vmPath(id, "/reboot"));
 export const deleteVm = (id: string) => call<void>("DELETE", vmPath(id));

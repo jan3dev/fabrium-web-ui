@@ -112,6 +112,8 @@ export interface Vm {
   /** RFC 3339, UTC. EC2 resets it at each start. */
   launched_at: string;
   setup: VmSetup;
+  /** Hours of uptime after which the VM stops itself; null or absent when unknown. */
+  auto_stop_hours?: number | null;
   /** From the agent bundle of the VM; null when there is none. */
   agent_id: string | null;
 }
@@ -151,6 +153,8 @@ export interface CreateVmRequest {
   /** The VM name, which is also the workstation name. */
   name: string;
   instance_type?: string;
+  /** Integer from 1 to 168. */
+  auto_stop_hours?: number;
   agent: CreateVmAgent;
   haven_api_key: string;
   github_token?: string;

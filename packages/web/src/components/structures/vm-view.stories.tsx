@@ -77,6 +77,14 @@ export const ConfirmDelete: Story = {
   },
 };
 
+export const ConfirmStart: Story = {
+  async play({ canvasElement }) {
+    await userEvent.click(
+      await within(canvasElement).findByRole("button", { name: "Start kilo" }),
+    );
+  },
+};
+
 export const Loading: Story = { args: { vms: null } };
 
 export const Empty: Story = { args: { vms: [] } };

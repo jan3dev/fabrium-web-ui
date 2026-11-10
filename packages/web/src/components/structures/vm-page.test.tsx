@@ -52,7 +52,13 @@ const AFTER_ACTION = { start: "pending", stop: "stopping", reboot: "running" } a
  * it, in order, and `created` holds the bodies of the creates.
  */
 function serve(initial: Vm[]) {
-  const cp = { vms: initial, calls: [] as string[], created: [] as CreateVmRequest[] };
+  const cp = {
+    vms: initial,
+    calls: [] as string[],
+    created: [] as CreateVmRequest[],
+    /** Bodies of the start calls. */
+    started: [] as unknown[],
+  };
   mswServer.use(
     http.get(`${API}/vms`, () => {
       cp.calls.push("GET /vms");
@@ -81,8 +87,9 @@ function serve(initial: Vm[]) {
       cp.vms = [...cp.vms, vm];
       return HttpResponse.json(vm, { status: 201 });
     }),
-    http.post(`${API}/vms/:id/:verb`, ({ params }) => {
+    http.post(`${API}/vms/:id/:verb`, async ({ params, request }) => {
       const verb = params.verb as keyof typeof AFTER_ACTION;
+      if (verb === "start") cp.started.push(await request.json().catch(() => null));
       cp.calls.push(`POST ${params.id}/${verb}`);
       cp.vms = cp.vms.map((v) =>
         v.id === params.id ? { ...v, state: AFTER_ACTION[verb] } : v,
@@ -183,6 +190,67 @@ describe("<VmRoute>", () => {
     );
     expect(cp.calls).toEqual(["GET /vms", `POST ${lima.id}/stop`, "GET /vms"]);
     expect(buttonsIn(rowOf("lima"))).toEqual(["Delete"]);
+  });
+
+  describe("Start dialog", () => {
+    const startDialog = () => screen.findByRole("dialog", { name: "Start kilo?" });
+    const hoursIn = (dialog: HTMLElement) =>
+      within(dialog).getByLabelText(/auto-stop after \(hours\)/i);
+
+    it("asks for the hours, prefilled with 12 when the VM has none", async () => {
+      const cp = serve([kilo]);
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole("button", { name: "Start kilo" }));
+      const dialog = await startDialog();
+      expect(hoursIn(dialog)).toHaveValue(12);
+      expect(cp.calls).toEqual(["GET /vms"]);
+
+      await user.clear(hoursIn(dialog));
+      await user.type(hoursIn(dialog), "5");
+      await user.click(within(dialog).getByRole("button", { name: "Start" }));
+
+      await waitFor(() =>
+        expect(within(rowOf("kilo")).getByText("pending")).toBeInTheDocument(),
+      );
+      expect(cp.calls).toEqual(["GET /vms", `POST ${kilo.id}/start`, "GET /vms"]);
+      expect(cp.started).toEqual([{ auto_stop_hours: 5 }]);
+    });
+
+    it("prefills the current value of the VM", async () => {
+      serve([{ ...kilo, auto_stop_hours: 36 }]);
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole("button", { name: "Start kilo" }));
+      expect(hoursIn(await startDialog())).toHaveValue(36);
+    });
+
+    it("calls nothing on Cancel", async () => {
+      const cp = serve([kilo]);
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole("button", { name: "Start kilo" }));
+      const dialog = await startDialog();
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(cp.calls).toEqual(["GET /vms"]);
+    });
+
+    it("disables Start for hours outside 1 to 168", async () => {
+      serve([kilo]);
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole("button", { name: "Start kilo" }));
+      const dialog = await startDialog();
+      await user.clear(hoursIn(dialog));
+      await user.type(hoursIn(dialog), "169");
+      expect(within(dialog).getByRole("button", { name: "Start" })).toBeDisabled();
+    });
   });
 
   it("disables the buttons of a VM while its action runs", async () => {
@@ -333,6 +401,7 @@ describe("<VmRoute>", () => {
         {
           name: "kilo",
           instance_type: "t3a.medium",
+          auto_stop_hours: 12,
           agent: { mode: "new", name: "scout" },
           haven_api_key: "hk-1",
         },

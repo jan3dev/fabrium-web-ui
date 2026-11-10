@@ -232,6 +232,32 @@ describe("routes", () => {
     expect(contentType).toContain("application/json");
   });
 
+  it("start sends auto_stop_hours as the body when given", async () => {
+    signInForVmApi();
+    let sent: unknown = "unset";
+    mswServer.use(
+      http.post(`${API}/vms/:id/start`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json(vm, { status: 202 });
+      }),
+    );
+    await startVm(vm.id, 6);
+    expect(sent).toEqual({ auto_stop_hours: 6 });
+  });
+
+  it("start sends no body without hours", async () => {
+    signInForVmApi();
+    let text = "unset";
+    mswServer.use(
+      http.post(`${API}/vms/:id/start`, async ({ request }) => {
+        text = await request.text();
+        return HttpResponse.json(vm, { status: 202 });
+      }),
+    );
+    await startVm(vm.id);
+    expect(text).toBe("");
+  });
+
   it.each([
     ["start", startVm],
     ["stop", stopVm],

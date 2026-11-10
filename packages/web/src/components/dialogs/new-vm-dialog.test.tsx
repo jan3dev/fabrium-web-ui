@@ -112,6 +112,7 @@ describe("<NewVmDialog>", () => {
       {
         name: "lima",
         instance_type: "t3a.medium",
+        auto_stop_hours: 12,
         agent: { mode: "new", name: "echo", persona: "Reviewer", project: "Fabrium" },
         haven_api_key: "hk-1",
         github_token: "gh-1",
@@ -133,6 +134,7 @@ describe("<NewVmDialog>", () => {
       {
         name: "lima",
         instance_type: "c6a.large",
+        auto_stop_hours: 12,
         agent: { mode: "new", name: "echo" },
         haven_api_key: "hk-1",
       },
@@ -150,11 +152,39 @@ describe("<NewVmDialog>", () => {
       {
         name: "orion",
         instance_type: "t3a.medium",
+        auto_stop_hours: 12,
         agent: { mode: "existing", name: "orion" },
         haven_api_key: "hk-1",
       },
     ]);
   });
+
+  it("defaults the auto-stop hours to 12 and sends a changed value", async () => {
+    const { user, onSubmit } = setup();
+    const hours = screen.getByLabelText(/auto-stop after \(hours\)/i);
+    expect(hours).toHaveValue(12);
+    await user.type(screen.getByLabelText(/^vm name/i), "lima");
+    await user.type(screen.getByLabelText(/^agent name/i), "echo");
+    await user.type(screen.getByLabelText(/haven api key/i), "hk-1");
+    await user.clear(hours);
+    await user.type(hours, "24");
+    await user.click(create());
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ auto_stop_hours: 24 });
+  });
+
+  it.each(["", "0", "169", "1.5"])(
+    "keeps Create disabled for auto-stop hours %j",
+    async (value) => {
+      const { user } = setup();
+      await user.type(screen.getByLabelText(/^vm name/i), "lima");
+      await user.type(screen.getByLabelText(/^agent name/i), "echo");
+      await user.type(screen.getByLabelText(/haven api key/i), "hk-1");
+      const hours = screen.getByLabelText(/auto-stop after \(hours\)/i);
+      await user.clear(hours);
+      if (value) await user.type(hours, value);
+      expect(create()).toBeDisabled();
+    },
+  );
 
   it("takes both secrets in password inputs", () => {
     setup();
