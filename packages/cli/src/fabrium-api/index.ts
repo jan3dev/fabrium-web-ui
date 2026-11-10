@@ -6,7 +6,7 @@ import { requireRole, type Caller } from './auth.js'
 import { listBundles } from './bundle.js'
 import type { FabriumApiConfig } from './config.js'
 import { createControlPlane, relay } from './control-plane.js'
-import { createVm, parseCreateRequest } from './create.js'
+import { createVm, parseAutoStopHours, parseCreateRequest } from './create.js'
 import { ApiError, apiErrorHandler } from './errors.js'
 import type { MatrixConn } from './matrix.js'
 import { FULL_COMMIT_RE } from './payload.js'
@@ -121,7 +121,32 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
     )
   })
 
-  for (const action of ['start', 'stop', 'reboot']) {
+  app.post('/vms/:id/start', async (c) => {
+    // The body is optional: without it the control plane keeps the current auto-stop value.
+    const text = await c.req.text()
+    let hours: number | undefined
+    if (text.trim() !== '') {
+      let raw: unknown
+      try {
+        raw = JSON.parse(text)
+      } catch {
+        throw new ApiError(400, { error: 'the body must be JSON' })
+      }
+      if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+        throw new ApiError(400, { error: 'the body must be a JSON object' })
+      }
+      hours = parseAutoStopHours((raw as Record<string, unknown>).auto_stop_hours)
+    }
+    return relay(
+      await controlPlane.request(
+        'POST',
+        `/v1/vms/${encodeURIComponent(c.req.param('id'))}/start`,
+        hours === undefined ? undefined : { auto_stop_hours: hours },
+      ),
+    )
+  })
+
+  for (const action of ['stop', 'reboot']) {
     app.post(`/vms/:id/${action}`, async (c) =>
       relay(
         await controlPlane.request(
