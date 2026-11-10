@@ -40,7 +40,8 @@ deploy.log                    one line per successful deploy
 | `deploy/restore.sh` | Extracts a backup into an empty `ZOOID_HOME`. |
 | `deploy/compose.sh` | `docker compose` bound to this instance, for `logs`, `ps`, `stop`, `start`, `down`. |
 | `deploy/add-workstation.sh` | Admits an agent VM: writes its tokens and tuwunel registration, adds its users to the workforce space and its rooms, publishes its roster entry. Refuses a workstation that the VM API admitted. See [Agent VM](#agent-vm-workstation). |
-| `deploy/agent-vm/prepare-image.sh` | Prepares a VM to become the agent VM image: installs Node 22, pnpm, opencode, gh and Docker CE, builds the zooid CLI at a commit. No bundle, no service. See [Build a VM image](#build-a-vm-image). |
+| `deploy/agent-vm/prepare-image.sh` | Prepares a VM to become the agent VM image: installs Node 22, pnpm, opencode, gh and Docker CE, builds the zooid CLI at a commit, and runs `image/install.sh`. No bundle, no agent service. See [Build a VM image](#build-a-vm-image). |
+| `deploy/agent-vm/image/` | Host parts of the agent VM image: host hardening and the auto-stop watcher, with `install.sh`. See [Host hardening and auto-stop](#host-hardening-and-auto-stop). |
 | `deploy/agent-vm/provision.sh` | Runs on an agent VM made from the image: checks the bundle and the VM token, builds the zooid CLI only when `--ref` is not the image's commit, runs it as a systemd user service. Installs nothing. Idempotent; also the update path. |
 | `deploy/agent-vm/configure-agent.sh` | Runs on an agent VM after `provision.sh`, for `preset: opencode`: stores the Haven and GitHub variables in `secrets.env`, writes `opencode.json`, checks one opencode turn on Haven, configures git, restarts the agent. See [Configure an opencode agent](#configure-an-opencode-agent). |
 
@@ -385,6 +386,41 @@ stops when `~/zooid` or the `fabrium-agent` unit exists: every VM made from the 
 
 On a VM made from the image, start at step 2 of [Prepare the VM](#prepare-the-vm). An image holds one commit:
 after this box deploys a new commit, `provision.sh` builds the new commit on each VM, or you build a new image.
+
+#### Host hardening and auto-stop
+
+`prepare-image.sh` runs `deploy/agent-vm/image/install.sh` as its last step. To add only these parts to an
+existing image, run `sudo deploy/agent-vm/image/install.sh` from a checkout on a VM made from that image, then
+follow steps 3 and 4. The script is idempotent. It installs:
+
+| Part | Files on the VM | What it does |
+|---|---|---|
+| MPTCP off | `/etc/sysctl.d/99-mptcp-off.conf` | Sets `net.mptcp.enabled=0` |
+| IP-options drop | `/etc/nftables.d-ipopts-drop.nft`, `ipopts-drop.service` | Loads the table `inet ipopts_drop`, which drops inbound IPv4 TCP packets with IP options at `prerouting`, priority `raw` (before Docker's DNAT) |
+| Auto-stop | `/usr/local/sbin/fabrium-auto-stop`, `fabrium-auto-stop.service`, `fabrium-auto-stop.timer` | Every 5 minutes, reads the instance tag `fabrium:auto-stop-hours` through IMDSv2 and powers the VM off when its uptime reaches that many hours |
+
+Host hardening notes:
+
+- `net.mptcp.enabled` is per network namespace. Containers start with `1`. The nftables rule covers the
+  ports that Docker publishes, because it runs before Docker's DNAT.
+- Never enable, start, stop or restart `nftables.service`. Its config starts with `flush ruleset` and its stop
+  flushes every table, so Docker loses its NAT and filter tables. The drop rule has its own table and unit, and
+  the unit has no `ExecStop`, so a restart reloads only that table.
+- Check it on a VM: `sysctl net.mptcp.enabled` prints `0`, `sudo nft list table inet ipopts_drop` shows two
+  rules, and `sudo nft list counter inet ipopts_drop ipopts_dropped` counts the drops.
+
+Auto-stop rules:
+
+- The control plane sets the tag at launch and at each start from the VM page (1 to 168 hours, default 12), and
+  turns on instance tags in IMDS. A stop and start resets the uptime.
+- Without the tag, or when IMDS has instance tags off, the VM uses 12 hours. The value `0` turns auto-stop off.
+  The VM page does not offer `0`; set the tag by hand for a VM that must stay on.
+- When IMDS does not answer, the check skips that run. It never stops the VM on a read error.
+- The power-off ends in the EC2 state `stopped`, not `terminated`: the control plane keeps the default
+  shutdown behavior.
+- Check it on a VM: `sudo fabrium-auto-stop --dry-run` prints the hours and the uptime.
+  `journalctl -u fabrium-auto-stop` shows the stop. To test a real stop without waiting:
+  `sudo FABRIUM_AUTO_STOP_LIMIT_SECONDS=60 fabrium-auto-stop`.
 
 ### Test without a model
 

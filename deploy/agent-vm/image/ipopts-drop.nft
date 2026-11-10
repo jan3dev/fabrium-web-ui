@@ -1,0 +1,11 @@
+# The empty table and the delete make a reload idempotent.
+table inet ipopts_drop {}
+delete table inet ipopts_drop
+table inet ipopts_drop {
+    counter ipopts_dropped {}
+    chain prerouting {
+        type filter hook prerouting priority raw; policy accept;
+        ip hdrlength > 5 meta l4proto tcp limit rate 5/minute log prefix "ipopts drop: "
+        ip hdrlength > 5 meta l4proto tcp counter name ipopts_dropped drop
+    }
+}

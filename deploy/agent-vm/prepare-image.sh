@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Prepare an Ubuntu 24.04 VM to become an agent VM image: install Node 22, pnpm,
-# opencode, gh and Docker CE, and build the zooid CLI at --ref. It reads no bundle and
-# installs no service: provision.sh adds them on each VM made from the image.
+# opencode, gh and Docker CE, build the zooid CLI at --ref, and install image/ (the
+# host hardening and the auto-stop watcher). It reads no bundle and installs no
+# agent service: provision.sh adds them on each VM made from the image.
 # See "Build a VM image" in deploy/README.md.
 set -euo pipefail
 
@@ -190,6 +191,10 @@ else
   [ "$(service_opencode_version)" = "$OPENCODE_VERSION" ] ||
     die "opencode $OPENCODE_VERSION is not the first opencode in the service PATH ($SERVICE_PATH)"
 fi
+
+# --- Host hardening and auto-stop -----------------------------------------
+log "Installing the host hardening and the auto-stop watcher"
+sudo "$REPO_DIR/deploy/agent-vm/image/install.sh"
 
 cat <<EOF_NEXT
 
