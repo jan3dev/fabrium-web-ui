@@ -1,0 +1,55 @@
+#!/bin/sh
+# Stop this VM after N hours of uptime. N is the EC2 instance tag fabrium:auto-stop-hours,
+# read through IMDSv2 (the control plane enables instance tags in metadata at launch).
+# Missing tag or invalid value: 12 hours. 0: never. fabrium-auto-stop.timer runs this every
+# 5 minutes. A stop and start resets the uptime, so each start gets N hours again.
+#   --dry-run                          print the decision, do not stop
+#   FABRIUM_AUTO_STOP_LIMIT_SECONDS=S  stop after S seconds of uptime instead (tests)
+set -u
+
+TAG=fabrium:auto-stop-hours
+DEFAULT_HOURS=12
+IMDS=http://169.254.169.254/latest
+
+dry_run=0
+[ "${1:-}" = "--dry-run" ] && dry_run=1
+say() { if [ "$dry_run" -eq 1 ] || [ "${2:-}" = always ]; then echo "$1"; fi; }
+
+token=$(curl -fsS -m 5 -X PUT "$IMDS/api/token" -H 'X-aws-ec2-metadata-token-ttl-seconds: 60') || {
+  say "IMDS unreachable; check skipped" always
+  exit 0
+}
+hours=$(curl -fs -m 5 -H "X-aws-ec2-metadata-token: $token" "$IMDS/meta-data/tags/instance/$TAG")
+rc=$?
+# Exit 22 is an HTTP error (no tag, or tags off in IMDS); any other failure skips this run.
+if [ "$rc" -eq 22 ]; then
+  hours=""
+elif [ "$rc" -ne 0 ]; then
+  say "IMDS read failed (curl exit $rc); check skipped" always
+  exit 0
+fi
+
+# Up to 4 digits, no leading zero: no octal surprise and no overflow in $(( )).
+case "$hours" in
+  0 | [1-9] | [1-9][0-9] | [1-9][0-9][0-9] | [1-9][0-9][0-9][0-9]) ;;
+  *)
+    say "tag $TAG is missing or invalid; using $DEFAULT_HOURS hours"
+    hours=$DEFAULT_HOURS
+    ;;
+esac
+if [ "$hours" -eq 0 ]; then
+  say "auto-stop is off ($TAG=0)"
+  exit 0
+fi
+
+limit=${FABRIUM_AUTO_STOP_LIMIT_SECONDS:-$((hours * 3600))}
+uptime=$(cut -d. -f1 /proc/uptime)
+if [ "$uptime" -lt "$limit" ]; then
+  say "uptime ${uptime}s is below the limit ${limit}s ($hours hours); no stop"
+  exit 0
+fi
+
+say "uptime ${uptime}s reached the limit ${limit}s ($hours hours); stopping the VM" always
+[ "$dry_run" -eq 1 ] && exit 0
+# The guest power-off ends in the EC2 state "stopped" (the default shutdown behavior).
+exec systemctl poweroff

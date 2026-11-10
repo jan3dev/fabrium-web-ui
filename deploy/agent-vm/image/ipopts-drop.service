@@ -1,0 +1,12 @@
+[Unit]
+Description=Drop inbound IPv4 TCP packets with IP options
+After=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f /etc/nftables.d-ipopts-drop.nft
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

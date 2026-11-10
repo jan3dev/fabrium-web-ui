@@ -1,0 +1,8 @@
+[Unit]
+Description=Stop this VM after the hours in the fabrium:auto-stop-hours tag
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/fabrium-auto-stop
