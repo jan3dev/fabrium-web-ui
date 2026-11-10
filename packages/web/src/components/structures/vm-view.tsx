@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { formatAbsoluteTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import type { Vm, VmState } from "../../model/types";
+import { StartVmDialog } from "../dialogs/start-vm-dialog";
 
 export type VmAction = "start" | "stop" | "reboot" | "delete";
 
@@ -59,7 +60,8 @@ interface VmViewProps {
   noAccess: boolean;
   /** VMs with an action in flight. */
   busyIds: ReadonlySet<string>;
-  onAction: (vm: Vm, action: VmAction) => void;
+  /** Start comes with the auto-stop hours chosen in its dialog. */
+  onAction: (vm: Vm, action: VmAction, autoStopHours?: number) => void;
   /** Opens the New VM dialog. Without it, the button is not shown. */
   onNew?: () => void;
   onRetry: () => void;
@@ -77,11 +79,16 @@ export function VmView({
   // The VM whose delete confirmation is open, by id.
   const [deleting, setDeleting] = useState<string | null>(null);
   const doomed = vms?.find((vm) => vm.id === deleting);
+  const [starting, setStarting] = useState<string | null>(null);
+  const startable = vms?.find((vm) => vm.id === starting) ?? null;
 
   // Forget a VM that left the list, so its return cannot bring back the confirmation.
   useEffect(() => {
     if (deleting && !doomed) setDeleting(null);
   }, [deleting, doomed]);
+  useEffect(() => {
+    if (starting && !startable) setStarting(null);
+  }, [starting, startable]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -116,10 +123,19 @@ export function VmView({
               busyIds={busyIds}
               onAction={onAction}
               onConfirmDelete={setDeleting}
+              onConfirmStart={setStarting}
             />
           </>
         )}
       </div>
+      <StartVmDialog
+        vm={startable}
+        onCancel={() => setStarting(null)}
+        onConfirm={(vm, hours) => {
+          setStarting(null);
+          onAction(vm, "start", hours);
+        }}
+      />
       <AlertDialog
         open={!!doomed}
         onOpenChange={(open) => {
@@ -187,11 +203,13 @@ function VmTable({
   busyIds,
   onAction,
   onConfirmDelete,
+  onConfirmStart,
 }: {
   vms: Vm[];
   busyIds: ReadonlySet<string>;
   onAction: (vm: Vm, action: VmAction) => void;
   onConfirmDelete: (id: string) => void;
+  onConfirmStart: (id: string) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-card border border-surface-border-primary">
@@ -220,6 +238,7 @@ function VmTable({
               busy={busyIds.has(vm.id)}
               onAction={onAction}
               onConfirmDelete={() => onConfirmDelete(vm.id)}
+              onConfirmStart={() => onConfirmStart(vm.id)}
             />
           ))}
         </tbody>
@@ -244,11 +263,13 @@ function VmRow({
   busy,
   onAction,
   onConfirmDelete,
+  onConfirmStart,
 }: {
   vm: Vm;
   busy: boolean;
   onAction: (vm: Vm, action: VmAction) => void;
   onConfirmDelete: () => void;
+  onConfirmStart: () => void;
 }) {
   const expired = vm.setup === "expired";
   return (
@@ -302,9 +323,11 @@ function VmRow({
               tone={action === "delete" ? "danger" : "default"}
               disabled={busy}
               aria-label={`${LABEL[action]} ${vm.name}`}
-              onClick={() =>
-                action === "delete" ? onConfirmDelete() : onAction(vm, action)
-              }
+              onClick={() => {
+                if (action === "delete") onConfirmDelete();
+                else if (action === "start") onConfirmStart();
+                else onAction(vm, action);
+              }}
             >
               {LABEL[action]}
             </Button>

@@ -194,6 +194,27 @@ describe('proxy routes', () => {
     })
   })
 
+  it('POST /vms/:id/start forwards auto_stop_hours as the body', async () => {
+    api.controlPlane.on('POST', `/v1/vms/${VM_ID}/start`, jsonResponse(202, vm('lima')))
+    const res = await api.request('POST', `/vms/${VM_ID}/start`, { json: { auto_stop_hours: 6 } })
+    expect(res.status).toBe(202)
+    expect(api.controlPlane.requests.at(-1)?.body).toEqual({ auto_stop_hours: 6 })
+  })
+
+  it('POST /vms/:id/start without a body forwards no body', async () => {
+    api.controlPlane.on('POST', `/v1/vms/${VM_ID}/start`, jsonResponse(202, vm('lima')))
+    await api.request('POST', `/vms/${VM_ID}/start`)
+    expect(api.controlPlane.requests.at(-1)?.body).toBeUndefined()
+  })
+
+  it.each([0, 169, 1.5, '12'])('POST /vms/:id/start answers 400 for auto_stop_hours %j', async (hours) => {
+    const before = api.controlPlane.requests.length
+    const res = await api.request('POST', `/vms/${VM_ID}/start`, { json: { auto_stop_hours: hours } })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: expect.any(String) })
+    expect(api.controlPlane.requests.length).toBe(before)
+  })
+
   it('DELETE /vms/:id proxies and returns an empty 202', async () => {
     api.controlPlane.on('DELETE', `/v1/vms/${VM_ID}`, new Response(null, { status: 202 }))
     const res = await api.request('DELETE', `/vms/${VM_ID}`)

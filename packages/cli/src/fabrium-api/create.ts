@@ -17,6 +17,8 @@ export interface CreateRequest {
   /** The VM name, and the workstation name of the agent. */
   name: string
   instanceType?: string
+  /** Hours of uptime after which the VM stops itself. */
+  autoStopHours?: number
   agent: { mode: 'new'; name: string; persona?: string; project?: string } | { mode: 'existing' }
   havenApiKey: string
   githubToken?: string
@@ -32,6 +34,15 @@ function optionalText(value: unknown, field: string): string | undefined {
   if (value == null || value === '') return undefined
   if (typeof value !== 'string' || value.length > MAX_TEXT) {
     throw bad(`${field} must be a string of at most ${MAX_TEXT} characters`)
+  }
+  return value
+}
+
+/** An optional auto-stop setting: an integer from 1 to 168. */
+export function parseAutoStopHours(value: unknown): number | undefined {
+  if (value == null) return undefined
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 168) {
+    throw bad('auto_stop_hours must be an integer from 1 to 168')
   }
   return value
 }
@@ -87,6 +98,7 @@ export function parseCreateRequest(raw: unknown): CreateRequest {
   return {
     name: body.name,
     instanceType: body.instance_type ?? undefined,
+    autoStopHours: parseAutoStopHours(body.auto_stop_hours),
     agent,
     havenApiKey: secret(body.haven_api_key, 'haven_api_key', true)!,
     githubToken: secret(body.github_token, 'github_token', false),
@@ -161,6 +173,7 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
   const upstream = await deps.controlPlane.request('POST', '/v1/vms', {
     name: req.name,
     ...(req.instanceType ? { instance_type: req.instanceType } : {}),
+    ...(req.autoStopHours === undefined ? {} : { auto_stop_hours: req.autoStopHours }),
     bootstrap: payload,
   })
   if (!upstream.ok) return relay(upstream)

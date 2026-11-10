@@ -19,6 +19,11 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { FabriumApiError } from "../../client/fabrium-api";
+import {
+  AutoStopField,
+  DEFAULT_AUTO_STOP_HOURS,
+  parseAutoStopHours,
+} from "./auto-stop-field";
 import type {
   CreateVmRequest,
   VmFormOptions,
@@ -46,6 +51,8 @@ interface FormState {
   existing: string;
   /** `null` means the default type. */
   instanceType: string | null;
+  /** Typed text, so a half-typed value stays visible. */
+  autoStopHours: string;
   havenKey: string;
   githubToken: string;
 }
@@ -58,6 +65,7 @@ const EMPTY: FormState = {
   project: "",
   existing: "",
   instanceType: null,
+  autoStopHours: String(DEFAULT_AUTO_STOP_HOURS),
   havenKey: "",
   githubToken: "",
 };
@@ -65,9 +73,14 @@ const EMPTY: FormState = {
 const typeLabel = (t: VmInstanceType) =>
   `${t.name} · ${t.vcpus} vCPU · ${+(t.memory_mib / 1024).toFixed(1)} GiB${t.sev_snp ? " · Confidential" : ""}`;
 
-function buildRequest(f: FormState, instanceType: string): CreateVmRequest {
+function buildRequest(
+  f: FormState,
+  instanceType: string,
+  autoStopHours: number,
+): CreateVmRequest {
   const shared = {
     ...(instanceType ? { instance_type: instanceType } : {}),
+    auto_stop_hours: autoStopHours,
     haven_api_key: f.havenKey.trim(),
     ...(f.githubToken.trim() ? { github_token: f.githubToken.trim() } : {}),
   };
@@ -141,16 +154,21 @@ export function NewVmDialog({
     form.mode === "new"
       ? form.vmName.trim() !== "" && form.agentName.trim() !== ""
       : chosen !== undefined;
+  const autoStopHours = parseAutoStopHours(form.autoStopHours);
   const canCreate =
-    options !== null && named && form.havenKey.trim() !== "" && !submitting;
+    options !== null &&
+    named &&
+    autoStopHours !== null &&
+    form.havenKey.trim() !== "" &&
+    !submitting;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!canCreate) return;
+    if (!canCreate || autoStopHours === null) return;
     setSubmitting(true);
     setFailure(null);
     try {
-      await onSubmit(buildRequest(form, instanceType));
+      await onSubmit(buildRequest(form, instanceType, autoStopHours));
       reset();
       onOpenChange(false);
     } catch (err) {
@@ -299,6 +317,12 @@ export function NewVmDialog({
               Loading options…
             </p>
           )}
+          <AutoStopField
+            id="auto-stop-hours"
+            value={form.autoStopHours}
+            onChange={(v) => set("autoStopHours", v)}
+            disabled={submitting}
+          />
           <Field id="haven-key" label="Haven API key">
             <Input
               id="haven-key"

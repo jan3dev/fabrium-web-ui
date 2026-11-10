@@ -19,7 +19,7 @@ const RUN = {
   stop: stopVm,
   reboot: rebootVm,
   delete: deleteVm,
-} satisfies Record<VmAction, (id: string) => Promise<unknown>>;
+} satisfies Record<VmAction, (id: string, autoStopHours?: number) => Promise<unknown>>;
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -35,10 +35,10 @@ export function VmRoute() {
     refresh();
   };
 
-  const onAction = async (vm: Vm, action: VmAction) => {
+  const onAction = async (vm: Vm, action: VmAction, autoStopHours?: number) => {
     setBusyIds((ids) => new Set(ids).add(vm.id));
     try {
-      await RUN[action](vm.id);
+      await RUN[action](vm.id, autoStopHours);
     } catch (e) {
       toast.error(`Could not ${action} ${vm.name}: ${messageOf(e)}`);
     } finally {

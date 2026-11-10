@@ -46,7 +46,7 @@ function setup(overrides: Parameters<typeof createTestApi>[0] = {}) {
 const create = (json: unknown, token?: string | null) => api.request('POST', '/vms', { json, token })
 const upstreamCreate = () =>
   api.controlPlane.requests.find((r) => r.method === 'POST' && r.path === '/v1/vms')
-    ?.body as { name: string; instance_type?: string; bootstrap: { files: { path: string; content: string; mode: string; owner: string }[]; script: string } }
+    ?.body as { name: string; instance_type?: string; auto_stop_hours?: number; bootstrap: { files: { path: string; content: string; mode: string; owner: string }[]; script: string } }
 
 afterEach(() => {
   api?.cleanup()
@@ -104,6 +104,10 @@ describe('validation', () => {
     ['a GitHub token with a backslash', { github_token: 'abc\\def' }],
     ['a GitHub token that starts with a quote', { github_token: '"ghp_abc' }],
     ['an instance type that is not a string', { instance_type: 5 }],
+    ['auto_stop_hours of 0', { auto_stop_hours: 0 }],
+    ['auto_stop_hours of 169', { auto_stop_hours: 169 }],
+    ['auto_stop_hours of 1.5', { auto_stop_hours: 1.5 }],
+    ['auto_stop_hours as a string', { auto_stop_hours: '12' }],
   ])('answers 400 for %s, without a secret in the message', async (_name, over) => {
     setup()
     const res = await create(body(over))
@@ -243,6 +247,18 @@ describe('a new agent', () => {
     expect(sent.bootstrap.files[2]?.content).toBe(
       `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nFABRIUM_CREATOR='${ADMIN}'\n`,
     )
+  })
+
+  it('forwards auto_stop_hours to the control plane', async () => {
+    setup()
+    await create(body({ auto_stop_hours: 8 }))
+    expect(upstreamCreate()).toMatchObject({ auto_stop_hours: 8 })
+  })
+
+  it('forwards no auto_stop_hours when it is absent', async () => {
+    setup()
+    await create(body())
+    expect(upstreamCreate()).not.toHaveProperty('auto_stop_hours')
   })
 
   it('trims whitespace around the secrets', async () => {
