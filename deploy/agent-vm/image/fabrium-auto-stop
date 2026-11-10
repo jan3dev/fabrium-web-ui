@@ -5,11 +5,12 @@
 # 5 minutes. A stop and start resets the uptime, so each start gets N hours again.
 #   --dry-run                          print the decision, do not stop
 #   FABRIUM_AUTO_STOP_LIMIT_SECONDS=S  stop after S seconds of uptime instead (tests)
+#   FABRIUM_AUTO_STOP_IMDS=URL         IMDS base URL (tests)
 set -u
 
 TAG=fabrium:auto-stop-hours
 DEFAULT_HOURS=12
-IMDS=http://169.254.169.254/latest
+IMDS=${FABRIUM_AUTO_STOP_IMDS:-http://169.254.169.254/latest}
 
 dry_run=0
 [ "${1:-}" = "--dry-run" ] && dry_run=1
@@ -19,15 +20,21 @@ token=$(curl -fsS -m 5 -X PUT "$IMDS/api/token" -H 'X-aws-ec2-metadata-token-ttl
   say "IMDS unreachable; check skipped" always
   exit 0
 }
-hours=$(curl -fs -m 5 -H "X-aws-ec2-metadata-token: $token" "$IMDS/meta-data/tags/instance/$TAG")
-rc=$?
-# Exit 22 is an HTTP error (no tag, or tags off in IMDS); any other failure skips this run.
-if [ "$rc" -eq 22 ]; then
-  hours=""
-elif [ "$rc" -ne 0 ]; then
-  say "IMDS read failed (curl exit $rc); check skipped" always
+out=$(curl -sS -m 5 -w ' %{http_code}' -H "X-aws-ec2-metadata-token: $token" "$IMDS/meta-data/tags/instance/$TAG") || {
+  say "IMDS unreachable; check skipped" always
   exit 0
-fi
+}
+code=${out##* }
+hours=${out% *}
+# Only 404 means no tag (or tags off in IMDS); any other status skips this run.
+case "$code" in
+  200) ;;
+  404) hours="" ;;
+  *)
+    say "IMDS read failed (HTTP $code); check skipped" always
+    exit 0
+    ;;
+esac
 
 # Up to 4 digits, no leading zero: no octal surprise and no overflow in $(( )).
 case "$hours" in
