@@ -79,7 +79,6 @@ export function VmView({
   // The VM whose delete confirmation is open, by id.
   const [deleting, setDeleting] = useState<string | null>(null);
   const doomed = vms?.find((vm) => vm.id === deleting);
-  // The VM whose Start dialog is open, by id.
   const [starting, setStarting] = useState<string | null>(null);
   const startable = vms?.find((vm) => vm.id === starting) ?? null;
 

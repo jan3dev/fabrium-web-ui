@@ -56,7 +56,6 @@ function serve(initial: Vm[]) {
     vms: initial,
     calls: [] as string[],
     created: [] as CreateVmRequest[],
-    /** Bodies of the start calls. */
     started: [] as unknown[],
   };
   mswServer.use(
