@@ -147,6 +147,10 @@ git -C "$REPO_DIR" checkout --quiet --detach "$COMMIT"
 SHA="$(git -C "$REPO_DIR" rev-parse --short=12 HEAD)"
 log "Repo at $SHA"
 
+# --- Auto-stop watcher ----------------------------------------------------
+# The image has one; this copy follows the commit, so a VM gets watcher fixes without a new image.
+sudo install -m 0755 "$REPO_DIR/deploy/agent-vm/image/fabrium-auto-stop" /usr/local/sbin/fabrium-auto-stop
+
 # --- Build the CLI (not the web UI) ----------------------------------------
 # prepare-image.sh and this script write the commit of the last build in dist/.commit.
 BUILT_FILE="$REPO_DIR/packages/cli/dist/.commit"

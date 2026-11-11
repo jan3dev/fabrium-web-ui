@@ -1,51 +1,89 @@
 #!/bin/sh
-# Stop this VM after N hours of uptime. N is the EC2 instance tag fabrium:auto-stop-hours,
-# read through IMDSv2 (the control plane enables instance tags in metadata at launch).
-# Missing tag or invalid value: 12 hours. 0: never. fabrium-auto-stop.timer runs this every
-# 5 minutes. A stop and start resets the uptime, so each start gets N hours again.
+# Stop this VM after N hours of uptime. fabrium-auto-stop.timer runs this every 5 minutes. A stop
+# and start resets the uptime, so each start gets N hours again. 0: never.
+# N comes from, in order:
+#   1. the control plane: GET /v1/vm/auto-stop with the VM token of /etc/fabrium/vm-token. Only a
+#      200 with a valid number counts, and it is kept in /var/lib/fabrium/auto-stop-hours;
+#   2. the last kept answer, when the control plane fails or has no row for the token;
+#   3. the EC2 instance tag fabrium:auto-stop-hours through IMDSv2 (a VM without a token, or before
+#      the first answer). An IMDS error other than 404 skips this run;
+#   4. 12.
 #   --dry-run                          print the decision, do not stop
 #   FABRIUM_AUTO_STOP_LIMIT_SECONDS=S  stop after S seconds of uptime instead (tests)
 #   FABRIUM_AUTO_STOP_IMDS=URL         IMDS base URL (tests)
+#   FABRIUM_AUTO_STOP_DIR=DIR          prefix of /etc/fabrium and /var/lib/fabrium (tests)
 set -u
 
 TAG=fabrium:auto-stop-hours
 DEFAULT_HOURS=12
 IMDS=${FABRIUM_AUTO_STOP_IMDS:-http://169.254.169.254/latest}
+ROOT=${FABRIUM_AUTO_STOP_DIR:-}
+TOKEN_FILE=$ROOT/etc/fabrium/vm-token
+URL_FILE=$ROOT/etc/fabrium/control-plane-url
+KEPT=$ROOT/var/lib/fabrium/auto-stop-hours
 
 dry_run=0
 [ "${1:-}" = "--dry-run" ] && dry_run=1
 say() { if [ "$dry_run" -eq 1 ] || [ "${2:-}" = always ]; then echo "$1"; fi; }
 
-token=$(curl -fsS -m 5 -X PUT "$IMDS/api/token" -H 'X-aws-ec2-metadata-token-ttl-seconds: 60') || {
-  say "IMDS unreachable; check skipped" always
-  exit 0
-}
-out=$(curl -sS -m 5 -w ' %{http_code}' -H "X-aws-ec2-metadata-token: $token" "$IMDS/meta-data/tags/instance/$TAG") || {
-  say "IMDS unreachable; check skipped" always
-  exit 0
-}
-code=${out##* }
-hours=${out% *}
-# Only 404 means no tag (or tags off in IMDS); any other status skips this run.
-case "$code" in
-  200) ;;
-  404) hours="" ;;
-  *)
-    say "IMDS read failed (HTTP $code); check skipped" always
-    exit 0
-    ;;
-esac
-
 # Up to 4 digits, no leading zero: no octal surprise and no overflow in $(( )).
-case "$hours" in
-  0 | [1-9] | [1-9][0-9] | [1-9][0-9][0-9] | [1-9][0-9][0-9][0-9]) ;;
-  *)
-    say "tag $TAG is missing or invalid; using $DEFAULT_HOURS hours"
+valid() {
+  case "$1" in
+    0 | [1-9] | [1-9][0-9] | [1-9][0-9][0-9] | [1-9][0-9][0-9][0-9]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Prints the hours of the control plane. The token goes through stdin, not the command line.
+from_control_plane() {
+  [ -r "$TOKEN_FILE" ] && [ -r "$URL_FILE" ] || return 1
+  out=$(printf 'header = "Authorization: Bearer %s"\n' "$(cat "$TOKEN_FILE")" |
+    curl -sS -m 10 -K - -w ' %{http_code}' "$(cat "$URL_FILE")/v1/vm/auto-stop") || return 1
+  [ "${out##* }" = 200 ] || return 1
+  n=$(printf '%s' "${out% *}" | jq -r '.auto_stop_hours | select(type == "number")' 2>/dev/null)
+  valid "$n" || return 1
+  echo "$n"
+}
+
+# Sets tag_hours to the instance tag, or to nothing when the tag is missing. Exits on IMDS errors.
+read_tag() {
+  token=$(curl -fsS -m 5 -X PUT "$IMDS/api/token" -H 'X-aws-ec2-metadata-token-ttl-seconds: 60') || {
+    say "IMDS unreachable; check skipped" always
+    exit 0
+  }
+  out=$(curl -sS -m 5 -w ' %{http_code}' -H "X-aws-ec2-metadata-token: $token" "$IMDS/meta-data/tags/instance/$TAG") || {
+    say "IMDS unreachable; check skipped" always
+    exit 0
+  }
+  # Only 404 means no tag (or tags off in IMDS); any other status skips this run.
+  case "${out##* }" in
+    200) tag_hours=${out% *} ;;
+    404) tag_hours="" ;;
+    *)
+      say "IMDS read failed (HTTP ${out##* }); check skipped" always
+      exit 0
+      ;;
+  esac
+}
+
+if hours=$(from_control_plane); then
+  source="from the control plane"
+  mkdir -p "${KEPT%/*}" && printf '%s\n' "$hours" >"$KEPT.new" && mv "$KEPT.new" "$KEPT"
+elif hours=$(cat "$KEPT" 2>/dev/null) && valid "$hours"; then
+  source="kept from the last control plane answer"
+else
+  read_tag
+  hours=$tag_hours
+  source="from the instance tag"
+  if ! valid "$hours"; then
     hours=$DEFAULT_HOURS
-    ;;
-esac
+    source="default"
+  fi
+fi
+say "auto-stop hours: $hours ($source)"
+
 if [ "$hours" -eq 0 ]; then
-  say "auto-stop is off ($TAG=0)"
+  say "auto-stop is off (0 hours)"
   exit 0
 fi
 

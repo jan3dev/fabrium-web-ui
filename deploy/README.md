@@ -397,7 +397,7 @@ follow steps 3 and 4. The script is idempotent. It installs:
 |---|---|---|
 | MPTCP off | `/etc/sysctl.d/99-mptcp-off.conf` | Sets `net.mptcp.enabled=0` |
 | IP-options drop | `/etc/nftables.d-ipopts-drop.nft`, `ipopts-drop.service` | Loads the table `inet ipopts_drop`, which drops inbound IPv4 TCP packets with IP options at `prerouting`, priority `raw` (before Docker's DNAT) |
-| Auto-stop | `/usr/local/sbin/fabrium-auto-stop`, `fabrium-auto-stop.service`, `fabrium-auto-stop.timer` | Every 5 minutes, reads the instance tag `fabrium:auto-stop-hours` through IMDSv2 and powers the VM off when its uptime reaches that many hours |
+| Auto-stop | `/usr/local/sbin/fabrium-auto-stop`, `fabrium-auto-stop.service`, `fabrium-auto-stop.timer` | Every 5 minutes, reads its hours from the control plane (or a fallback, see below) and powers the VM off when its uptime reaches that many hours |
 
 Host hardening notes:
 
@@ -411,11 +411,16 @@ Host hardening notes:
 
 Auto-stop rules:
 
-- The control plane sets the tag at launch and at each start from the VM page (1 to 168 hours, default 12), and
-  turns on instance tags in IMDS. A stop and start resets the uptime.
-- Without the tag, or when IMDS has instance tags off, the VM uses 12 hours. The value `0` turns auto-stop off.
-  The VM page does not offer `0`; set the tag by hand for a VM that must stay on.
-- When IMDS does not answer, the check skips that run. It never stops the VM on a read error.
+- The control plane keeps the hours of each VM (1 to 168, default 12). The VM page sets them at create, at
+  start, and with **Set**. A stop and start resets the uptime.
+- The watcher asks the control plane with the VM token that the bootstrap payload writes to
+  `/etc/fabrium/vm-token` (root only; the URL is in `/etc/fabrium/control-plane-url`). It keeps the last answer
+  in `/var/lib/fabrium/auto-stop-hours` and uses it while the control plane does not answer.
+- With no token and no kept answer (a VM from before the registry, or the first minutes of a new VM), it reads
+  the instance tag `fabrium:auto-stop-hours`, which the control plane sets at launch, through IMDSv2. Without the
+  tag it uses 12 hours. When IMDS fails, the check skips that run: it never stops the VM on a read error.
+- The value `0` turns auto-stop off. The VM page does not offer it.
+- `provision.sh` installs the watcher of its commit, so a VM gets watcher changes without a new image.
 - The power-off ends in the EC2 state `stopped`, not `terminated`: the control plane keeps the default
   shutdown behavior.
 - Check it on a VM: `sudo fabrium-auto-stop --dry-run` prints the hours and the uptime.
