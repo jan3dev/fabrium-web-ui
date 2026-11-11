@@ -3,7 +3,8 @@ import type { MiddlewareHandler } from 'hono'
 import { ApiError } from './errors.js'
 import { openIdSub, stateEvent, type MatrixConn } from './matrix.js'
 
-export type Role = 'admin' | 'owner'
+/** A vm-creator sees and manages only the VMs that they created. */
+export type Role = 'vm-creator' | 'admin' | 'owner'
 
 export interface Caller {
   userId: string
@@ -28,6 +29,7 @@ const IDENTITY_TTL_MS = 5 * 60_000
 // The role thresholds of packages/web/src/lib/roles.ts.
 const OWNER_LEVEL = 100
 const ADMIN_LEVEL = 90
+const VM_CREATOR_LEVEL = 70
 
 function isLocalUser(userId: string, serverName: string): boolean {
   const match = /^@([^:]+):(.+)$/.exec(userId)
@@ -96,7 +98,8 @@ function createRoles(deps: AuthDeps): (userId: string) => Promise<Role | null> {
       ? Infinity
       : (users?.[userId] ?? (power?.users_default as number | undefined) ?? 0)
     if (level >= OWNER_LEVEL) return 'owner'
-    return level >= ADMIN_LEVEL ? 'admin' : null
+    if (level >= ADMIN_LEVEL) return 'admin'
+    return level >= VM_CREATOR_LEVEL ? 'vm-creator' : null
   }
 }
 

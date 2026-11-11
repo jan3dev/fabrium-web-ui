@@ -48,6 +48,8 @@ export interface BundleSummary {
   agentId: string
   /** `acp.preset` of the agent in zooid.yaml; null for another kind of agent, such as the echo fixture. */
   preset: string | null
+  /** The Matrix user who created its first VM; absent for an older bundle. */
+  creator?: string
 }
 
 /** A room without a server part gets this server, as zooid.yaml does. */
@@ -138,6 +140,13 @@ async function createIfMissing(path: string, content: string, mode: number): Pro
   }
 }
 
+const CREATOR_FILE = '.creator'
+
+/** Keeps the first creator of a workstation: a resume or a later VM does not change it. */
+export async function recordCreator(dir: string, userId: string): Promise<void> {
+  await createIfMissing(join(dir, CREATOR_FILE), `${userId}\n`, 0o600)
+}
+
 /**
  * Create the bundle, or complete one that an earlier try left unfinished. Files
  * that exist stay as they are, so the tokens never change under a running VM.
@@ -216,6 +225,7 @@ export async function readBundle(
   const serverName = envVar(env, 'SERVER_NAME')
   if (!agent || !serverName) return null
   const workstation = basename(dir)
+  const creator = (await readFile(join(dir, CREATOR_FILE), 'utf8').catch(() => '')).trim()
   return {
     env,
     yaml,
@@ -224,6 +234,7 @@ export async function readBundle(
       agent,
       agentId: `@${envVar(env, 'WORKSTATION') ?? workstation}.${agent}:${serverName}`,
       preset: presetOf(yaml, agent),
+      ...(creator ? { creator } : {}),
     },
   }
 }

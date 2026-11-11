@@ -527,6 +527,18 @@ directory of the bundle's agent. The bundle's `preset: claude` still needs harne
 ## VM management from the web UI
 
 Admins and owners of the workspace create, list, start, stop, reboot, and delete agent VMs in the web UI.
+
+Who sees what depends on the power level in the workforce space:
+
+| Role | Level | VMs |
+|---|---|---|
+| Owner, admin | 100, 90 | Every VM of the instance. |
+| VM creator | 70 to 89 | Only the VMs that they created, and only their own free agents. Any other VM answers `404`. |
+| Below 70 | | No VM page; the API answers `403`. |
+
+The control plane keeps the creator of each VM; a VM from before that has no creator, so only admins and owners
+see it. A new agent name must be unique: not an agent of the daemon config (`zooid.yaml`) and not the agent of
+another workstation. When that agent is free, the error says to pick it as an existing agent.
 The browser calls the zooid daemon at `/_fabrium/v1` on its own origin: Caddy sends `/_fabrium/*` to `zooid`.
 The daemon checks the user, gives a new agent its Matrix identity, and builds the bootstrap payload (the bundle,
 the secrets, and a setup script). The Fabrium control plane, a separate service, starts the VM on AWS and hands

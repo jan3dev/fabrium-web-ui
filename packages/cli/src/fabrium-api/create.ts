@@ -5,13 +5,14 @@ import {
   VM_NAME_RE,
   listBundles,
   readBundle,
+  recordCreator,
   type Bundle,
   type BundleFiles,
 } from './bundle.js'
 import { describeFailure, relay, type ControlPlane } from './control-plane.js'
 import { ApiError } from './errors.js'
 import { buildPayload, isStrictUserId, secretProblem } from './payload.js'
-import { agentsWithFree, fetchVms, liveWorkstations, type LiveDeps } from './vms.js'
+import { agentsWithFree, fetchVms, liveWorkstations, type LiveDeps, type Vm } from './vms.js'
 
 export interface CreateRequest {
   /** The VM name, and the workstation name of the agent. */
@@ -112,8 +113,33 @@ export interface CreateDeps extends LiveDeps {
   commit: string
   /** The caller: the new agent greets them in a direct message once it works. */
   creator: string
+  /** Set for a vm-creator: an existing agent must be one whose first VM this user created. */
+  onlyCreator?: string
+  /** The agents of the daemon config: a new agent may not take one of their names. */
+  agentNames: readonly string[]
   controlPlane: ControlPlane
   admission: { admitNew(agent: NewAgent): Promise<Bundle> }
+}
+
+/**
+ * A new agent name must be unique: in the daemon config and on every other workstation. The same
+ * workstation with the same agent is a retry of an admission, which resumes.
+ */
+async function checkAgentName(
+  deps: CreateDeps,
+  workstation: string,
+  agent: string,
+  vms: Vm[],
+): Promise<void> {
+  if (deps.agentNames.includes(agent)) {
+    throw new ApiError(409, { error: `agent name ${agent} is in use` })
+  }
+  const bundles = await listBundles(deps.workstationsDir)
+  const other = bundles.find((b) => b.agent === agent && b.workstation !== workstation)
+  if (!other) return
+  const free = agentsWithFree(bundles, vms).some((e) => e.workstation === other.workstation && e.free)
+  const hint = free ? '; pick it as an existing agent' : ''
+  throw new ApiError(409, { error: `agent name ${agent} is in use${hint}` })
 }
 
 /**
@@ -128,12 +154,14 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
     const listed = await fetchVms(deps.controlPlane)
     if ('failure' in listed) return listed.failure
     if (listed.vms.some((vm) => vm.name === req.name)) throw new ApiError(409, { error: 'name in use' })
+    await checkAgentName(deps, req.name, req.agent.name, listed.vms)
     const bundle = await deps.admission.admitNew({
       workstation: req.name,
       agent: req.agent.name,
       persona: req.agent.persona,
       project: req.agent.project,
     })
+    await recordCreator(join(deps.workstationsDir, req.name), deps.creator)
     files = bundle
     agentId = bundle.agentId
   } else {
@@ -142,6 +170,10 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
     const bundles = await listBundles(deps.workstationsDir)
     const entry = agentsWithFree(bundles, listed.vms).find((e) => e.workstation === req.name)
     if (!entry?.free) throw bad(`${req.name} is not a free agent`)
+    const owner = bundles.find((b) => b.workstation === req.name)?.creator
+    if (deps.onlyCreator !== undefined && owner !== deps.onlyCreator) {
+      throw bad(`${req.name} is not a free agent`)
+    }
     // A read-only check. Running the admission again would write the roster without the persona and the project.
     const asked = bundles.filter((b) => b.workstation === req.name)
     const live = await liveWorkstations(deps, asked)
@@ -174,6 +206,7 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
     name: req.name,
     ...(req.instanceType ? { instance_type: req.instanceType } : {}),
     ...(req.autoStopHours === undefined ? {} : { auto_stop_hours: req.autoStopHours }),
+    ...(creator === undefined ? {} : { creator }),
     bootstrap: payload,
   })
   if (!upstream.ok) return relay(upstream)
