@@ -536,8 +536,9 @@ Who sees what depends on the power level in the workforce space:
 | VM creator | 70 to 89 | Only the VMs that they created, and only their own free agents. Any other VM answers `404`. |
 | Below 70 | | No VM page; the API answers `403`. |
 
-The control plane keeps the creator of each VM; a VM from before that has no creator, so only admins and owners
-see it. A new agent name must be unique: not an agent of the daemon config (`zooid.yaml`) and not the agent of
+Give the VM creator role by setting power level 70 in the workforce space from a Matrix client: the web UI
+shows the label but does not edit the levels of that space. The control plane keeps the creator of each VM; a VM
+from before that has no creator, so only admins and owners see it. A new agent name must be unique: not an agent of the daemon config (`zooid.yaml`) and not the agent of
 another workstation. When that agent is free, the error says to pick it as an existing agent.
 
 The VM page shows the owner of each VM next to its agent, and an **Auto-stop [N] hs Set** control before the

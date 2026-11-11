@@ -17,7 +17,6 @@ import type { MemberRole } from "../../hooks/use-member-roles";
 import { useMyPowerLevel } from "../../hooks/use-my-power-level";
 import { usePresence } from "../../hooks/use-presence";
 import { useSetPowerLevel } from "../../hooks/use-set-power-level";
-import { useWorkforce } from "../../hooks/use-workforce";
 import { useActor } from "../../hooks/use-actor";
 import { CREATOR_LEVEL, roleForLevel, roleLabel, standardRoleOptions } from "../../lib/roles";
 import { Button } from "../ui/button";
@@ -184,9 +183,7 @@ function MemberActions({
 }) {
   const { setLevel, resetToDefault } = useSetPowerLevel(roomId);
   const [dialog, setDialog] = useState<"kick" | "ban" | null>(null);
-  // Only the workforce space has a roster: VM creator means something there alone.
-  const workforce = useWorkforce(roomId).ready;
-  const options = standardRoleOptions(viewerLevel, { workforce });
+  const options = standardRoleOptions(viewerLevel);
 
   const onSelectRole = async (value: string) => {
     try {

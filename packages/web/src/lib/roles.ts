@@ -104,15 +104,12 @@ export interface RoleOption {
   disabled: boolean;
 }
 
-// The standard roles in descending order. When `viewerLevel` is given, any
-// option above it is disabled (Rule 9: cannot grant above your own level).
-// VM creator is offered only in the workforce space, the one room that grants it.
-export function standardRoleOptions(
-  viewerLevel = Infinity,
-  { workforce = false }: { workforce?: boolean } = {},
-): RoleOption[] {
-  const kinds = workforce ? STANDARD : STANDARD.filter((kind) => kind !== "vm-creator");
-  return kinds.map((kind) => ({
+// The standard roles of a room menu, in descending order. When `viewerLevel` is given,
+// any option above it is disabled (Rule 9: cannot grant above your own level).
+// VM creator is left out: only the workforce space grants it, and no screen edits
+// that space's levels (set 70 there from a Matrix client).
+export function standardRoleOptions(viewerLevel = Infinity): RoleOption[] {
+  return STANDARD.filter((kind) => kind !== "vm-creator").map((kind) => ({
     kind,
     level: LEVELS[kind],
     label: LABELS[kind],

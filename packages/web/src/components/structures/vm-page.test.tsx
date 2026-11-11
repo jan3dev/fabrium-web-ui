@@ -633,5 +633,12 @@ describe("auto-stop, owner, and names", () => {
     await user.type(within(dialog).getByLabelText("Agent name"), "foxtrot");
     expect(within(dialog).queryByRole("alert")).toBeNull();
     expect(within(dialog).getByRole("button", { name: "Create VM" })).toBeEnabled();
+
+    // The agent of the typed VM name is a retry of its own admission: no error.
+    await user.clear(within(dialog).getByLabelText("VM name"));
+    await user.type(within(dialog).getByLabelText("VM name"), "nova");
+    await user.clear(within(dialog).getByLabelText("Agent name"));
+    await user.type(within(dialog).getByLabelText("Agent name"), "echo");
+    expect(within(dialog).queryByRole("alert")).toBeNull();
   });
 });

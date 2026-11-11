@@ -163,7 +163,10 @@ export function NewVmDialog({
   const vmNameError =
     form.mode === "new" && vmNames.includes(vmName) ? `A VM named ${vmName} exists.` : undefined;
   const agentNameError =
-    form.mode === "new" && agentName !== "" && (options?.agents ?? []).some((a) => agentOf(a.agent_id) === agentName)
+    form.mode === "new" &&
+    agentName !== "" &&
+    // The agent of the typed VM name is a retry of its admission, which the server resumes.
+    (options?.agents ?? []).some((a) => a.workstation !== vmName && agentOf(a.agent_id) === agentName)
       ? `An agent named ${agentName} exists. Pick it under Existing agent if it is free.`
       : undefined;
   const autoStopHours = parseAutoStopHours(form.autoStopHours);

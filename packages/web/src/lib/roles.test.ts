@@ -61,16 +61,9 @@ describe("standardRoleOptions", () => {
     ]);
   });
 
-  it("offers VM creator between admin and manager only in the workforce space", () => {
-    expect(standardRoleOptions(Infinity, { workforce: true }).map((o) => o.kind)).toEqual([
-      "owner",
-      "admin",
-      "vm-creator",
-      "manager",
-      "member",
-    ]);
-    const vmCreator = standardRoleOptions(80, { workforce: true }).find((o) => o.kind === "vm-creator");
-    expect(vmCreator).toEqual({ kind: "vm-creator", level: 70, label: "VM creator", disabled: false });
+  it("labels level 70 as VM creator but leaves it out of room menus", () => {
+    expect(roleLabel(roleForLevel(70))).toBe("VM creator");
+    expect(standardRoleOptions().map((o) => o.kind)).not.toContain("vm-creator");
   });
 
   it("disables options above a viewer's own level", () => {
