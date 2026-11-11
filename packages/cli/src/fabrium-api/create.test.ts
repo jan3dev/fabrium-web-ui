@@ -238,6 +238,8 @@ describe('a new agent', () => {
       `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='${GITHUB}'\n`,
     )
     expect(sent.bootstrap.script).not.toContain('greet-creator.sh')
+    // The VM still gets its creator: the control plane checks the ID itself.
+    expect(sent.creator).toBe(caller)
   })
 
   it('omits instance_type and GH_TOKEN when they are absent or empty', async () => {

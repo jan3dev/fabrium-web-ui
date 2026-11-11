@@ -164,6 +164,33 @@ describe('create', () => {
     expect(res.status).toBe(201)
   })
 
+  it('refuses a vm-creator a new agent on a workstation of someone else, even as a resume', async () => {
+    await api.bundle('kilo-old', 'delta')
+    await api.bundle('papa-old', 'echo')
+    await recordCreator(join(api.workstationsDir, 'papa-old'), ADMIN)
+    for (const [name, agent] of [
+      ['kilo-old', 'delta'],
+      ['papa-old', 'echo'],
+    ]) {
+      const res = await api.request('POST', '/vms', {
+        token: cara,
+        json: body({ name, agent: { mode: 'new', name: agent } }),
+      })
+      expect(res.status, name).toBe(409)
+      expect(await res.json()).toEqual({ error: 'name in use' })
+    }
+    expect(writes()).toEqual([])
+  })
+
+  it('records the creator with the bundle, so a vm-creator can retry a failed admission', async () => {
+    api.fake.failOnce('POST', /\/join\//, 500)
+    const failed = await api.request('POST', '/vms', { token: cara, json: body() })
+    expect(failed.status).toBe(502)
+    expect(readFileSync(join(api.workstationsDir, 'mike', '.creator'), 'utf8')).toBe(`${CARA}\n`)
+    const retry = await api.request('POST', '/vms', { token: cara, json: body() })
+    expect(retry.status).toBe(201)
+  })
+
   it('lets a vm-creator move only its own free agent', async () => {
     await api.bundle('kilo-old', 'delta')
     await api.bundle('lima-old', 'echo')

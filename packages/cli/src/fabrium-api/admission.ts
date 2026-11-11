@@ -53,6 +53,8 @@ export interface NewAgent {
   agent: string
   persona?: string
   project?: string
+  /** The Matrix user who asks: a new bundle records them as its creator. */
+  creator?: string
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -154,6 +156,7 @@ export function createAdmission(deps: AdmissionDeps): { admitNew(agent: NewAgent
       homeserverUrl: deps.homeserverUrl,
       space: deps.workforceSpace,
       rooms: deps.rooms,
+      creator: a.creator,
     }
     const step = async <T>(name: Step, fn: () => Promise<T>): Promise<T> => {
       try {

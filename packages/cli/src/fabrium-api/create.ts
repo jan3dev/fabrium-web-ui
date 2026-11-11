@@ -5,9 +5,9 @@ import {
   VM_NAME_RE,
   listBundles,
   readBundle,
-  recordCreator,
   type Bundle,
   type BundleFiles,
+  type BundleSummary,
 } from './bundle.js'
 import { describeFailure, relay, type ControlPlane } from './control-plane.js'
 import { ApiError } from './errors.js'
@@ -125,16 +125,16 @@ export interface CreateDeps extends LiveDeps {
  * A new agent name must be unique: in the daemon config and on every other workstation. The same
  * workstation with the same agent is a retry of an admission, which resumes.
  */
-async function checkAgentName(
+function checkAgentName(
   deps: CreateDeps,
+  bundles: BundleSummary[],
   workstation: string,
   agent: string,
   vms: Vm[],
-): Promise<void> {
+): void {
   if (deps.agentNames.includes(agent)) {
     throw new ApiError(409, { error: `agent name ${agent} is in use` })
   }
-  const bundles = await listBundles(deps.workstationsDir)
   const other = bundles.find((b) => b.agent === agent && b.workstation !== workstation)
   if (!other) return
   const free = agentsWithFree(bundles, vms).some((e) => e.workstation === other.workstation && e.free)
@@ -154,14 +154,20 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
     const listed = await fetchVms(deps.controlPlane)
     if ('failure' in listed) return listed.failure
     if (listed.vms.some((vm) => vm.name === req.name)) throw new ApiError(409, { error: 'name in use' })
-    await checkAgentName(deps, req.name, req.agent.name, listed.vms)
+    const bundles = await listBundles(deps.workstationsDir)
+    // A resume hands over the bundle's tokens: a vm-creator resumes only a bundle of their own.
+    const held = bundles.find((b) => b.workstation === req.name)
+    if (deps.onlyCreator !== undefined && held && held.creator !== deps.onlyCreator) {
+      throw new ApiError(409, { error: 'name in use' })
+    }
+    checkAgentName(deps, bundles, req.name, req.agent.name, listed.vms)
     const bundle = await deps.admission.admitNew({
       workstation: req.name,
       agent: req.agent.name,
       persona: req.agent.persona,
       project: req.agent.project,
+      creator: deps.creator,
     })
-    await recordCreator(join(deps.workstationsDir, req.name), deps.creator)
     files = bundle
     agentId = bundle.agentId
   } else {
@@ -206,7 +212,8 @@ export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Re
     name: req.name,
     ...(req.instanceType ? { instance_type: req.instanceType } : {}),
     ...(req.autoStopHours === undefined ? {} : { auto_stop_hours: req.autoStopHours }),
-    ...(creator === undefined ? {} : { creator }),
+    // Unconditional: a caller ID outside the strict grammar still owns the VM. The control plane checks it.
+    creator: deps.creator,
     bootstrap: payload,
   })
   if (!upstream.ok) return relay(upstream)

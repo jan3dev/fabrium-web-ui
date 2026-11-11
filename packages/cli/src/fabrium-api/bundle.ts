@@ -26,6 +26,8 @@ export interface BundleSpec {
   space: string
   /** Rooms of the agent: `#alias`, `#alias:server`, or `!id:server`. */
   rooms: string[]
+  /** Recorded with the marker, so a retry of a failed admission still belongs to its creator. */
+  creator?: string
 }
 
 export interface Tokens {
@@ -162,6 +164,7 @@ export async function ensureBundle(dir: string, spec: BundleSpec): Promise<Bundl
       `Remove it with: !admin appservices unregister ${spec.workstation}\n`,
     0o600,
   )
+  if (spec.creator) await recordCreator(dir, spec.creator)
   const envPath = join(dir, '.env')
   let tokens = readTokens(envPath)
   if (!tokens) {
