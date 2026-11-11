@@ -57,6 +57,7 @@ function serve(initial: Vm[]) {
     calls: [] as string[],
     created: [] as CreateVmRequest[],
     started: [] as unknown[],
+    autoStops: [] as { id: string; body: unknown }[],
   };
   mswServer.use(
     http.get(`${API}/vms`, () => {
@@ -98,6 +99,14 @@ function serve(initial: Vm[]) {
         { status: 202 },
       );
     }),
+    http.put(`${API}/vms/:id/auto-stop`, async ({ params, request }) => {
+      const body = (await request.json()) as { auto_stop_hours: number };
+      cp.autoStops.push({ id: params.id as string, body });
+      cp.vms = cp.vms.map((v) =>
+        v.id === params.id ? { ...v, auto_stop_hours: body.auto_stop_hours } : v,
+      );
+      return HttpResponse.json(cp.vms.find((v) => v.id === params.id));
+    }),
     http.delete(`${API}/vms/:id`, ({ params }) => {
       cp.calls.push(`DELETE ${params.id}`);
       cp.vms = cp.vms.map((v) =>
@@ -116,10 +125,12 @@ function renderPage() {
 
 const rowOf = (name: string) =>
   screen.getByRole("rowheader", { name }).closest("tr") as HTMLElement;
+/** The action buttons of a row, without the Set of its auto-stop control. */
 const buttonsIn = (row: HTMLElement) =>
   within(row)
     .getAllByRole("button")
-    .map((b) => b.textContent);
+    .map((b) => b.textContent)
+    .filter((text) => text !== "Set");
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -135,7 +146,7 @@ describe("<VmRoute>", () => {
     await screen.findByRole("rowheader", { name: "lima" });
     expect(
       screen.getAllByRole("columnheader").map((h) => h.textContent),
-    ).toEqual(["Name", "Agent", "Type", "State", "IP", "Launched", "Actions"]);
+    ).toEqual(["Name", "Agent", "Owner", "Type", "State", "IP", "Launched", "Actions"]);
 
     const running = within(rowOf("lima"));
     expect(running.getByText("@lima.echo:example.org")).toBeInTheDocument();
@@ -380,7 +391,7 @@ describe("<VmRoute>", () => {
     }
     const fill = async (user: User, dialog: HTMLElement) => {
       await user.type(within(dialog).getByLabelText(/^vm name/i), "kilo");
-      await user.type(within(dialog).getByLabelText(/^agent name/i), "scout");
+      await user.type(within(dialog).getByLabelText(/^agent name/i), "sierra");
       await user.type(within(dialog).getByLabelText(/haven api key/i), "hk-1");
     };
 
@@ -401,7 +412,7 @@ describe("<VmRoute>", () => {
           name: "kilo",
           instance_type: "t3a.medium",
           auto_stop_hours: 12,
-          agent: { mode: "new", name: "scout" },
+          agent: { mode: "new", name: "sierra" },
           haven_api_key: "hk-1",
         },
       ]);
@@ -474,6 +485,7 @@ describe("<VmView>", () => {
       noAccess={false}
       busyIds={new Set()}
       onAction={() => {}}
+      onSetAutoStop={() => {}}
       onRetry={() => {}}
       {...over}
     />
@@ -500,7 +512,11 @@ describe("<VmView>", () => {
     for (const button of within(rowOf("lima")).getAllByRole("button")) {
       expect(button).toBeDisabled();
     }
-    for (const button of within(rowOf("kilo")).getAllByRole("button")) {
+    // Set stays disabled until the hours change.
+    const actions = within(rowOf("kilo"))
+      .getAllByRole("button")
+      .filter((b) => b.textContent !== "Set");
+    for (const button of actions) {
       expect(button).toBeEnabled();
     }
   });
@@ -525,5 +541,97 @@ describe("<VmView>", () => {
     rerender(view({ onNew }));
     await user.click(screen.getByRole("button", { name: "New VM" }));
     expect(onNew).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("auto-stop, owner, and names", () => {
+  const juliet = makeVm({
+    id: "i-0123456789abcdef5",
+    name: "juliet",
+    state: "stopped",
+    auto_stop_hours: 8,
+    creator: null,
+    registered: false,
+  });
+
+  it("shows the owner next to the agent, or Unknown", async () => {
+    serve([lima, juliet]);
+    renderPage();
+    await screen.findByRole("rowheader", { name: "lima" });
+    expect(within(rowOf("lima")).getByText("@ann:example.org")).toBeInTheDocument();
+    expect(within(rowOf("juliet")).getByText("Unknown")).toBeInTheDocument();
+  });
+
+  it("sets the auto-stop hours of a VM", async () => {
+    const cp = serve([makeVm({ auto_stop_hours: 12 })]);
+    const user = userEvent.setup();
+    renderPage();
+    const hours = await screen.findByLabelText("Auto-stop hours of lima");
+    const set = screen.getByRole("button", { name: "Set auto-stop of lima" });
+    expect(hours).toHaveValue(12);
+    expect(set).toBeDisabled(); // nothing changed yet
+
+    await user.clear(hours);
+    await user.type(hours, "3");
+    await user.click(set);
+
+    await waitFor(() =>
+      expect(cp.autoStops).toEqual([{ id: lima.id, body: { auto_stop_hours: 3 } }]),
+    );
+    await waitFor(() => expect(screen.getByLabelText("Auto-stop hours of lima")).toHaveValue(3));
+  });
+
+  it("disables Set for hours outside 1 to 168", async () => {
+    serve([makeVm({ auto_stop_hours: 12 })]);
+    const user = userEvent.setup();
+    renderPage();
+    const hours = await screen.findByLabelText("Auto-stop hours of lima");
+    const set = screen.getByRole("button", { name: "Set auto-stop of lima" });
+    for (const value of ["0", "169", "2.5"]) {
+      await user.clear(hours);
+      await user.type(hours, value);
+      expect(set, value).toBeDisabled();
+    }
+  });
+
+  it("shows the hours of a VM from before the registry, and starts it without hours", async () => {
+    const cp = serve([juliet]);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("rowheader", { name: "juliet" });
+    expect(within(rowOf("juliet")).getByText("Auto-stop 8 hs")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Auto-stop hours of juliet")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Start juliet" }));
+    const dialog = await screen.findByRole("dialog", { name: "Start juliet?" });
+    expect(within(dialog).queryByLabelText(/auto-stop after/i)).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(cp.calls).toContain(`POST ${juliet.id}/start`));
+    expect(cp.started).toEqual([null]);
+  });
+
+  it("refuses a VM name or an agent name that exists", async () => {
+    serve([lima]);
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "New VM" }));
+    const dialog = await screen.findByRole("dialog", { name: "New VM" });
+    await user.type(within(dialog).getByLabelText("VM name"), "lima");
+    await user.type(within(dialog).getByLabelText("Agent name"), "echo");
+    await user.type(within(dialog).getByLabelText(/Haven API key/i), "hk-1");
+
+    expect(within(dialog).getByText("A VM named lima exists.")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("An agent named echo exists. Pick it under Existing agent if it is free."),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("VM name")).toHaveAttribute("aria-invalid", "true");
+    expect(within(dialog).getByRole("button", { name: "Create VM" })).toBeDisabled();
+
+    await user.clear(within(dialog).getByLabelText("VM name"));
+    await user.type(within(dialog).getByLabelText("VM name"), "mike");
+    await user.clear(within(dialog).getByLabelText("Agent name"));
+    await user.type(within(dialog).getByLabelText("Agent name"), "foxtrot");
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Create VM" })).toBeEnabled();
   });
 });

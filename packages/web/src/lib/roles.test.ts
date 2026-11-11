@@ -18,6 +18,7 @@ describe("roleForLevel", () => {
   it("maps the standard ladder to named roles", () => {
     expect(roleForLevel(100)).toEqual<Role>({ kind: "owner", level: 100 });
     expect(roleForLevel(90)).toEqual<Role>({ kind: "admin", level: 90 });
+    expect(roleForLevel(70)).toEqual<Role>({ kind: "vm-creator", level: 70 });
     expect(roleForLevel(50)).toEqual<Role>({ kind: "manager", level: 50 });
     expect(roleForLevel(0)).toEqual<Role>({ kind: "member", level: 0 });
   });
@@ -58,6 +59,18 @@ describe("standardRoleOptions", () => {
       "manager",
       "member",
     ]);
+  });
+
+  it("offers VM creator between admin and manager only in the workforce space", () => {
+    expect(standardRoleOptions(Infinity, { workforce: true }).map((o) => o.kind)).toEqual([
+      "owner",
+      "admin",
+      "vm-creator",
+      "manager",
+      "member",
+    ]);
+    const vmCreator = standardRoleOptions(80, { workforce: true }).find((o) => o.kind === "vm-creator");
+    expect(vmCreator).toEqual({ kind: "vm-creator", level: 70, label: "VM creator", disabled: false });
   });
 
   it("disables options above a viewer's own level", () => {

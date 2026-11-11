@@ -2,10 +2,12 @@
 // a room member who is not in the room's project space (see use-member-roles).
 export const OWNER_LEVEL = 100;
 export const ADMIN_LEVEL = 90;
+/** Manages only the VMs that they created. Only the workforce space reads it (the VM API). */
+export const VM_CREATOR_LEVEL = 70;
 export const MANAGER_LEVEL = 50;
 export const MEMBER_LEVEL = 0;
 
-export type StandardRoleKind = "owner" | "admin" | "manager" | "member";
+export type StandardRoleKind = "owner" | "admin" | "vm-creator" | "manager" | "member";
 export type RoleKind = StandardRoleKind | "custom";
 
 export interface Role {
@@ -16,6 +18,7 @@ export interface Role {
 const LEVELS: Record<StandardRoleKind, number> = {
   owner: OWNER_LEVEL,
   admin: ADMIN_LEVEL,
+  "vm-creator": VM_CREATOR_LEVEL,
   manager: MANAGER_LEVEL,
   member: MEMBER_LEVEL,
 };
@@ -23,6 +26,7 @@ const LEVELS: Record<StandardRoleKind, number> = {
 const LABELS: Record<StandardRoleKind, string> = {
   owner: "Owner",
   admin: "Admin",
+  "vm-creator": "VM creator",
   manager: "Manager",
   member: "Member",
 };
@@ -102,8 +106,13 @@ export interface RoleOption {
 
 // The standard roles in descending order. When `viewerLevel` is given, any
 // option above it is disabled (Rule 9: cannot grant above your own level).
-export function standardRoleOptions(viewerLevel = Infinity): RoleOption[] {
-  return STANDARD.map((kind) => ({
+// VM creator is offered only in the workforce space, the one room that grants it.
+export function standardRoleOptions(
+  viewerLevel = Infinity,
+  { workforce = false }: { workforce?: boolean } = {},
+): RoleOption[] {
+  const kinds = workforce ? STANDARD : STANDARD.filter((kind) => kind !== "vm-creator");
+  return kinds.map((kind) => ({
     kind,
     level: LEVELS[kind],
     label: LABELS[kind],
