@@ -52,7 +52,7 @@ export const ARTIFACT_KINDS = Object.keys(KINDS) as [ArtifactKind, ...ArtifactKi
 export const PREVIEW_START_DESCRIPTION =
   'Run a web app and show it live to the user beside this thread: use it for anything with a dev server (Vite, Next.js, Flask, Rails, a static file server). For a single self-contained page or component, use zooid_artifact instead. ' +
   'Pass the shell command that starts the app in the foreground (e.g. "npm run dev -- --port $PORT"). It runs in your workspace (or `cwd`), keeps running after your turn, and is restarted when you call this again with the same `name`. ' +
-  'The app MUST listen on the port in $PORT (or the `port` you pass) on 127.0.0.1 or localhost; it gets a clean environment (PATH, HOME, LANG and PORT, no daemon secrets), so pass anything else in `env`. Install dependencies before calling. ' +
+  'The app MUST listen on the port in $PORT (or the `port` you pass) on 127.0.0.1 or localhost; it gets a clean environment (PATH, HOME, LANG and PORT, no daemon secrets), so pass anything else in `env` (not PATH, HOME, PORT or loader variables). `cwd` must be inside your workdir. Install dependencies before calling. ' +
   'Returns once the port accepts connections (status "running") or the app exits or 60 s pass, with the last log lines: if the status is "crashed" or still "starting", read the logs, fix the problem, and call again. ' +
   'The user sees the app in a card in this thread; do not post its URL. Only in threads. ' +
   'For an Expo app pass kind "expo" and the command "npx expo start --port $PORT"; never add --tunnel or --lan, the preview is the tunnel. ' +

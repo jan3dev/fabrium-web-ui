@@ -9,7 +9,7 @@ import { createGateway, frameAncestors, hostOnlyCookies } from './gateway.js'
 import { PreviewHub } from './hub.js'
 import { PreviewSupervisor } from './supervisor.js'
 import { startTunnelClient, type TunnelClient } from './tunnel-client.js'
-import { heartbeat, type PreviewState } from './protocol.js'
+import { heartbeat, previewOriginProblem, type PreviewState } from './protocol.js'
 
 const AGENT = '@ws.coder:test'
 const TOKEN = 'as-token'
@@ -296,6 +296,12 @@ describe('PreviewSupervisor', () => {
     await expect(supervisor.start(caller, { name: 'x', kind: 'ios' as never, command: 'true' })).rejects.toThrow(/invalid_kind/)
 
     await expect(supervisor.start({ ...caller, threadId: '' }, { name: 'x', command: 'true' })).rejects.toThrow(/threads/)
+    // The app runs inside the workdir, with no loader or shell variables from the model.
+    await expect(supervisor.start(caller, { name: 'x', command: 'true', cwd: '..' })).rejects.toThrow(/invalid_cwd/)
+    await expect(supervisor.start(caller, { name: 'x', command: 'true', cwd: '/' })).rejects.toThrow(/invalid_cwd/)
+    await expect(
+      supervisor.start(caller, { name: 'x', command: 'true', env: { LD_PRELOAD: '/tmp/x.so' } }),
+    ).rejects.toThrow(/invalid_env: LD_PRELOAD/)
     await expect(supervisor.start(caller, { name: 'Bad Name', command: 'true' })).rejects.toThrow(/invalid_name/)
   })
 })
@@ -330,5 +336,13 @@ describe('gateway headers', () => {
       "default-src 'self'; frame-ancestors http://app, frame-ancestors http://app",
     )
     expect(hostOnlyCookies(['a=1; Domain=preview.localhost; Path=/', 'b=2'])).toEqual(['a=1; Path=/', 'b=2'])
+  })
+})
+
+describe('previewOriginProblem', () => {
+  it('refuses a preview origin on the same site as the homeserver', () => {
+    expect(previewOriginProblem('https://*.preview.example.net', 'https://fabrium.example.net')).toMatch(/same site/)
+    expect(previewOriginProblem('https://*.fabrium-preview.net', 'https://fabrium.example.net')).toBeNull()
+    expect(previewOriginProblem('http://*.preview.localhost:9000', 'http://localhost:8448')).toBeNull()
   })
 })

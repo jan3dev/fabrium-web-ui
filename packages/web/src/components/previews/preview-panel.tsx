@@ -31,15 +31,16 @@ import { copyToClipboard } from "@/lib/browser-actions";
 import { setComposerFill } from "@/lib/quote-draft-store";
 import { cn } from "@/lib/utils";
 import type { PreviewSession } from "@/model/types";
-import { addConsoleEntry, frameUrl, postToBridge, readBridgeMessage, type BridgeCommand } from "./bridge";
+import { addConsoleEntry, frameUrl, postToBridge, readBridgeMessage, sameSite, type BridgeCommand } from "./bridge";
 import { PreviewStatusBadge } from "./preview-card";
 import { logTail, PreviewConsole, type ConsoleTab } from "./preview-console";
 import { PreviewState } from "./preview-state";
 import { DEVICE_WIDTH, PreviewToolbar, type PreviewDevice } from "./preview-toolbar";
 
 /** Same as spec §5.5: the app runs on a foreign origin, so `allow-same-origin` grants it nothing of ours. */
-export const PREVIEW_FRAME_SANDBOX =
-  "allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads";
+// `allow-same-origin` is safe only on a foreign site (sameSite guard below). Popups keep the
+// sandbox: no `allow-popups-to-escape-sandbox`, so a window the app opens is no more trusted.
+const PREVIEW_FRAME_SANDBOX = "allow-scripts allow-forms allow-same-origin allow-popups allow-downloads";
 
 const DEVICE_KEY = "fabrium:preview-device:v1";
 
@@ -127,9 +128,9 @@ export function PreviewPanel({
     createPreviewSession(agentId, name).then(
       (s) => {
         if (!live) return;
-        // A misconfigured `previews.origin` must never put the agent's app in Fabrium's origin.
-        if (new URL(s.url).origin === window.location.origin) {
-          setSessionError("The preview origin is the Fabrium origin. Ask an admin to fix the previews setting.");
+        // A misconfigured `previews.origin` must never put the agent's app on Fabrium's site.
+        if (sameSite(new URL(s.url).hostname, window.location.hostname)) {
+          setSessionError("Previews are on the same site as Fabrium. Ask an admin to fix the previews setting.");
           return;
         }
         setSession(s);
