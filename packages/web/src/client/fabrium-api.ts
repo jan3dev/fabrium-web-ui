@@ -3,6 +3,9 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import type {
   CreateVmRequest,
+  PreviewDetail,
+  PreviewInfo,
+  PreviewSession,
   Vm,
   VmAccess,
   VmAgent,
@@ -106,3 +109,19 @@ export const startVm = (id: string) => call<Vm>("POST", vmPath(id, "/start"));
 export const stopVm = (id: string) => call<Vm>("POST", vmPath(id, "/stop"));
 export const rebootVm = (id: string) => call<Vm>("POST", vmPath(id, "/reboot"));
 export const deleteVm = (id: string) => call<void>("DELETE", vmPath(id));
+
+// Live app previews. A preview is (agent, name); 404 = previews off or unknown preview.
+const previewPath = (agentId: string, name: string, verb = "") =>
+  `/previews/${encodeURIComponent(agentId)}/${encodeURIComponent(name)}${verb}`;
+
+export const listPreviews = (roomId: string) =>
+  call<PreviewInfo[]>("GET", `/previews?room=${encodeURIComponent(roomId)}`);
+export const getPreview = (agentId: string, name: string, logOffset: number) =>
+  call<PreviewDetail>("GET", previewPath(agentId, name, `?log_offset=${logOffset}`));
+/** The only source of a preview's iframe URL. */
+export const createPreviewSession = (agentId: string, name: string) =>
+  call<PreviewSession>("POST", previewPath(agentId, name, "/session"));
+export const restartPreview = (agentId: string, name: string) =>
+  call<void>("POST", previewPath(agentId, name, "/restart"));
+export const stopPreview = (agentId: string, name: string) =>
+  call<void>("POST", previewPath(agentId, name, "/stop"));

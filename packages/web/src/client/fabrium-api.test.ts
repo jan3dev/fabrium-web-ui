@@ -6,13 +6,18 @@ import { makeVm } from "../../test/vm-fixtures";
 import type { CreateVmRequest } from "../model/types";
 import {
   FabriumApiError,
+  createPreviewSession,
   createVm,
+  getPreview,
+  listPreviews,
+  restartPreview,
   deleteVm,
   getAccess,
   isNoAccess,
   listVms,
   rebootVm,
   startVm,
+  stopPreview,
   stopVm,
 } from "./fabrium-api";
 import { MatrixClientPeg } from "./peg";
@@ -288,5 +293,42 @@ describe("base URL", () => {
     );
     await listVms();
     expect(url).toBe(`${window.location.origin}${API}/vms`);
+  });
+});
+
+describe("previews", () => {
+  it("encodes the agent ID and name into the path", async () => {
+    signInForVmApi(["tok-1"]);
+    const hits: string[] = [];
+    mswServer.use(
+      http.get(`${API}/previews`, ({ request }) => {
+        hits.push(new URL(request.url).search);
+        return HttpResponse.json([]);
+      }),
+      http.get(`${API}/previews/:agent/:name`, ({ request, params }) => {
+        hits.push(`${String(params.agent)} ${String(params.name)} ${new URL(request.url).search}`);
+        return HttpResponse.json({ log: { offset: 5, text: "ready" } });
+      }),
+      http.post(`${API}/previews/:agent/:name/:verb`, ({ params }) => {
+        hits.push(`${String(params.verb)} ${String(params.agent)}`);
+        return params.verb === "session"
+          ? HttpResponse.json({ url: "https://t.preview.example/", expires_at: "2026-11-09T12:00:00Z" })
+          : new HttpResponse(null, { status: 204 });
+      }),
+    );
+    await listPreviews("!r:h");
+    await expect(getPreview("@vm1.coder:h", "todo-app", 3)).resolves.toMatchObject({ log: { offset: 5 } });
+    await expect(createPreviewSession("@vm1.coder:h", "todo-app")).resolves.toMatchObject({
+      url: "https://t.preview.example/",
+    });
+    await expect(restartPreview("@vm1.coder:h", "todo-app")).resolves.toBeUndefined();
+    await stopPreview("@vm1.coder:h", "todo-app");
+    expect(hits).toEqual([
+      "?room=!r%3Ah",
+      "@vm1.coder:h todo-app ?log_offset=3",
+      "session @vm1.coder:h",
+      "restart @vm1.coder:h",
+      "stop @vm1.coder:h",
+    ]);
   });
 });

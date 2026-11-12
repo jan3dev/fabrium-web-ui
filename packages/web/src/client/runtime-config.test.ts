@@ -50,6 +50,13 @@ describe("loadRuntimeConfig", () => {
     expect(cfg).toEqual({});
   });
 
+  it("reads previews only as a boolean", async () => {
+    mswServer.use(http.get("/config.json", () => HttpResponse.json({ previews: true })));
+    expect(await loadRuntimeConfig()).toEqual({ previews: true });
+    mswServer.use(http.get("/config.json", () => HttpResponse.json({ previews: "true" })));
+    expect(await loadRuntimeConfig()).toEqual({});
+  });
+
   it("reads the two push fields", async () => {
     mswServer.use(
       http.get("/config.json", () =>

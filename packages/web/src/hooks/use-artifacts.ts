@@ -5,16 +5,29 @@ import { fetchAuthedMedia } from "@/lib/matrix/authed-media";
 import type { ArtifactVersion } from "@/model/types";
 import { useThreadEntries } from "./use-timeline-entries";
 
-/** Search params with `id` as the open thread; an artifact belongs to its thread, so a new thread closes it. */
+/** The side panels beside a thread: an artifact or a preview, one at a time. */
+const PANEL_KEYS = ["artifact", "version", "preview"];
+
+/** Search params with `id` as the open thread; artifacts and previews belong to their thread, so a new thread closes them. */
 export function withThread(prev: URLSearchParams, id: string): URLSearchParams {
   const next = new URLSearchParams(prev);
   next.set("thread", id);
   next.delete("event");
   next.delete("pane");
-  if (prev.get("thread") !== id) {
-    next.delete("artifact");
-    next.delete("version");
-  }
+  if (prev.get("thread") !== id) for (const k of PANEL_KEYS) next.delete(k);
+  return next;
+}
+
+/** Search params with one side panel open, beside `threadId` when given; it closes the other panel. */
+export function withPanel(
+  prev: URLSearchParams,
+  threadId: string | null | undefined,
+  panel: Record<string, string>,
+): URLSearchParams {
+  const next =
+    threadId && prev.get("thread") !== threadId ? withThread(prev, threadId) : new URLSearchParams(prev);
+  for (const k of PANEL_KEYS) next.delete(k);
+  for (const [k, v] of Object.entries(panel)) next.set(k, v);
   return next;
 }
 
@@ -26,16 +39,13 @@ export function useArtifactRoute() {
   const [params, setParams] = useSearchParams();
   const open = useCallback(
     (identifier: string, versionEventId?: string, threadId?: string | null) =>
-      setParams((prev) => {
-        const next =
-          threadId && prev.get("thread") !== threadId
-            ? withThread(prev, threadId)
-            : new URLSearchParams(prev);
-        next.set("artifact", identifier);
-        if (versionEventId) next.set("version", versionEventId);
-        else next.delete("version");
-        return next;
-      }),
+      setParams((prev) =>
+        withPanel(
+          prev,
+          threadId,
+          versionEventId ? { artifact: identifier, version: versionEventId } : { artifact: identifier },
+        ),
+      ),
     [setParams],
   );
   const close = useCallback(

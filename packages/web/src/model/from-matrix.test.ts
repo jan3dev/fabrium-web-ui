@@ -4,7 +4,8 @@ import {
   type MatrixEvent,
   type Room,
 } from "matrix-js-sdk";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { setPreviewsEnabled } from "@/client/feature-flags";
 import { allRoomEvents } from "@/hooks/use-timeline";
 import { appendArtifactRefs, ARTIFACT_REFS_FIELD, type ArtifactRef } from "@/lib/artifacts/refs";
 import { QUOTE_FIELD, type QuoteRef } from "@/lib/matrix/quote";
@@ -23,7 +24,7 @@ import {
   toTimelineMessages,
 } from "./from-matrix";
 import type { AgentTurn, ApprovalView } from "./agent-activity";
-import type { ArtifactVersion } from "./types";
+import type { ArtifactVersion, PreviewEvent } from "./types";
 
 const roomId = "!r:h.example";
 const me = "@me:h.example";
@@ -559,5 +560,49 @@ describe("artifacts", () => {
     ];
     const room = roomWith(text(ana, appendArtifactRefs("tweak this", refs), undefined, { [ARTIFACT_REFS_FIELD]: refs }));
     expect(entries(room)[0].message).toMatchObject({ body: "tweak this", artifactRefs: refs });
+  });
+});
+
+describe("previews", () => {
+  afterEach(() => setPreviewsEnabled(false));
+  const preview = (sender: string) =>
+    ev(sender, "m.room.message", {
+      msgtype: "m.notice",
+      body: "Preview: Todo app (npm run dev)",
+      "dev.fabrium.preview": { name: "todo-app", title: "Todo app", command: "npm run dev", action: "started" },
+      "m.relates_to": { rel_type: "m.thread", event_id: "$root" },
+    });
+
+  it("maps an agent's preview event to a card", () => {
+    setPreviewsEnabled(true);
+    const [entry] = entries(roomWith(preview(agent)));
+    expect(entry.message.kind).toBe("preview");
+    expect(entry.message.raw as PreviewEvent).toMatchObject({
+      name: "todo-app",
+      action: "started",
+      threadRootId: "$root",
+      author: { id: agent, kind: "agent" },
+    });
+  });
+
+  it("renders the notice text when previews are off, the sender is not an agent, or the room is encrypted", () => {
+    expect(entries(roomWith(preview(agent)))[0].message).toMatchObject({
+      kind: "message",
+      body: "Preview: Todo app (npm run dev)",
+    });
+    setPreviewsEnabled(true);
+    expect(entries(roomWith(preview(ana)))[0].message.kind).toBe("message");
+    const sealed = roomWith(preview(agent));
+    injectStateEvent(
+      sealed,
+      mkMatrixEvent({
+        roomId,
+        sender: me,
+        type: "m.room.encryption",
+        stateKey: "",
+        content: { algorithm: "m.megolm.v1.aes-sha2" },
+      }),
+    );
+    expect(entries(sealed)[0].message.kind).toBe("message");
   });
 });

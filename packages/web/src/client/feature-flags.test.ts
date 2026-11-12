@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  isPreviewsEnabled,
   resolveGlobalSearch,
   setGlobalSearchEnabled,
   isGlobalSearchEnabled,
@@ -35,5 +36,11 @@ describe("global-search singleton", () => {
     expect(isGlobalSearchEnabled()).toBe(false);
     setGlobalSearchEnabled(true);
     expect(isGlobalSearchEnabled()).toBe(true);
+  });
+});
+
+describe("previews flag", () => {
+  it("is off by default", () => {
+    expect(isPreviewsEnabled()).toBe(false);
   });
 });
