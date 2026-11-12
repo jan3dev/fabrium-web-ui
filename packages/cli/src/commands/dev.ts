@@ -238,6 +238,8 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
             homeserverUrl: homeserver,
             // Same default as the daemon's space provisioning (start-daemon.ts).
             workforceSpace: matrix.transport.space ?? 'dev',
+            previews: preview.previews !== undefined,
+            ...(ctx.daemon ? { daemonUrl: `http://127.0.0.1:${ctx.daemon.port}` } : {}),
             ...(ctx.daemon?.vapidPublicKey
               ? {
                   // Tuwunel runs in a container; `localhost` here would

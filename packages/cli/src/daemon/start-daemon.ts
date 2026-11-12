@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { createServer as createHttpServer, type RequestListener, type ServerOptions } from 'node:http'
 import { mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
@@ -48,6 +49,12 @@ import { makeTaskJournal } from './task-journal.js'
 import { shouldBindHttpListener } from './pull-wiring.js'
 import { startTriggerScheduler, validateCron } from './trigger-scheduler.js'
 import { mountWebhookRoutes, WEBHOOK_ROUTE_PREFIX } from './webhook-routes.js'
+import { stateEvent } from '../fabrium-api/matrix.js'
+import { previewApi } from '../previews/api.js'
+import { createGateway } from '../previews/gateway.js'
+import { PreviewHub } from '../previews/hub.js'
+import { PreviewSupervisor, type PreviewAgent, type PreviewStartInput } from '../previews/supervisor.js'
+import { startTunnelClient, type TunnelClient } from '../previews/tunnel-client.js'
 import { loadCustomVerifiers } from './load-custom-verifiers.js'
 import { joinTriggerRooms } from './trigger-rooms.js'
 import { ignoredHooksWarning } from './ignored-hooks.js'
@@ -202,6 +209,9 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   let server: ServerType | null = null
   let syncLoops: SyncLoop[] | undefined
   let triggers: { stop(): Promise<void> } | undefined
+  let previews: PreviewSupervisor | undefined
+  let tunnel: TunnelClient | undefined
+  let previewHub: PreviewHub | undefined
   let stopped = false
   let resolveStopped!: () => void
   const whenStopped = new Promise<void>((r) => {
@@ -286,6 +296,39 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     })
     contextSpawnRegistry.setTaskActions(transport.taskActions)
 
+    // Live app previews (PREVIEWS_SPEC.md). Every daemon with `previews:` runs its
+    // agents' apps; the one that binds the HTTP listener also serves the gateway.
+    // Shared by the preview supervisor, hub and API.
+    const previewConn = { homeserver: matrix.transport.homeserver, fetch: opts.fetch ?? fetch }
+    if (config.previews) {
+      // v1 runs preview apps on the host only (PREVIEWS_SPEC.md §4.2).
+      const agents: Record<string, PreviewAgent> = {}
+      for (const b of bindings) {
+        if (resolveAgentRuntime(config.agents[b.name]!, config) !== 'local') continue
+        agents[b.name] = { userId: b.userId, workdir: b.workspaceDir! }
+      }
+      const supervisor = new PreviewSupervisor({
+        agents,
+        max: config.previews.max,
+        stateFile: dataDir ? join(dataDir, 'previews.json') : undefined,
+        sendEvent: async (asUserId, roomId, content) => {
+          await client.sendCustomEvent({ roomId, asUserId, eventType: 'm.room.message', content })
+        },
+        isEncrypted: async (roomId, asUserId) =>
+          (await stateEvent(previewConn, matrix.transport.as_token, roomId, 'm.room.encryption', '', asUserId)) !== null,
+        onState: (preview) => tunnel?.send({ t: 'state', preview }),
+        onLog: (agent_id, name, text) => tunnel?.send({ t: 'log', agent_id, name, text }),
+        onRemove: (agent_id, name) => tunnel?.send({ t: 'remove', agent_id, name }),
+      })
+      previews = supervisor
+      // The model's raw arguments; the supervisor validates every field.
+      contextSpawnRegistry.setPreviewActions({
+        start: (caller, input) => supervisor.start(caller, input as unknown as PreviewStartInput),
+        stop: (caller, input) => supervisor.stop(caller, input as { name: string }),
+        logs: (caller, input) => supervisor.logs(caller, input as { name: string; lines?: number }),
+      })
+    }
+
     // Declared here, assigned after the listener is up. The closures below
     // read it at call time, so they can be built before the space exists.
     let spaceRoomId: string | undefined
@@ -345,6 +388,25 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         }
       }
 
+      // Previews: mounted before the VM API, whose admin check covers all of /_fabrium/v1.
+      if (config.previews) {
+        previewHub = new PreviewHub({
+          conn: previewConn,
+          origin: config.previews.origin ?? `http://*.preview.localhost:${requestedPort}`,
+        })
+        transport.app.route(
+          '/_fabrium/v1/previews',
+          previewApi({
+            hub: previewHub,
+            conn: previewConn,
+            serverName,
+            isNotHuman: transport.isNotHuman,
+          }),
+        )
+        console.log('[previews] API at /_fabrium/v1/previews')
+      }
+      const gateway = previewHub ? createGateway(previewHub) : undefined
+
       // The web UI's VM API, off unless configured; mounted before serve() like the routes above.
       const vmApi = loadFabriumApiConfig()
       if (vmApi) {
@@ -368,7 +430,21 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         fetch: transport.app.fetch,
         port: requestedPort,
         hostname: '0.0.0.0',
+        // Preview origins (by Host) go to the gateway, everything else to Hono.
+        createServer: ((options: ServerOptions, listener: RequestListener) =>
+          createHttpServer(options, (req, res) =>
+            previewHub && gateway && previewHub.isPreviewHost(req.headers.host)
+              ? gateway.handleRequest(req, res)
+              : listener(req, res),
+          )) as typeof createHttpServer,
       })
+      if (previewHub && gateway) {
+        const hub = previewHub
+        server.on('upgrade', (req, socket, head) => {
+          if (hub.isPreviewHost(req.headers.host)) gateway.handleUpgrade(req, socket, head)
+          else if (!hub.handleTunnelUpgrade(req, socket)) socket.destroy()
+        })
+      }
       port = await listenAsync(server)
     } else {
       // Pull (client) mode runs outbound /sync loops; no inbound listener.
@@ -432,6 +508,24 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
           )
         }
       }
+    }
+
+    if (previews && config.previews) {
+      const supervisor = previews
+      // The central daemon dials its own listener; a VM dials the public site.
+      const url =
+        config.previews.tunnel_url ??
+        (shouldBindHttpListener(mode) ? `http://127.0.0.1:${port}` : new URL(matrix.transport.homeserver).origin)
+      tunnel = startTunnelClient({
+        url,
+        asToken: matrix.transport.as_token,
+        snapshot: () => supervisor.snapshot(),
+        port: (agentId, name) => supervisor.port(agentId, name),
+        restart: (agentId, name) => supervisor.restartById(agentId, name),
+        stop: (agentId, name) => supervisor.stopById(agentId, name),
+      })
+      supervisor.resume()
+      console.log(`[previews] tunnel to ${url}`)
     }
 
     // Pull mode: start the outbound /sync loops after bootstrap so the rooms
@@ -508,6 +602,13 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     }
     try {
       if (syncLoops) for (const loop of syncLoops) loop.stop()
+    } catch {
+      // swallow
+    }
+    try {
+      tunnel?.close()
+      previewHub?.close()
+      await previews?.shutdown()
     } catch {
       // swallow
     }
