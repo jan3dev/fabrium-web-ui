@@ -25,7 +25,6 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
 import {
   useArtifactRoute,
   useArtifactText,
@@ -35,7 +34,6 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import {
   addArtifactRefDraft,
   type ArtifactRefTarget,
-  MAX_NOTE,
   MAX_REFS,
 } from "@/lib/artifacts/refs";
 import { addPreviewError, composeFixRequest } from "@/lib/artifacts/runtime";
@@ -45,7 +43,7 @@ import { cn } from "@/lib/utils";
 import type { ArtifactKind } from "@/model/types";
 import { ArtifactKindIcon, artifactKindLabel } from "./artifact-card";
 import { ArtifactPreview } from "./artifact-preview";
-import { describeTarget } from "./artifact-refs";
+import { AnnotationForm } from "./artifact-refs";
 import { ArtifactTextView } from "./artifact-text-view";
 
 type Tab = "preview" | "code" | "changes";
@@ -364,51 +362,13 @@ export function ArtifactPanel({
           data-testid="artifact-annotation-bar"
         >
           {target ? (
-            <form
-              className="flex flex-col gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                addAnnotation();
-              }}
-            >
-              <p className="truncate text-caption1 text-text-secondary">
-                Annotating{" "}
-                <span className="font-mono text-text-primary">
-                  {describeTarget(target)}
-                </span>
-              </p>
-              <Textarea
-                aria-label="Annotation note"
-                autoFocus
-                rows={2}
-                maxLength={MAX_NOTE}
-                value={note}
-                placeholder="What should change here? (optional)"
-                className="text-body2"
-                onChange={(e) => setNote(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault();
-                    addAnnotation();
-                  } else if (e.key === "Escape") {
-                    resetAnnotation();
-                  }
-                }}
-              />
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost"
-                  onClick={resetAnnotation}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" size="xs">
-                  Add to reply
-                </Button>
-              </div>
-            </form>
+            <AnnotationForm
+              target={target}
+              note={note}
+              onNoteChange={setNote}
+              onAdd={addAnnotation}
+              onCancel={resetAnnotation}
+            />
           ) : (
             <p className="text-caption1 text-text-tertiary">
               {srcdoc !== null

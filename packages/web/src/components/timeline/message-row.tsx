@@ -4,6 +4,7 @@ import * as React from "react";
 import { ArtifactRefList } from "@/components/artifacts/artifact-refs";
 import { UserAvatar } from "@/components/user-avatar";
 import { useArtifactRoute } from "@/hooks/use-artifacts";
+import { usePreviewRoute } from "@/hooks/use-previews";
 import { UserProfilePopover } from "@/components/user-profile-popover";
 import {
   Tooltip,
@@ -98,6 +99,8 @@ function MessageBody({
 /** A reply carrying artifact annotations: the comment, any quote, then the annotations. */
 function AnnotatedBody({ message, roomId }: { message: TimelineMessage; roomId: string }) {
   const route = useArtifactRoute();
+  const previewRoute = usePreviewRoute();
+  const thread = message.threadRootId;
   return (
     <>
       {message.body ? <PlainMessageBody text={message.body} roomId={roomId} /> : null}
@@ -105,8 +108,11 @@ function AnnotatedBody({ message, roomId }: { message: TimelineMessage; roomId: 
       <ArtifactRefList
         refs={message.artifactRefs ?? []}
         onOpen={
-          message.threadRootId
-            ? (r) => route.open(r.identifier, r.event_id, message.threadRootId)
+          thread
+            ? (r) =>
+                r.preview
+                  ? previewRoute.open({ agentId: r.preview.agent, name: r.identifier }, thread)
+                  : route.open(r.identifier, r.event_id, thread)
             : undefined
         }
       />
