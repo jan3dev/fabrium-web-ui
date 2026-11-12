@@ -37,6 +37,7 @@ export type {
   RoomBinding,
   HttpBinding,
   ZooidConfig,
+  PreviewsConfig,
   TransportConfig,
   MatrixTransportConfig,
   HttpTransportConfig,
