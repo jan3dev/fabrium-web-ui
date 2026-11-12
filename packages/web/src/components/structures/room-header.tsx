@@ -8,6 +8,7 @@ import { RoomGlyph } from "@/components/room-glyph";
 import { Badge } from "@/components/ui/badge";
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
+import { toActor } from "@/model/from-matrix";
 import { MatrixClientPeg } from "../../client/peg";
 import { useDirectRooms } from "../../hooks/use-direct-rooms";
 import { useJoinRule } from "../../hooks/use-join-rule";
@@ -16,6 +17,7 @@ import { useRoomFavorite } from "../../hooks/use-room-favorite";
 import { useRoomNotifState } from "../../hooks/use-room-notif-state";
 import { useRoomTopic } from "../../hooks/use-room-topic";
 import { useWorkforce } from "../../hooks/use-workforce";
+import { RoomPreviewMenu } from "../previews/preview-menu";
 import { MemberStack } from "./member-stack";
 import { RoomStatusBadge } from "./room-status-badge";
 
@@ -46,7 +48,8 @@ export function RoomHeader({
   const { isFavorite, toggle: toggleFavorite } = useRoomFavorite(roomId);
   const { rule } = useJoinRule(roomId);
   const { state: notifState } = useRoomNotifState(roomId);
-  const { isAgent } = useWorkforce(workforceSpaceId ?? "");
+  const roster = useWorkforce(workforceSpaceId ?? "");
+  const { isAgent } = roster;
   const isDm = useDirectRooms().some((r) => r.roomId === roomId);
   const avatarMxc = useRoomAvatarMxc(roomId);
 
@@ -100,6 +103,7 @@ export function RoomHeader({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
+        <RoomPreviewMenu roomId={roomId} agentLabel={(id) => toActor(id, room ?? null, roster).displayName} />
         {members.length > 0 ? (
           <MemberStack
             members={members}
