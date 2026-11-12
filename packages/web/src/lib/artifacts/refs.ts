@@ -22,6 +22,12 @@ export interface ArtifactRef {
   event_id: string;
   target: ArtifactRefTarget;
   note: string;
+  /**
+   * Set when the annotation is on a live app preview, not an artifact: the
+   * preview's agent and the page path. `identifier` is the preview name,
+   * `event_id` its latest event, `version` 0.
+   */
+  preview?: { agent: string; path: string };
 }
 
 const str = (v: unknown, max: number) =>
@@ -46,6 +52,20 @@ export function readTarget(raw: unknown): ArtifactRefTarget | null {
   return null;
 }
 
+/** A page path from a frame: one line, it lands in the user's message unfenced. */
+export function onePath(raw: unknown): string | null {
+  const path = str(raw, 500)?.replace(/\s+/g, "").trim();
+  return path?.startsWith("/") ? path : null;
+}
+
+function readPreview(raw: unknown): ArtifactRef["preview"] | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const agent = str(o.agent, 255);
+  const path = onePath(o.path);
+  return agent && path ? { agent, path } : undefined;
+}
+
 /** Valid refs from message content (or a frame's message); anything malformed is dropped. */
 export function readArtifactRefs(content: unknown): ArtifactRef[] {
   const raw = (content as Record<string, unknown> | null)?.[
@@ -60,6 +80,7 @@ export function readArtifactRefs(content: unknown): ArtifactRef[] {
     const eventId = str(o.event_id, 255);
     if (!target || !identifier || !eventId || typeof o.version !== "number")
       return [];
+    const preview = readPreview(o.preview);
     return [
       {
         identifier,
@@ -68,6 +89,7 @@ export function readArtifactRefs(content: unknown): ArtifactRef[] {
         event_id: eventId,
         target,
         note: str(o.note, MAX_NOTE) ?? "",
+        ...(preview ? { preview } : {}),
       },
     ];
   });
@@ -87,7 +109,9 @@ function fence(lang: string, content: string): string {
 export function formatArtifactRefs(refs: readonly ArtifactRef[]): string {
   return refs
     .map((r, i) => {
-      const head = `[Annotation ${i + 1} on artifact \`${r.identifier}\` v${r.version} "${r.title}" (event ${r.event_id})]`;
+      const head = r.preview
+        ? `[Annotation ${i + 1} on the preview \`${r.identifier}\` "${r.title}" at ${r.preview.path} (event ${r.event_id})]`
+        : `[Annotation ${i + 1} on artifact \`${r.identifier}\` v${r.version} "${r.title}" (event ${r.event_id})]`;
       const t = r.target;
       const lines =
         t.kind === "element"

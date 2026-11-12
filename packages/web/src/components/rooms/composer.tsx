@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EventStatus, type MatrixEvent, type Room } from "matrix-js-sdk";
 import { parseSlashCommand } from "@/lib/slash-commands";
 import { ArtifactRefChips } from "@/components/artifacts/artifact-refs";
@@ -10,9 +10,9 @@ import {
   useArtifactRefDrafts,
 } from "@/lib/artifacts/refs";
 import { buildQuoteContent } from "@/lib/matrix/quote";
-import { setQuoteDraft, useQuoteDraft } from "@/lib/quote-draft-store";
+import { setComposerFill, setQuoteDraft, useComposerFill, useQuoteDraft } from "@/lib/quote-draft-store";
 import { QuoteChip } from "./quote-chip";
-import { MessageInput, type MessageInputSubmit } from "./message-input";
+import { MessageInput, type MessageInputHandle, type MessageInputSubmit } from "./message-input";
 import { useMatrixClient } from "../../hooks/use-matrix-client";
 import { allRoomEvents } from "../../hooks/use-timeline";
 import { useMediaUpload } from "../../hooks/use-media-upload";
@@ -45,6 +45,14 @@ export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }:
   const quoteDraft = useQuoteDraft(roomId, threadId);
   const refDrafts = useArtifactRefDrafts(roomId, threadId);
   const hasRefs = refDrafts.length > 0;
+  const input = useRef<MessageInputHandle>(null);
+  const fill = useComposerFill(roomId, threadId);
+  // Text another view put here (a preview's "Ask agent to fix"): taken once, then cleared.
+  useEffect(() => {
+    if (!fill || !input.current) return;
+    input.current.fill(fill.text, fill.mention);
+    setComposerFill(roomId, threadId, null);
+  }, [fill, roomId, threadId]);
 
   /**
    * Send one event. When the server rejects it, the SDK keeps a NOT_SENT local
@@ -167,6 +175,7 @@ export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }:
 
   return (
     <MessageInput
+      ref={input}
       roomId={roomId}
       workforceSpaceId={workforceSpaceId}
       className="shrink-0 px-3 pb-3"

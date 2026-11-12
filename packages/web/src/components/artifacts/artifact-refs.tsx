@@ -1,5 +1,7 @@
 import { CloseIcon, CommentIcon } from "@/components/icons";
-import type { ArtifactRef, ArtifactRefTarget } from "@/lib/artifacts/refs";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { MAX_NOTE, type ArtifactRef, type ArtifactRefTarget } from "@/lib/artifacts/refs";
 
 /** One line naming what an annotation points at. */
 export function describeTarget(t: ArtifactRefTarget): string {
@@ -13,8 +15,9 @@ function RefBody({ item: r }: { item: ArtifactRef }) {
   return (
     <span className="min-w-0 flex-1">
       <span className="block truncate text-caption1 text-text-secondary">
-        <span className="font-semibold text-text-primary">{r.title}</span> v
-        {r.version} · <span className="font-mono">{describeTarget(r.target)}</span>
+        <span className="font-semibold text-text-primary">{r.title}</span>
+        {r.preview ? ` · ${r.preview.path}` : ` v${r.version}`} ·{" "}
+        <span className="font-mono">{describeTarget(r.target)}</span>
       </span>
       {r.note.trim() ? (
         <span className="block line-clamp-2 text-caption1 whitespace-pre-wrap text-text-primary">
@@ -81,5 +84,60 @@ export function ArtifactRefList({
         </li>
       ))}
     </ul>
+  );
+}
+
+/** The note form for a picked target, under an artifact or a preview. */
+export function AnnotationForm({
+  target,
+  note,
+  onNoteChange,
+  onAdd,
+  onCancel,
+}: {
+  target: ArtifactRefTarget;
+  note: string;
+  onNoteChange: (note: string) => void;
+  onAdd: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <form
+      className="flex flex-col gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onAdd();
+      }}
+    >
+      <p className="truncate text-caption1 text-text-secondary">
+        Annotating <span className="font-mono text-text-primary">{describeTarget(target)}</span>
+      </p>
+      <Textarea
+        aria-label="Annotation note"
+        autoFocus
+        rows={2}
+        maxLength={MAX_NOTE}
+        value={note}
+        placeholder="What should change here? (optional)"
+        className="text-body2"
+        onChange={(e) => onNoteChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            onAdd();
+          } else if (e.key === "Escape") {
+            onCancel();
+          }
+        }}
+      />
+      <div className="flex justify-end gap-2">
+        <Button type="button" size="xs" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" size="xs">
+          Add to reply
+        </Button>
+      </div>
+    </form>
   );
 }
