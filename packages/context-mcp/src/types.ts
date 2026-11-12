@@ -20,3 +20,20 @@ export interface ZooidContextServerSpec {
   args: string[]
   env: Array<{ name: string; value: string }>
 }
+
+/** Who calls a preview tool: from the authenticated spawn binding, never from the model. */
+export interface PreviewCallerRef {
+  agentName: string
+  channelId: string
+  threadId: string
+}
+
+/**
+ * The daemon's preview supervisor, as the socket sees it. Inputs are the
+ * model's raw tool arguments; the supervisor validates them.
+ */
+export interface PreviewActions {
+  start(caller: PreviewCallerRef, input: Record<string, unknown>): Promise<unknown>
+  stop(caller: PreviewCallerRef, input: Record<string, unknown>): Promise<unknown>
+  logs(caller: PreviewCallerRef, input: Record<string, unknown>): unknown
+}

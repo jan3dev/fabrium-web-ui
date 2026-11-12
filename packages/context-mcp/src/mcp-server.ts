@@ -7,6 +7,9 @@ import {
   ARTIFACT_INSTRUCTIONS,
   ARTIFACT_KINDS,
   HANDOFF_DESCRIPTION,
+  PREVIEW_LOGS_DESCRIPTION,
+  PREVIEW_START_DESCRIPTION,
+  PREVIEW_STOP_DESCRIPTION,
   SEND_ATTACHMENT_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
 } from './tool-text.js'
@@ -41,6 +44,11 @@ export interface BuildContextMcpServerOpts {
    * when the bound provider can send attachments ([[ZOD068]]).
    */
   canSendAttachment?: boolean
+  /**
+   * Register the zooid_preview_* tools: set by the spawn (`--previews`) when
+   * previews are on and the agent runs locally. Calls the daemon's supervisor.
+   */
+  callPreview?: (method: 'previewStart' | 'previewStop' | 'previewLogs', params: Record<string, unknown>) => Promise<unknown>
 }
 // The socket substitutes its authenticated spawn binding; models never supply an address.
 const CALLER_FROM_BINDING: TaskCallerRef = {
@@ -263,6 +271,37 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
         const result = await provider.sendAttachment('', '', { path, name, caption })
         return { content: [{ type: 'text', text: JSON.stringify(result) }] }
       },
+    )
+  }
+
+  const callPreview = opts.callPreview
+  if (callPreview) {
+    const text = (result: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(result) }] })
+    server.tool(
+      'zooid_preview_start',
+      PREVIEW_START_DESCRIPTION,
+      {
+        name: z.string().describe('kebab-case id, stable across restarts, e.g. "todo-app"'),
+        command: z.string().describe('shell command that runs the app in the foreground'),
+        title: z.string().optional().describe('shown to the user; defaults to name'),
+        port: z.number().int().optional().describe('default: a free port, given in $PORT'),
+        cwd: z.string().optional().describe('relative to your workspace'),
+        env: z.record(z.string()).optional(),
+        kind: z
+          .enum(['web', 'expo'])
+          .optional()
+          .describe('"expo" for a React Native app with Expo: the user can also open it in Expo Go on a phone'),
+      },
+      async (input) => text(await callPreview('previewStart', input)),
+    )
+    server.tool('zooid_preview_stop', PREVIEW_STOP_DESCRIPTION, { name: z.string() }, async (input) =>
+      text(await callPreview('previewStop', input)),
+    )
+    server.tool(
+      'zooid_preview_logs',
+      PREVIEW_LOGS_DESCRIPTION,
+      { name: z.string(), lines: z.number().int().optional().describe('default 100, max 1000') },
+      async (input) => text(await callPreview('previewLogs', input)),
     )
   }
 

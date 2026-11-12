@@ -66,8 +66,10 @@ export function buildContextServerSpec(opts: {
   containerize?: boolean
   /** Append `--send-attachment` so the MCP server registers zooid_send_attachment ([[ZOD068]]). */
   sendAttachment?: boolean
+  /** Append `--previews` so the MCP server registers the zooid_preview_* tools. */
+  previews?: boolean
 }): ZooidContextServerSpec {
-  const flags = opts.sendAttachment ? ['--send-attachment'] : []
+  const flags = [...(opts.sendAttachment ? ['--send-attachment'] : []), ...(opts.previews ? ['--previews'] : [])]
   if (opts.containerize) {
     return {
       name: 'zooid-context',

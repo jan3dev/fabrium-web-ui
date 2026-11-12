@@ -15,6 +15,7 @@ import type {
 const spawnIdIdx = process.argv.indexOf('--spawn-id')
 const spawnId = spawnIdIdx >= 0 ? process.argv[spawnIdIdx + 1] : undefined
 const canSendAttachment = process.argv.includes('--send-attachment')
+const previews = process.argv.includes('--previews')
 const sockPath = process.env.ZOOID_DAEMON_SOCK
 if (!spawnId || !sockPath) {
   process.stderr.write('zooid-context-mcp: --spawn-id and ZOOID_DAEMON_SOCK are required\n')
@@ -134,6 +135,9 @@ const server = buildContextMcpServer({
   role,
   roleError,
   canSendAttachment,
+  ...(previews
+    ? { callPreview: (method, params) => callDaemon(sockPath, { spawnId, method, params }) }
+    : {}),
 })
 await server.connect(new StdioServerTransport())
 process.stderr.write(`zooid-context-mcp: ready (spawnId=${spawnId})\n`)
