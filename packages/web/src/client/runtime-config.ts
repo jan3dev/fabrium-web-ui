@@ -2,6 +2,8 @@ export interface RuntimeConfig {
   homeserver_url?: string;
   default_idp_label?: string;
   global_search?: boolean;
+  /** Live app previews (PREVIEWS_SPEC.md). Off unless `true`. */
+  previews?: boolean;
   push_gateway_url?: string;
   vapid_public_key?: string;
   /** Alias localpart of the workforce space (no `#`, no server name). Defaults to `dev`. */
@@ -24,6 +26,7 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig | null> {
     if (typeof json.homeserver_url === "string") out.homeserver_url = json.homeserver_url;
     if (typeof json.default_idp_label === "string") out.default_idp_label = json.default_idp_label;
     if (typeof json.global_search === "boolean") out.global_search = json.global_search;
+    if (typeof json.previews === "boolean") out.previews = json.previews;
     if (typeof json.push_gateway_url === "string") out.push_gateway_url = json.push_gateway_url;
     if (typeof json.vapid_public_key === "string") out.vapid_public_key = json.vapid_public_key;
     if (typeof json.workforce_space === "string") out.workforce_space = json.workforce_space;
