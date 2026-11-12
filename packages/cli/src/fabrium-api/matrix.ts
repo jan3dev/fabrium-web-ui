@@ -40,9 +40,13 @@ export async function openIdSub(c: MatrixConn, accessToken: string): Promise<str
   return typeof sub === 'string' ? sub : null
 }
 
-/** The user that the homeserver sees behind an appservice token, or null when it does not accept it. */
-export async function whoami(c: MatrixConn, token: string): Promise<string | null> {
-  const r = await get(c, '/_matrix/client/v3/account/whoami', token)
+/**
+ * The user that the homeserver sees behind an appservice token, or null when it does not accept it.
+ * With `asUserId`, the answer is that user only when the token may act as it (appservice masquerade).
+ */
+export async function whoami(c: MatrixConn, token: string, asUserId?: string): Promise<string | null> {
+  const query = asUserId ? `?user_id=${enc(asUserId)}` : ''
+  const r = await get(c, `/_matrix/client/v3/account/whoami${query}`, token)
   const id = r.ok ? (await jsonOf(r))?.user_id : null
   return typeof id === 'string' ? id : null
 }
@@ -54,10 +58,13 @@ export async function stateEvent(
   roomId: string,
   type: string,
   stateKey: string,
+  /** Read as this user of the appservice token. */
+  asUserId?: string,
 ): Promise<Record<string, unknown> | null> {
+  const query = asUserId ? `?user_id=${enc(asUserId)}` : ''
   const r = await get(
     c,
-    `/_matrix/client/v3/rooms/${enc(roomId)}/state/${enc(type)}/${enc(stateKey)}`,
+    `/_matrix/client/v3/rooms/${enc(roomId)}/state/${enc(type)}/${enc(stateKey)}${query}`,
     token,
   )
   if (r.status === 404) return null

@@ -34,7 +34,13 @@ function isLocalUser(userId: string, serverName: string): boolean {
   return match?.[2] === serverName
 }
 
-function createVerifier(deps: AuthDeps): (token: string) => Promise<string> {
+/** The token of an `Authorization: Bearer <token>` header. */
+export function bearerToken(header: string | undefined): string | undefined {
+  return /^Bearer\s+(\S+)$/i.exec(header ?? '')?.[1]
+}
+
+/** OpenID access token → local user ID, cached; throws 401. */
+export function createVerifier(deps: Pick<AuthDeps, 'conn' | 'serverName' | 'now'>): (token: string) => Promise<string> {
   const now = deps.now ?? Date.now
   const cache = new Map<string, { userId: string; expires: number }>()
   return async (token) => {
@@ -109,7 +115,7 @@ export function requireRole(deps: AuthDeps): MiddlewareHandler<{ Variables: { ca
   const verify = createVerifier(deps)
   const roleOf = createRoles(deps)
   return async (c, next) => {
-    const token = /^Bearer\s+(\S+)$/i.exec(c.req.header('authorization') ?? '')?.[1]
+    const token = bearerToken(c.req.header('authorization'))
     if (!token) throw new ApiError(401, { error: 'invalid token' })
     const userId = await verify(token)
     const role = await roleOf(userId)
