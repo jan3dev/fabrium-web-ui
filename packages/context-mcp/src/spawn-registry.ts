@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { SpawnBinding } from './types.js'
+import type { PreviewActions, SpawnBinding } from './types.js'
 import type { TaskActions, TransportContextProvider, ThreadRef } from '@zooid/core'
 
 export class SpawnRegistry {
@@ -7,6 +7,7 @@ export class SpawnRegistry {
   private readonly spawnByAgentSession = new Map<string, string>()
   private readonly spawnByAcpSession = new Map<string, string>()
   private tasks: TaskActions | undefined
+  private previewActions: PreviewActions | undefined
 
   register(input: {
     agentName: string
@@ -46,6 +47,12 @@ export class SpawnRegistry {
   }
   get taskActions(): TaskActions | undefined {
     return this.tasks
+  }
+  setPreviewActions(actions: PreviewActions | undefined): void {
+    this.previewActions = actions
+  }
+  get previews(): PreviewActions | undefined {
+    return this.previewActions
   }
   private key(agentName: string, sessionKey: string): string {
     return `${agentName}::${sessionKey}`
