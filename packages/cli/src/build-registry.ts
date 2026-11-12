@@ -400,6 +400,8 @@ function buildContextSpawns(
           sockPath,
           containerize: isContainerRuntime(kind),
           sendAttachment: workspace !== undefined,
+          // v1 runs preview apps on the host only (PREVIEWS_SPEC.md §4.2).
+          previews: cfg.previews !== undefined && kind === 'local',
         })
       }
     } else {
