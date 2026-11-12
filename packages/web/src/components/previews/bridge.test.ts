@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addConsoleEntry, frameUrl, MAX_CONSOLE_ENTRIES, readBridgeMessage } from "./bridge";
+import { addConsoleEntry, frameUrl, MAX_CONSOLE_ENTRIES, readBridgeMessage, sameSite } from "./bridge";
 
 const ORIGIN = "https://3f9c.fabrium-preview.net";
 const msg = (m: Record<string, unknown>) => readBridgeMessage({ source: "fabrium-preview", ...m }, ORIGIN);
@@ -41,5 +41,11 @@ describe("preview bridge", () => {
     expect(frameUrl("", ORIGIN)).toBe(`${ORIGIN}/`);
     expect(frameUrl("//evil.example/x", ORIGIN)).toBeNull();
     expect(frameUrl("https://evil.example/x", ORIGIN)).toBe(`${ORIGIN}/https://evil.example/x`);
+  });
+
+  it("tells a preview host on Fabrium's site from a separate one", () => {
+    expect(sameSite("abc.preview.example.net", "fabrium.example.net")).toBe(true);
+    expect(sameSite("abc.fabrium-preview.net", "fabrium.example.net")).toBe(false);
+    expect(sameSite("abc.preview.localhost", "localhost")).toBe(false);
   });
 });

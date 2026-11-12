@@ -20,12 +20,13 @@ describe('previews config', () => {
   it('takes true and a mapping', () => {
     expect(loadZooidConfig(`${BASE}previews: true\n`).previews).toEqual({ max: 3 })
     const cfg = loadZooidConfig(
-      `${BASE}previews:\n  origin: https://*.preview.example.net\n  tunnel_url: https://fabrium.example.net/\n  max: 5\n`,
+      `${BASE}previews:\n  origin: https://*.fabrium-preview.net\n  tunnel_url: https://fabrium.example.net/\n  max: 5\n  agents: [qa]\n`,
     )
     expect(cfg.previews).toEqual({
-      origin: 'https://*.preview.example.net',
+      origin: 'https://*.fabrium-preview.net',
       tunnel_url: 'https://fabrium.example.net',
       max: 5,
+      agents: ['qa'],
     })
     expect(mergeCliFlags(cfg, {}).previews).toEqual(cfg.previews)
   })
@@ -34,5 +35,6 @@ describe('previews config', () => {
     expect(() => loadZooidConfig(`${BASE}previews: { origin: https://preview.example.net }\n`)).toThrow(/previews.origin/)
     expect(() => loadZooidConfig(`${BASE}previews: { tunnel_url: ftp://x }\n`)).toThrow(/previews.tunnel_url/)
     expect(() => loadZooidConfig(`${BASE}previews: { max: 0 }\n`)).toThrow(/previews.max/)
+    expect(() => loadZooidConfig(`${BASE}previews: { agents: [ghost] }\n`)).toThrow(/no agent "ghost"/)
   })
 })

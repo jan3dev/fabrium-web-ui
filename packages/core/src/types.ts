@@ -321,6 +321,11 @@ export interface PreviewsConfig {
   tunnel_url?: string
   /** Previews per workstation; the oldest stops first. */
   max: number
+  /**
+   * The agents that get the preview tools; default every `runtime: local` agent. The tools run
+   * shell commands through the daemon, outside the agent's harness and its permission prompts.
+   */
+  agents?: string[]
 }
 
 export interface CliFlags {

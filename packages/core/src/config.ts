@@ -1274,6 +1274,12 @@ function parsePreviews(raw: unknown): PreviewsConfig | undefined {
     }
     out.max = r.max as number
   }
+  if (r.agents !== undefined) {
+    if (!Array.isArray(r.agents) || !r.agents.every((a) => typeof a === 'string')) {
+      throw new Error('previews.agents must be a list of agent names')
+    }
+    out.agents = r.agents as string[]
+  }
   return out
 }
 
@@ -1368,6 +1374,9 @@ export function loadZooidConfig(
   }
   if (workstation !== undefined) cfg.workstation = workstation
   const previews = parsePreviews(r.previews)
+  for (const name of previews?.agents ?? []) {
+    if (!cfg.agents[name]) throw new Error(`previews.agents: no agent "${name}"`)
+  }
   if (previews) cfg.previews = previews
   if (r.container !== undefined && r.container !== null) {
     if (engines.size === 0) {

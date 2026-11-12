@@ -8,6 +8,16 @@ export function resolveAgentRuntime(
   return agent.runtime ?? cfg.runtime
 }
 
+/**
+ * True when the agent gets the preview tools (PREVIEWS_SPEC.md §4.1): previews are on, it runs
+ * on the host (v1), and `previews.agents` lists it when set.
+ */
+export function previewsFor(cfg: Pick<ZooidConfig, 'runtime' | 'agents' | 'previews'>, name: string): boolean {
+  const agent = cfg.agents[name]
+  if (!cfg.previews || !agent || resolveAgentRuntime(agent, cfg) !== 'local') return false
+  return cfg.previews.agents?.includes(name) ?? true
+}
+
 export function isContainerRuntime(kind: RuntimeKind): kind is 'docker' | 'podman' {
   return kind === 'docker' || kind === 'podman'
 }

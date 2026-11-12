@@ -140,7 +140,7 @@ For a React Native app built with Expo, the user runs the app natively on their 
 
 ### 4.1 MCP tools (`packages/context-mcp`)
 
-These tools are registered only when `previews` is configured, the same way `canSendAttachment` gates its tool.
+These tools are registered only when `previews` is configured, the same way `canSendAttachment` gates its tool, and only for `runtime: local` agents that `previews.agents` lists (default: all of them). The daemon runs the command, outside the agent's harness and its permission prompts: turning previews on for an agent lets it run shell commands on the workstation.
 
 ```
 zooid_preview_start({ name, command, title?, port?, cwd?, env?, kind? = "web" }) → { name, status, port, exit_code, logs_tail }
@@ -149,7 +149,7 @@ zooid_preview_logs({ name, lines? = 100 }) → string
 ```
 
 - `name` is kebab-case and stable. Starting the same name again restarts it with the new command.
-- The daemon runs `sh -c <command>` in the agent's working directory with `PORT=<port>` set. When `port` is not given, it allocates one from 20000–29999. The tool description tells the model to bind to `$PORT` on `127.0.0.1` or `0.0.0.0`.
+- The daemon runs `sh -c <command>` in the agent's working directory with `PORT=<port>` set. `cwd` must resolve (symlinks included) inside that directory. `env` cannot set `PATH`, `HOME`, `PORT`, `SHELL`, `ENV`, `BASH_ENV`, `NODE_OPTIONS`, `LD_*` or `DYLD_*`. When `port` is not given, it allocates one from 20000–29999. The tool description tells the model to bind to `$PORT` on `127.0.0.1` or `0.0.0.0`.
 - The call returns when the port accepts TCP connections, or after 60 s with status `crashed` or `starting` and the log tail, so the agent can fix the problem in the same turn.
 - The daemon sends the `dev.fabrium.preview` event (§6) into the current thread.
 - `kind: "expo"` marks an Expo app (§3.8). The supervisor also sets `CI=1`, so `expo start` does not wait for keyboard input. The tool description tells the model to run `npx expo start --port $PORT`, and never `--tunnel` or `--lan`: the preview gateway is the tunnel.
@@ -181,7 +181,7 @@ The central box accepts the control and stream upgrades from §4.3, checks the a
 
 - Each preview session gets its own origin: `https://<token>.<PREVIEW_DOMAIN>`, where the token is 128 random bits. It is bound to (preview, user) and expires after 12 h, on stop, or when the user leaves the room. The gateway checks room membership again at most once a minute, so a user who leaves loses the preview within a minute, open WebSockets included. The web UI asks for a new session on each run of the app.
 - The unguessable host is the credential. No cookies are needed, which matters because the iframe is cross-site and Safari blocks third-party cookies. The same link works in a new tab.
-- `PREVIEW_DOMAIN` must be a **separate registrable domain** (e.g. `fabrium-preview.net`), not a subdomain of the app. This keeps cookies, storage and the app's `SameSite` boundary apart (plan rule: "never embed previews in the client origin").
+- `PREVIEW_DOMAIN` must be a **separate registrable domain** (e.g. `fabrium-preview.net`), not a subdomain of the app. The daemon refuses to start when `previews.origin` is on the homeserver's site, and the panel refuses a session URL on Fabrium's site. This keeps cookies, storage and the app's `SameSite` boundary apart (plan rule: "never embed previews in the client origin").
 - Sessions under one `PREVIEW_DOMAIN` share a registrable domain, so an app could set a cookie for all of them. The gateway strips `Domain=` from `Set-Cookie`. Cookies that page script sets bypass the gateway: list the domain in the Public Suffix List (private section) to close that, or accept the risk (D1).
 - TLS: wildcard certificate via DNS-01 (D2).
 - Local `zooid dev`: `http://<token>.preview.localhost:<gateway-port>`. Browsers resolve `*.localhost` to loopback, so no DNS or TLS setup is needed.
@@ -207,7 +207,7 @@ Room membership is read as the preview's agent, with its workstation's appservic
 
 ### 5.5 Iframe (web side of the origin contract)
 
-`sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads"`, `referrerpolicy="no-referrer"`, `allow` empty. `allow-same-origin` is safe here only because the origin is foreign to the app. The parent accepts a bridge message only when `event.source` is its iframe and `event.origin` is the session origin. This is the same check that `artifact-preview.tsx` does today.
+`sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-downloads"` (popups keep the sandbox), `referrerpolicy="no-referrer"`, `allow` empty. `allow-same-origin` is safe here only because the origin is foreign to the app. The parent accepts a bridge message only when `event.source` is its iframe and `event.origin` is the session origin. This is the same check that `artifact-preview.tsx` does today.
 
 ## 6. Matrix event
 

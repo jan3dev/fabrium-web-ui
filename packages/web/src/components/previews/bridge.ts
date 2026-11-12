@@ -50,6 +50,16 @@ export function addConsoleEntry(entries: readonly string[], message: string): re
   return entries.at(-1) === message ? entries : [...entries, message].slice(-MAX_CONSOLE_ENTRIES);
 }
 
+/**
+ * Same site, by a naive registrable domain: the last two labels, or the whole host for an IP
+ * or `localhost`. ponytail: no public-suffix list, so `a.co.uk` and `b.co.uk` match (refused:
+ * the safe side). Mirrors `siteOf` in the CLI's previews/protocol.ts.
+ */
+export function sameSite(a: string, b: string): boolean {
+  const site = (h: string) => (/^[\d.]+$|:/.test(h) ? h : h.split(".").slice(-2).join("."));
+  return site(a) === site(b);
+}
+
 export function postToBridge(
   frame: HTMLIFrameElement | null,
   origin: string,

@@ -14,6 +14,7 @@ import {
   findMatrixTransport,
   loadZooidConfig,
   mergeCliFlags,
+  previewsFor,
   resolveAgentRuntime,
   type CliFlags,
   type TapEvent,
@@ -53,6 +54,7 @@ import { stateEvent } from '../fabrium-api/matrix.js'
 import { previewApi } from '../previews/api.js'
 import { createGateway } from '../previews/gateway.js'
 import { PreviewHub } from '../previews/hub.js'
+import { previewOriginProblem } from '../previews/protocol.js'
 import { PreviewSupervisor, type PreviewAgent, type PreviewStartInput } from '../previews/supervisor.js'
 import { startTunnelClient, type TunnelClient } from '../previews/tunnel-client.js'
 import { loadCustomVerifiers } from './load-custom-verifiers.js'
@@ -301,10 +303,10 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     // Shared by the preview supervisor, hub and API.
     const previewConn = { homeserver: matrix.transport.homeserver, fetch: opts.fetch ?? fetch }
     if (config.previews) {
-      // v1 runs preview apps on the host only (PREVIEWS_SPEC.md §4.2).
+      // The same agents that get the preview tools (build-registry.ts).
       const agents: Record<string, PreviewAgent> = {}
       for (const b of bindings) {
-        if (resolveAgentRuntime(config.agents[b.name]!, config) !== 'local') continue
+        if (!previewsFor(config, b.name)) continue
         agents[b.name] = { userId: b.userId, workdir: b.workspaceDir! }
       }
       const supervisor = new PreviewSupervisor({
@@ -390,10 +392,10 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
 
       // Previews: mounted before the VM API, whose admin check covers all of /_fabrium/v1.
       if (config.previews) {
-        previewHub = new PreviewHub({
-          conn: previewConn,
-          origin: config.previews.origin ?? `http://*.preview.localhost:${requestedPort}`,
-        })
+        const origin = config.previews.origin ?? `http://*.preview.localhost:${requestedPort}`
+        const problem = previewOriginProblem(origin, matrix.transport.homeserver)
+        if (problem) throw new Error(problem)
+        previewHub = new PreviewHub({ conn: previewConn, origin })
         transport.app.route(
           '/_fabrium/v1/previews',
           previewApi({
