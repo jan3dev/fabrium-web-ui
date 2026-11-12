@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import type { Page } from "@playwright/test";
 import type { AxeResults } from "axe-core";
@@ -103,6 +104,61 @@ for (const theme of ["light", "dark"] as const) {
       toolCallId: "tc-axe",
     });
 
+    // A live app preview in the thread: the agent must be in a workforce roster for its card.
+    const { user_id: agent } = await daemon.agentClient.whoami();
+    const workforceSpace = `axe-${randomUUID().slice(0, 8)}`;
+    const space = await fetch(`${HS_URL}/_matrix/client/v3/createRoom`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${human.accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        room_alias_name: workforceSpace,
+        creation_content: { type: "m.space" },
+        initial_state: [
+          {
+            type: "dev.zooid.workforce",
+            state_key: "axe",
+            content: { version: 1, agents: [{ user_id: agent, name: "coder" }] },
+          },
+        ],
+      }),
+    });
+    expect(space.ok).toBeTruthy();
+    await (
+      daemon.agentClient.sendEvent as (r: string, t: string, c: Record<string, unknown>) => Promise<unknown>
+    )(roomId, "m.room.message", {
+      msgtype: "m.notice",
+      body: "Preview: Todo app (npm run dev)",
+      "dev.fabrium.preview": { name: "todo-app", title: "Todo app", command: "npm run dev", action: "started" },
+      "m.relates_to": { rel_type: "m.thread", event_id: rootId },
+    });
+    await page.route("**/config.json", (route) =>
+      route.fulfill({ json: { homeserver_url: HS_URL, workforce_space: workforceSpace, previews: true } }),
+    );
+    // Crashed, so the panel shows its state with log and actions; a second app keeps the header button up.
+    const previewInfo = (name: string, status: string) => ({
+      agent_id: agent,
+      name,
+      title: name === "todo-app" ? "Todo app" : "Shop",
+      command: "npm run dev",
+      kind: "web",
+      room_id: roomId,
+      thread_root: rootId,
+      status,
+      since: "2026-11-11T09:30:00Z",
+      exit_code: status === "crashed" ? 1 : null,
+    });
+    await page.route("**/_fabrium/v1/previews?*", (route) =>
+      route.fulfill({ json: [previewInfo("todo-app", "crashed"), previewInfo("shop", "running")] }),
+    );
+    await page.route("**/_fabrium/v1/previews/**", (route) =>
+      route.fulfill({
+        json: {
+          ...previewInfo("todo-app", "crashed"),
+          log: { offset: 80, text: "VITE ready in 300 ms\nError: Cannot find module './routes/todos'\n" },
+        },
+      }),
+    );
+
     // No Fabrium API in the fixture: stub it and its OpenID request, so the rail and /vm show VMs.
     await page.route("**/openid/request_token", (route) =>
       route.request().method() === "OPTIONS"
@@ -151,6 +207,15 @@ for (const theme of ["light", "dark"] as const) {
     await sweep(
       `${room}?thread=${encodeURIComponent(rootId)}`,
       text("Staging is green"),
+    );
+    await sweep(
+      `${room}?thread=${encodeURIComponent(rootId)}&preview=${encodeURIComponent(`${agent}/todo-app`)}`,
+      async () => {
+        await page.getByTestId("preview-card").waitFor();
+        await page.getByTestId("preview-state").getByRole("button", { name: "Restart app" }).waitFor();
+        await page.getByRole("tab", { name: "Logs" }).click();
+        await page.getByRole("tabpanel", { name: "App logs" }).waitFor();
+      },
     );
     await sweep(`${room}?pane=members`, text(human.username));
     await sweep(`${room}?pane=info`, text("Room info"));
