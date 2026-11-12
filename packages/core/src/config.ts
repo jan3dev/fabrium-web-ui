@@ -22,6 +22,7 @@ import type {
   TriggerMessage,
   WebhookTriggerConfig,
   ZooidConfig,
+  PreviewsConfig,
   ZooidContainerConfig,
 } from './types.js'
 
@@ -1247,6 +1248,35 @@ function parseRuntime(raw: unknown): RuntimeKind {
   return parseRuntimeValue(raw ?? 'docker', 'runtime')
 }
 
+function parsePreviews(raw: unknown): PreviewsConfig | undefined {
+  if (raw === undefined || raw === null || raw === false) return undefined
+  if (raw === true) raw = {}
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('previews must be true or a mapping')
+  }
+  const r = raw as Record<string, unknown>
+  const out: PreviewsConfig = { max: 3 }
+  if (r.origin !== undefined) {
+    if (typeof r.origin !== 'string' || !/^https?:\/\/\*\.[a-z0-9.-]+(:\d+)?$/.test(r.origin)) {
+      throw new Error('previews.origin must look like https://*.example.net (one * for the session token)')
+    }
+    out.origin = r.origin
+  }
+  if (r.tunnel_url !== undefined) {
+    if (typeof r.tunnel_url !== 'string' || !/^https?:\/\/[^\s/]+\/?$/.test(r.tunnel_url)) {
+      throw new Error('previews.tunnel_url must be an http(s) origin, e.g. https://fabrium.example.net')
+    }
+    out.tunnel_url = r.tunnel_url.replace(/\/$/, '')
+  }
+  if (r.max !== undefined) {
+    if (!Number.isInteger(r.max) || (r.max as number) < 1 || (r.max as number) > 20) {
+      throw new Error('previews.max must be an integer from 1 to 20')
+    }
+    out.max = r.max as number
+  }
+  return out
+}
+
 function zooidHooks(raw: Record<string, unknown>): { pre_turn?: string; post_turn?: string } {
   const out: { pre_turn?: string; post_turn?: string } = {}
   if (raw.hooks && typeof raw.hooks === 'object') {
@@ -1337,6 +1367,8 @@ export function loadZooidConfig(
     triggers,
   }
   if (workstation !== undefined) cfg.workstation = workstation
+  const previews = parsePreviews(r.previews)
+  if (previews) cfg.previews = previews
   if (r.container !== undefined && r.container !== null) {
     if (engines.size === 0) {
       throw new Error(
@@ -1419,6 +1451,7 @@ export function mergeCliFlags(base: ZooidConfig, flags: CliFlags): ZooidConfig {
     hooks: { ...base.hooks },
     triggers: base.triggers,
   }
+  if (base.previews) merged.previews = base.previews
   const anyContainer = Object.values(base.agents).some((a) =>
     isContainerRuntime(resolveAgentRuntime(a, { runtime })),
   )
