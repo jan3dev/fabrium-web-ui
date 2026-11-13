@@ -1,13 +1,7 @@
 #!/bin/sh
-# Stop this VM after N hours of uptime. fabrium-auto-stop.timer runs this every 5 minutes. A stop
-# and start resets the uptime, so each start gets N hours again. 0: never.
-# N comes from, in order:
-#   1. the control plane: GET /v1/vm/auto-stop with the VM token of /etc/fabrium/vm-token. Only a
-#      200 with a valid number counts, and it is kept in /var/lib/fabrium/auto-stop-hours;
-#   2. the last kept answer, when the control plane fails or has no row for the token;
-#   3. the EC2 instance tag fabrium:auto-stop-hours through IMDSv2 (a VM without a token, or before
-#      the first answer). An IMDS error other than 404 skips this run;
-#   4. 12.
+# Stop this VM after N hours of uptime (0: never); fabrium-auto-stop.timer runs this every 5 minutes.
+# N: the control plane, else its last kept answer, else the instance tag, else 12. See "Auto-stop
+# rules" in deploy/README.md.
 #   --dry-run                          print the decision, do not stop
 #   FABRIUM_AUTO_STOP_LIMIT_SECONDS=S  stop after S seconds of uptime instead (tests)
 #   FABRIUM_AUTO_STOP_IMDS=URL         IMDS base URL (tests)
