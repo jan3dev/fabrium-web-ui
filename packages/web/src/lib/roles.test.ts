@@ -18,7 +18,6 @@ describe("roleForLevel", () => {
   it("maps the standard ladder to named roles", () => {
     expect(roleForLevel(100)).toEqual<Role>({ kind: "owner", level: 100 });
     expect(roleForLevel(90)).toEqual<Role>({ kind: "admin", level: 90 });
-    expect(roleForLevel(70)).toEqual<Role>({ kind: "vm-creator", level: 70 });
     expect(roleForLevel(50)).toEqual<Role>({ kind: "manager", level: 50 });
     expect(roleForLevel(0)).toEqual<Role>({ kind: "member", level: 0 });
   });
@@ -61,9 +60,8 @@ describe("standardRoleOptions", () => {
     ]);
   });
 
-  it("labels level 70 as VM creator but leaves it out of room menus", () => {
-    expect(roleLabel(roleForLevel(70))).toBe("VM creator");
-    expect(standardRoleOptions().map((o) => o.kind)).not.toContain("vm-creator");
+  it("keeps the VM creator level (70) a custom role in rooms", () => {
+    expect(roleLabel(roleForLevel(70))).toBe("Custom (70)");
   });
 
   it("disables options above a viewer's own level", () => {

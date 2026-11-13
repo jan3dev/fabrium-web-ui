@@ -2,12 +2,12 @@
 // a room member who is not in the room's project space (see use-member-roles).
 export const OWNER_LEVEL = 100;
 export const ADMIN_LEVEL = 90;
-/** Manages only the VMs that they created. Only the workforce space reads it (the VM API). */
-export const VM_CREATOR_LEVEL = 70;
 export const MANAGER_LEVEL = 50;
 export const MEMBER_LEVEL = 0;
 
-export type StandardRoleKind = "owner" | "admin" | "vm-creator" | "manager" | "member";
+// The VM API's vm-creator role (levels 70 to 89 of the workforce space) is not a room
+// role: rooms show it as Custom (N).
+export type StandardRoleKind = "owner" | "admin" | "manager" | "member";
 export type RoleKind = StandardRoleKind | "custom";
 
 export interface Role {
@@ -18,7 +18,6 @@ export interface Role {
 const LEVELS: Record<StandardRoleKind, number> = {
   owner: OWNER_LEVEL,
   admin: ADMIN_LEVEL,
-  "vm-creator": VM_CREATOR_LEVEL,
   manager: MANAGER_LEVEL,
   member: MEMBER_LEVEL,
 };
@@ -26,7 +25,6 @@ const LEVELS: Record<StandardRoleKind, number> = {
 const LABELS: Record<StandardRoleKind, string> = {
   owner: "Owner",
   admin: "Admin",
-  "vm-creator": "VM creator",
   manager: "Manager",
   member: "Member",
 };
@@ -104,12 +102,10 @@ export interface RoleOption {
   disabled: boolean;
 }
 
-// The standard roles of a room menu, in descending order. When `viewerLevel` is given,
-// any option above it is disabled (Rule 9: cannot grant above your own level).
-// VM creator is left out: only the workforce space grants it, and no screen edits
-// that space's levels (set 70 there from a Matrix client).
+// The standard roles in descending order. When `viewerLevel` is given, any
+// option above it is disabled (Rule 9: cannot grant above your own level).
 export function standardRoleOptions(viewerLevel = Infinity): RoleOption[] {
-  return STANDARD.filter((kind) => kind !== "vm-creator").map((kind) => ({
+  return STANDARD.map((kind) => ({
     kind,
     level: LEVELS[kind],
     label: LABELS[kind],
