@@ -5,6 +5,8 @@ export const ADMIN_LEVEL = 90;
 export const MANAGER_LEVEL = 50;
 export const MEMBER_LEVEL = 0;
 
+// The VM API's vm-creator role (levels 70 to 89 of the workforce space) is not a room
+// role: rooms show it as Custom (N).
 export type StandardRoleKind = "owner" | "admin" | "manager" | "member";
 export type RoleKind = StandardRoleKind | "custom";
 

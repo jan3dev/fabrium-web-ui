@@ -5,6 +5,7 @@ import {
   deleteVm,
   isNoAccess,
   rebootVm,
+  setAutoStop,
   startVm,
   stopVm,
 } from "../../client/fabrium-api";
@@ -35,12 +36,13 @@ export function VmRoute() {
     refresh();
   };
 
-  const onAction = async (vm: Vm, action: VmAction, autoStopHours?: number) => {
+  /** Runs `work` on a VM with its buttons disabled, then refreshes the list. */
+  const run = async (vm: Vm, what: string, work: () => Promise<unknown>) => {
     setBusyIds((ids) => new Set(ids).add(vm.id));
     try {
-      await RUN[action](vm.id, autoStopHours);
+      await work();
     } catch (e) {
-      toast.error(`Could not ${action} ${vm.name}: ${messageOf(e)}`);
+      toast.error(`Could not ${what} ${vm.name}: ${messageOf(e)}`);
     } finally {
       setBusyIds((ids) => {
         const rest = new Set(ids);
@@ -52,6 +54,11 @@ export function VmRoute() {
     }
   };
 
+  const onAction = (vm: Vm, action: VmAction, autoStopHours?: number) =>
+    run(vm, action, () => RUN[action](vm.id, autoStopHours));
+  const onSetAutoStop = (vm: Vm, hours: number) =>
+    run(vm, "set the auto-stop of", () => setAutoStop(vm.id, hours));
+
   return (
     <>
       <VmView
@@ -60,6 +67,7 @@ export function VmRoute() {
         noAccess={isNoAccess(error)}
         busyIds={busyIds}
         onAction={onAction}
+        onSetAutoStop={onSetAutoStop}
         onNew={() => setCreating(true)}
         onRetry={refresh}
       />
@@ -68,6 +76,7 @@ export function VmRoute() {
         onOpenChange={setCreating}
         options={options}
         optionsError={optionsError}
+        vmNames={vms?.map((vm) => vm.name) ?? []}
         onSubmit={create}
       />
     </>

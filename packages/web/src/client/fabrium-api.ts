@@ -108,6 +108,8 @@ export const startVm = (id: string, autoStopHours?: number) =>
     vmPath(id, "/start"),
     autoStopHours === undefined ? undefined : { auto_stop_hours: autoStopHours },
   );
+export const setAutoStop = (id: string, autoStopHours: number) =>
+  call<Vm>("PUT", vmPath(id, "/auto-stop"), { auto_stop_hours: autoStopHours });
 export const stopVm = (id: string) => call<Vm>("POST", vmPath(id, "/stop"));
 export const rebootVm = (id: string) => call<Vm>("POST", vmPath(id, "/reboot"));
 export const deleteVm = (id: string) => call<void>("DELETE", vmPath(id));

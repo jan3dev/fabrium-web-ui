@@ -77,7 +77,7 @@ describe("<NewVmDialog>", () => {
     const { user } = setup();
     expect(create()).toBeDisabled();
     await user.type(screen.getByLabelText(/^vm name/i), "lima");
-    await user.type(screen.getByLabelText(/^agent name/i), "echo");
+    await user.type(screen.getByLabelText(/^agent name/i), "sierra");
     expect(create()).toBeDisabled();
     await user.type(screen.getByLabelText(/haven api key/i), "hk-1");
     expect(create()).toBeEnabled();
@@ -100,7 +100,7 @@ describe("<NewVmDialog>", () => {
   it("sends the new-agent request", async () => {
     const { user, onSubmit } = setup();
     await user.type(screen.getByLabelText(/^vm name/i), "lima");
-    await user.type(screen.getByLabelText(/^agent name/i), "echo");
+    await user.type(screen.getByLabelText(/^agent name/i), "sierra");
     await user.type(screen.getByLabelText(/persona/i), "Reviewer");
     await user.type(screen.getByLabelText(/project/i), "Fabrium");
     await user.type(screen.getByLabelText(/haven api key/i), "hk-1");
@@ -113,7 +113,7 @@ describe("<NewVmDialog>", () => {
         name: "lima",
         instance_type: "t3a.medium",
         auto_stop_hours: 12,
-        agent: { mode: "new", name: "echo", persona: "Reviewer", project: "Fabrium" },
+        agent: { mode: "new", name: "sierra", persona: "Reviewer", project: "Fabrium" },
         haven_api_key: "hk-1",
         github_token: "gh-1",
       },
@@ -123,7 +123,7 @@ describe("<NewVmDialog>", () => {
   it("leaves out the optional fields that are empty, and trims what it sends", async () => {
     const { user, onSubmit } = setup();
     await user.type(screen.getByLabelText(/^vm name/i), " lima ");
-    await user.type(screen.getByLabelText(/^agent name/i), " echo ");
+    await user.type(screen.getByLabelText(/^agent name/i), " sierra ");
     await user.type(screen.getByLabelText(/persona/i), "   ");
     await user.type(screen.getByLabelText(/haven api key/i), " hk-1 ");
     await user.type(screen.getByLabelText(/github token/i), " ");
@@ -135,7 +135,7 @@ describe("<NewVmDialog>", () => {
         name: "lima",
         instance_type: "c6a.large",
         auto_stop_hours: 12,
-        agent: { mode: "new", name: "echo" },
+        agent: { mode: "new", name: "sierra" },
         haven_api_key: "hk-1",
       },
     ]);
@@ -164,7 +164,7 @@ describe("<NewVmDialog>", () => {
     const hours = screen.getByLabelText(/auto-stop after \(hours\)/i);
     expect(hours).toHaveValue(12);
     await user.type(screen.getByLabelText(/^vm name/i), "lima");
-    await user.type(screen.getByLabelText(/^agent name/i), "echo");
+    await user.type(screen.getByLabelText(/^agent name/i), "sierra");
     await user.type(screen.getByLabelText(/haven api key/i), "hk-1");
     await user.clear(hours);
     await user.type(hours, "24");
@@ -177,7 +177,7 @@ describe("<NewVmDialog>", () => {
     async (value) => {
       const { user } = setup();
       await user.type(screen.getByLabelText(/^vm name/i), "lima");
-      await user.type(screen.getByLabelText(/^agent name/i), "echo");
+      await user.type(screen.getByLabelText(/^agent name/i), "sierra");
       await user.type(screen.getByLabelText(/haven api key/i), "hk-1");
       const hours = screen.getByLabelText(/auto-stop after \(hours\)/i);
       await user.clear(hours);
@@ -197,7 +197,7 @@ describe("<NewVmDialog>", () => {
     const onSubmit = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
     const { user, onOpenChange } = setup({ onSubmit });
     await user.type(screen.getByLabelText(/^vm name/i), "lima");
-    await user.type(screen.getByLabelText(/^agent name/i), "echo");
+    await user.type(screen.getByLabelText(/^agent name/i), "sierra");
     await user.type(screen.getByLabelText(/haven api key/i), "hk-1");
     await user.click(create());
 
@@ -227,7 +227,7 @@ describe("<NewVmDialog>", () => {
       .mockResolvedValue(undefined);
     const { user, onOpenChange } = setup({ onSubmit });
     await user.type(screen.getByLabelText(/^vm name/i), "lima");
-    await user.type(screen.getByLabelText(/^agent name/i), "echo");
+    await user.type(screen.getByLabelText(/^agent name/i), "sierra");
     await user.type(screen.getByLabelText(/haven api key/i), "hk-1");
     await user.click(create());
 
@@ -248,7 +248,7 @@ describe("<NewVmDialog>", () => {
   it("clears both secrets after a successful create, even when the parent keeps the dialog open", async () => {
     const { user, onOpenChange } = setup();
     await user.type(screen.getByLabelText(/^vm name/i), "lima");
-    await user.type(screen.getByLabelText(/^agent name/i), "echo");
+    await user.type(screen.getByLabelText(/^agent name/i), "sierra");
     await user.type(screen.getByLabelText(/haven api key/i), "hk-1");
     await user.type(screen.getByLabelText(/github token/i), "gh-1");
     await user.click(create());
@@ -283,7 +283,7 @@ describe("<NewVmDialog>", () => {
   it("shows why the options did not load, and keeps Create disabled", async () => {
     const { user } = setup({ options: null, optionsError: "control plane unreachable" });
     await user.type(screen.getByLabelText(/^vm name/i), "lima");
-    await user.type(screen.getByLabelText(/^agent name/i), "echo");
+    await user.type(screen.getByLabelText(/^agent name/i), "sierra");
     await user.type(screen.getByLabelText(/haven api key/i), "hk-1");
 
     expect(screen.getByRole("alert")).toHaveTextContent("control plane unreachable");
@@ -293,7 +293,7 @@ describe("<NewVmDialog>", () => {
   it("shows a loading line, and keeps Create disabled, while the options load", async () => {
     const { user } = setup({ options: null });
     await user.type(screen.getByLabelText(/^vm name/i), "lima");
-    await user.type(screen.getByLabelText(/^agent name/i), "echo");
+    await user.type(screen.getByLabelText(/^agent name/i), "sierra");
     await user.type(screen.getByLabelText(/haven api key/i), "hk-1");
 
     expect(screen.getByText("Loading options…")).toBeInTheDocument();

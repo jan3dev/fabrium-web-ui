@@ -116,6 +116,10 @@ export interface Vm {
   auto_stop_hours?: number | null;
   /** From the agent bundle of the VM; null when there is none. */
   agent_id: string | null;
+  /** The Matrix user who created the VM; null or absent for a VM from before the registry. */
+  creator?: string | null;
+  /** False for a VM from before the registry: its auto-stop hours cannot change. */
+  registered?: boolean;
 }
 
 export interface VmInstanceType {
@@ -136,7 +140,7 @@ export interface VmAgent {
 
 export interface VmAccess {
   user_id: string;
-  role: "admin" | "owner";
+  role: "vm-creator" | "admin" | "owner";
 }
 
 /** What the New VM dialog offers. */

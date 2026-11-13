@@ -26,6 +26,8 @@ export function makeVm(over: Partial<Vm> = {}): Vm {
     launched_at: "2026-10-26T19:00:00Z",
     setup: "delivered",
     agent_id: "@lima.echo:example.org",
+    creator: "@ann:example.org",
+    registered: true,
     ...over,
   };
 }

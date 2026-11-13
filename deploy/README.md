@@ -536,9 +536,15 @@ Who sees what depends on the power level in the workforce space:
 | VM creator | 70 to 89 | Only the VMs that they created, and only their own free agents. Any other VM answers `404`. |
 | Below 70 | | No VM page; the API answers `403`. |
 
-The control plane keeps the creator of each VM; a VM from before that has no creator, so only admins and owners
-see it. A new agent name must be unique: not an agent of the daemon config (`zooid.yaml`) and not the agent of
+Give the VM creator role by setting power level 70 in the workforce space from a Matrix client: the web UI
+does not edit the levels of that space, and its room member lists show that level as `Custom (70)`. The control plane keeps the creator of each VM; a VM
+from before that has no creator, so only admins and owners see it. A new agent name must be unique: not an agent of the daemon config (`zooid.yaml`) and not the agent of
 another workstation. When that agent is free, the error says to pick it as an existing agent.
+
+The VM page shows the owner of each VM next to its agent, and an **Auto-stop [N] hs Set** control before the
+actions: it changes the hours of a running or stopped VM, and the VM reads them on its next check (within 5
+minutes). A VM from before the registry shows its hours without the control; recreate it to change them.
+The New VM dialog flags a VM name or an agent name that exists before it sends the request.
 The browser calls the zooid daemon at `/_fabrium/v1` on its own origin: Caddy sends `/_fabrium/*` to `zooid`.
 The daemon checks the user, gives a new agent its Matrix identity, and builds the bootstrap payload (the bundle,
 the secrets, and a setup script). The Fabrium control plane, a separate service, starts the VM on AWS and hands
