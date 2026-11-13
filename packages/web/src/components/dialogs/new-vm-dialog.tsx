@@ -113,6 +113,8 @@ interface NewVmDialogProps {
   options: VmFormOptions | null;
   /** Why the options did not load. */
   optionsError: string | null;
+  /** Names of the VMs that exist: a new VM may not take one. */
+  vmNames?: readonly string[];
   /** Creates the VM. Rejects with the reason it failed. */
   onSubmit: (req: CreateVmRequest) => Promise<void>;
 }
@@ -122,6 +124,7 @@ export function NewVmDialog({
   onOpenChange,
   options,
   optionsError,
+  vmNames = [],
   onSubmit,
 }: NewVmDialogProps) {
   const [form, setForm] = useState<FormState>(EMPTY);
@@ -154,10 +157,24 @@ export function NewVmDialog({
     form.mode === "new"
       ? form.vmName.trim() !== "" && form.agentName.trim() !== ""
       : chosen !== undefined;
+  // The server checks too: these only show a taken name before the request.
+  const vmName = form.vmName.trim().toLowerCase();
+  const agentName = form.agentName.trim().toLowerCase();
+  const vmNameError =
+    form.mode === "new" && vmNames.includes(vmName) ? `A VM named ${vmName} exists.` : undefined;
+  const agentNameError =
+    form.mode === "new" &&
+    agentName !== "" &&
+    // The agent of the typed VM name is a retry of its admission, which the server resumes.
+    (options?.agents ?? []).some((a) => a.workstation !== vmName && agentOf(a.agent_id) === agentName)
+      ? `An agent named ${agentName} exists. Pick it under Existing agent if it is free.`
+      : undefined;
   const autoStopHours = parseAutoStopHours(form.autoStopHours);
   const canCreate =
     options !== null &&
     named &&
+    !vmNameError &&
+    !agentNameError &&
     autoStopHours !== null &&
     form.havenKey.trim() !== "" &&
     !submitting;
@@ -213,10 +230,12 @@ export function NewVmDialog({
                 id="vm-name"
                 label="VM name"
                 hint="Lowercase letters, digits, and hyphens."
+                error={vmNameError}
               >
                 <Input
                   id="vm-name"
-                  aria-describedby="vm-name-hint"
+                  aria-describedby={vmNameError ? "vm-name-hint vm-name-error" : "vm-name-hint"}
+                  aria-invalid={!!vmNameError}
                   value={form.vmName}
                   onChange={(e) => set("vmName", e.target.value)}
                   disabled={submitting}
@@ -231,10 +250,14 @@ export function NewVmDialog({
                 id="agent-name"
                 label="Agent name"
                 hint="Lowercase letters, digits, and hyphens. Start with a letter."
+                error={agentNameError}
               >
                 <Input
                   id="agent-name"
-                  aria-describedby="agent-name-hint"
+                  aria-describedby={
+                    agentNameError ? "agent-name-hint agent-name-error" : "agent-name-hint"
+                  }
+                  aria-invalid={!!agentNameError}
                   value={form.agentName}
                   onChange={(e) => set("agentName", e.target.value)}
                   disabled={submitting}
@@ -367,17 +390,22 @@ export function NewVmDialog({
   );
 }
 
+/** The agent part of `@<workstation>.<agent>:<server>`. */
+const agentOf = (agentId: string) => agentId.slice(1).split(":")[0].split(".").slice(1).join(".");
+
 function Field({
   id,
   label,
   optional,
   hint,
+  error,
   children,
 }: {
   id: string;
   label: string;
   optional?: boolean;
   hint?: string;
+  error?: string;
   children: ReactNode;
 }) {
   return (
@@ -395,6 +423,11 @@ function Field({
       {hint ? (
         <p id={`${id}-hint`} className={HINT}>
           {hint}
+        </p>
+      ) : null}
+      {error ? (
+        <p id={`${id}-error`} role="alert" className="text-caption1 text-accent-danger">
+          {error}
         </p>
       ) : null}
     </div>

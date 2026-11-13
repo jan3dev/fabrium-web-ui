@@ -60,6 +60,10 @@ describe("standardRoleOptions", () => {
     ]);
   });
 
+  it("keeps the VM creator level (70) a custom role in rooms", () => {
+    expect(roleLabel(roleForLevel(70))).toBe("Custom (70)");
+  });
+
   it("disables options above a viewer's own level", () => {
     // viewer at 50 may grant manager/member, not owner or admin
     const opts = standardRoleOptions(50);

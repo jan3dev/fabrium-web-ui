@@ -23,6 +23,8 @@ export interface FabriumApiDeps extends FabriumApiConfig {
   serverName: string
   /** Localpart of the workforce space. */
   workforceSpace: string
+  /** The agents of the daemon config: a new VM agent may not take one of their names. */
+  agentNames?: readonly string[]
   getSpaceRoomId(): string | undefined
   // Test seams.
   now?: () => number
@@ -62,6 +64,22 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
     pollIntervalMs: deps.pollIntervalMs,
   })
 
+  /**
+   * A vm-creator acts only on the VMs they created. Any other VM is a 404, as a VM of another tenant
+   * is. Returns the control plane failure to pass on, if the list fails.
+   */
+  async function checkOwner(caller: Caller, id: string): Promise<Response | undefined> {
+    if (caller.role !== 'vm-creator') return undefined
+    const result = await fetchVms(controlPlane)
+    if ('failure' in result) return result.failure
+    if (!result.vms.some((vm) => vm.id === id && vm.creator === caller.userId)) {
+      throw new ApiError(404, { error: 'not found' })
+    }
+    return undefined
+  }
+
+  const vmPath = (id: string, action = '') => `/v1/vms/${encodeURIComponent(id)}${action}`
+
   app.onError(apiErrorHandler)
   app.use(
     '*',
@@ -82,12 +100,17 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
   })
 
   app.get('/vms', async (c) => {
+    const caller = c.get('caller')
     const result = await fetchVms(controlPlane)
     if ('failure' in result) return result.failure
     const agentIds = new Map(
       (await listBundles(workstationsDir)).map((b) => [b.workstation, b.agentId]),
     )
-    return c.json(result.vms.map((vm) => ({ ...vm, agent_id: agentIds.get(vm.name) ?? null })))
+    const vms =
+      caller.role === 'vm-creator'
+        ? result.vms.filter((vm) => vm.creator === caller.userId)
+        : result.vms
+    return c.json(vms.map((vm) => ({ ...vm, agent_id: agentIds.get(vm.name) ?? null })))
   })
 
   app.get('/instance-types', async () => relay(await controlPlane.request('GET', '/v1/instance-types')))
@@ -95,7 +118,10 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
   app.get('/agents', async (c) => {
     const result = await fetchVms(controlPlane)
     if ('failure' in result) return result.failure
-    const bundles = await listBundles(workstationsDir)
+    const caller = c.get('caller')
+    const all = await listBundles(workstationsDir)
+    const bundles =
+      caller.role === 'vm-creator' ? all.filter((b) => b.creator === caller.userId) : all
     return c.json(agentsWithFree(bundles, result.vms, await liveWorkstations(live, bundles)))
   })
 
@@ -108,11 +134,14 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
     const raw: unknown = await c.req.json().catch(() => {
       throw new ApiError(400, { error: 'the body must be JSON' })
     })
+    const caller = c.get('caller')
     return createVm(
       {
         havenModel: deps.havenModel,
         commit: deps.zooidCommit,
-        creator: c.get('caller').userId,
+        creator: caller.userId,
+        onlyCreator: caller.role === 'vm-creator' ? caller.userId : undefined,
+        agentNames: deps.agentNames ?? [],
         controlPlane,
         admission,
         ...live,
@@ -122,46 +151,57 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
   })
 
   app.post('/vms/:id/start', async (c) => {
+    const id = c.req.param('id')
     // The body is optional: without it the control plane keeps the current auto-stop value.
-    const text = await c.req.text()
-    let hours: number | undefined
-    if (text.trim() !== '') {
-      let raw: unknown
-      try {
-        raw = JSON.parse(text)
-      } catch {
-        throw new ApiError(400, { error: 'the body must be JSON' })
-      }
-      if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-        throw new ApiError(400, { error: 'the body must be a JSON object' })
-      }
-      hours = parseAutoStopHours((raw as Record<string, unknown>).auto_stop_hours)
-    }
-    return relay(
-      await controlPlane.request(
-        'POST',
-        `/v1/vms/${encodeURIComponent(c.req.param('id'))}/start`,
-        hours === undefined ? undefined : { auto_stop_hours: hours },
-      ),
-    )
+    const hours = parseAutoStopHours((await bodyObject(c.req.text()))?.auto_stop_hours)
+    const failure = await checkOwner(c.get('caller'), id)
+    if (failure) return failure
+    const body = hours === undefined ? undefined : { auto_stop_hours: hours }
+    return relay(await controlPlane.request('POST', vmPath(id, '/start'), body))
   })
 
   for (const action of ['stop', 'reboot']) {
-    app.post(`/vms/:id/${action}`, async (c) =>
-      relay(
-        await controlPlane.request(
-          'POST',
-          `/v1/vms/${encodeURIComponent(c.req.param('id'))}/${action}`,
-        ),
-      ),
-    )
+    app.post(`/vms/:id/${action}`, async (c) => {
+      const id = c.req.param('id')
+      const failure = await checkOwner(c.get('caller'), id)
+      if (failure) return failure
+      return relay(await controlPlane.request('POST', vmPath(id, `/${action}`)))
+    })
   }
 
-  app.delete('/vms/:id', async (c) =>
-    relay(await controlPlane.request('DELETE', `/v1/vms/${encodeURIComponent(c.req.param('id'))}`)),
-  )
+  app.delete('/vms/:id', async (c) => {
+    const id = c.req.param('id')
+    const failure = await checkOwner(c.get('caller'), id)
+    if (failure) return failure
+    return relay(await controlPlane.request('DELETE', vmPath(id)))
+  })
+
+  app.put('/vms/:id/auto-stop', async (c) => {
+    const id = c.req.param('id')
+    const hours = parseAutoStopHours((await bodyObject(c.req.text()))?.auto_stop_hours)
+    if (hours === undefined) throw new ApiError(400, { error: 'auto_stop_hours is required' })
+    const failure = await checkOwner(c.get('caller'), id)
+    if (failure) return failure
+    return relay(await controlPlane.request('PUT', vmPath(id, '/auto-stop'), { auto_stop_hours: hours }))
+  })
 
   return app
+}
+
+/** A JSON object body, or undefined for an empty body. */
+async function bodyObject(text: Promise<string>): Promise<Record<string, unknown> | undefined> {
+  const raw = await text
+  if (raw.trim() === '') return undefined
+  let value: unknown
+  try {
+    value = JSON.parse(raw)
+  } catch {
+    throw new ApiError(400, { error: 'the body must be JSON' })
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new ApiError(400, { error: 'the body must be a JSON object' })
+  }
+  return value as Record<string, unknown>
 }
 
 /** Mount the browser API of the VM management under `/_fabrium/v1`. Call it before `serve()`. */

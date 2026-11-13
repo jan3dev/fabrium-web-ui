@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useId, useState } from "react";
 import { PlusIcon, ShieldCheckIcon } from "@/components/icons";
 import { Alert } from "@/components/ui/alert";
 import {
@@ -13,9 +13,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { formatAbsoluteTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import type { Vm, VmState } from "../../model/types";
+import { initialAutoStopHours, parseAutoStopHours } from "../dialogs/auto-stop-field";
 import { StartVmDialog } from "../dialogs/start-vm-dialog";
 
 export type VmAction = "start" | "stop" | "reboot" | "delete";
@@ -44,7 +46,7 @@ const STATE_TONE: Record<VmState, "success" | "neutral" | "warning"> = {
   "shutting-down": "warning",
 };
 
-const HEADERS = ["Name", "Agent", "Type", "State", "IP", "Launched"];
+const HEADERS = ["Name", "Agent", "Owner", "Type", "State", "IP", "Launched"];
 
 function launchedLabel(iso: string): string {
   const ts = Date.parse(iso);
@@ -62,6 +64,8 @@ interface VmViewProps {
   busyIds: ReadonlySet<string>;
   /** Start comes with the auto-stop hours chosen in its dialog. */
   onAction: (vm: Vm, action: VmAction, autoStopHours?: number) => void;
+  /** Sets the hours of uptime after which the VM stops itself. */
+  onSetAutoStop: (vm: Vm, hours: number) => void;
   /** Opens the New VM dialog. Without it, the button is not shown. */
   onNew?: () => void;
   onRetry: () => void;
@@ -73,6 +77,7 @@ export function VmView({
   noAccess,
   busyIds,
   onAction,
+  onSetAutoStop,
   onNew,
   onRetry,
 }: VmViewProps) {
@@ -104,8 +109,8 @@ export function VmView({
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
         {noAccess ? (
           <Notice title="No access">
-            Only workspace admins and owners can manage VMs. If you are one, VM
-            management may be off for this workspace.
+            Only workspace VM creators, admins, and owners can manage VMs. If you
+            are one, VM management may be off for this workspace.
           </Notice>
         ) : vms === null ? (
           <FirstLoad error={error} onRetry={onRetry} />
@@ -122,6 +127,7 @@ export function VmView({
               vms={vms}
               busyIds={busyIds}
               onAction={onAction}
+              onSetAutoStop={onSetAutoStop}
               onConfirmDelete={setDeleting}
               onConfirmStart={setStarting}
             />
@@ -202,18 +208,20 @@ function VmTable({
   vms,
   busyIds,
   onAction,
+  onSetAutoStop,
   onConfirmDelete,
   onConfirmStart,
 }: {
   vms: Vm[];
   busyIds: ReadonlySet<string>;
   onAction: (vm: Vm, action: VmAction) => void;
+  onSetAutoStop: (vm: Vm, hours: number) => void;
   onConfirmDelete: (id: string) => void;
   onConfirmStart: (id: string) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-card border border-surface-border-primary">
-      <table className="w-full min-w-[48rem] border-collapse text-left">
+      <table className="w-full min-w-[68rem] border-collapse text-left">
         <thead className="bg-surface-secondary">
           <tr>
             {HEADERS.map((header) => (
@@ -237,6 +245,7 @@ function VmTable({
               vm={vm}
               busy={busyIds.has(vm.id)}
               onAction={onAction}
+              onSetAutoStop={(hours) => onSetAutoStop(vm, hours)}
               onConfirmDelete={() => onConfirmDelete(vm.id)}
               onConfirmStart={() => onConfirmStart(vm.id)}
             />
@@ -262,12 +271,14 @@ function VmRow({
   vm,
   busy,
   onAction,
+  onSetAutoStop,
   onConfirmDelete,
   onConfirmStart,
 }: {
   vm: Vm;
   busy: boolean;
   onAction: (vm: Vm, action: VmAction) => void;
+  onSetAutoStop: (hours: number) => void;
   onConfirmDelete: () => void;
   onConfirmStart: () => void;
 }) {
@@ -282,6 +293,9 @@ function VmRow({
       </th>
       <td className="px-4 py-3 text-body2 break-all text-text-secondary">
         {vm.agent_id ?? "None"}
+      </td>
+      <td className="px-4 py-3 text-body2 break-all text-text-secondary">
+        {vm.creator ?? "Unknown"}
       </td>
       <td className="px-4 py-3">
         <span className="flex flex-wrap items-center gap-2 text-body2 text-text-primary">
@@ -313,27 +327,98 @@ function VmRow({
         <time dateTime={vm.launched_at}>{launchedLabel(vm.launched_at)}</time>
       </td>
       <td className="px-4 py-3">
-        <div className="flex justify-end gap-1.5">
-          {(ACTIONS[vm.state] ?? ["delete"]).map((action) => (
-            <Button
-              key={action}
-              type="button"
-              size="xs"
-              variant={action === "delete" ? "utility" : "secondary"}
-              tone={action === "delete" ? "danger" : "default"}
-              disabled={busy}
-              aria-label={`${LABEL[action]} ${vm.name}`}
-              onClick={() => {
-                if (action === "delete") onConfirmDelete();
-                else if (action === "start") onConfirmStart();
-                else onAction(vm, action);
-              }}
-            >
-              {LABEL[action]}
-            </Button>
-          ))}
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <AutoStopControl vm={vm} busy={busy} onSet={onSetAutoStop} />
+          <div className="flex gap-1.5">
+            {(ACTIONS[vm.state] ?? ["delete"]).map((action) => (
+              <Button
+                key={action}
+                type="button"
+                size="xs"
+                variant={action === "delete" ? "utility" : "secondary"}
+                tone={action === "delete" ? "danger" : "default"}
+                disabled={busy}
+                aria-label={`${LABEL[action]} ${vm.name}`}
+                onClick={() => {
+                  if (action === "delete") onConfirmDelete();
+                  else if (action === "start") onConfirmStart();
+                  else onAction(vm, action);
+                }}
+              >
+                {LABEL[action]}
+              </Button>
+            ))}
+          </div>
         </div>
       </td>
     </tr>
+  );
+}
+
+/** "Auto-stop [N] hs [Set]": the hours of uptime after which the VM stops itself. */
+function AutoStopControl({
+  vm,
+  busy,
+  onSet,
+}: {
+  vm: Vm;
+  busy: boolean;
+  onSet: (hours: number) => void;
+}) {
+  const id = useId();
+  const current = initialAutoStopHours(vm.auto_stop_hours);
+  const [text, setText] = useState(current);
+  // A set or a refresh brings a new value from the server: show it.
+  useEffect(() => setText(current), [current]);
+  const hours = parseAutoStopHours(text);
+
+  // A VM from before the registry reads only its tag: its hours cannot change.
+  if (vm.registered === false) {
+    return (
+      <span
+        className="text-caption1 whitespace-nowrap text-text-secondary"
+        title="Recreate the VM to change its auto-stop"
+      >
+        Auto-stop {current} hs
+      </span>
+    );
+  }
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (hours !== null) onSet(hours);
+  };
+
+  return (
+    <form onSubmit={submit} className="flex items-center gap-1.5">
+      <label htmlFor={id} className="text-caption1 font-medium text-text-secondary">
+        Auto-stop<span className="sr-only"> hours of {vm.name}</span>
+      </label>
+      <Input
+        id={id}
+        type="number"
+        inputMode="numeric"
+        min={1}
+        max={168}
+        step={1}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        disabled={busy}
+        aria-invalid={hours === null}
+        className="h-7 w-16 px-2"
+      />
+      <span className="text-caption1 text-text-secondary" aria-hidden>
+        hs
+      </span>
+      <Button
+        type="submit"
+        size="xs"
+        variant="secondary"
+        disabled={busy || hours === null || text === current}
+        aria-label={`Set auto-stop of ${vm.name}`}
+      >
+        Set
+      </Button>
+    </form>
   );
 }

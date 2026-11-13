@@ -46,7 +46,7 @@ function setup(overrides: Parameters<typeof createTestApi>[0] = {}) {
 const create = (json: unknown, token?: string | null) => api.request('POST', '/vms', { json, token })
 const upstreamCreate = () =>
   api.controlPlane.requests.find((r) => r.method === 'POST' && r.path === '/v1/vms')
-    ?.body as { name: string; instance_type?: string; auto_stop_hours?: number; bootstrap: { files: { path: string; content: string; mode: string; owner: string }[]; script: string } }
+    ?.body as { name: string; instance_type?: string; auto_stop_hours?: number; creator?: string; bootstrap: { files: { path: string; content: string; mode: string; owner: string }[]; script: string } }
 
 afterEach(() => {
   api?.cleanup()
@@ -204,7 +204,8 @@ describe('a new agent', () => {
     expect(await res.json()).toEqual({ ...VM, agent_id: '@lima.echo:example.org' })
 
     const sent = upstreamCreate()
-    expect(Object.keys(sent).sort()).toEqual(['bootstrap', 'instance_type', 'name'])
+    expect(Object.keys(sent).sort()).toEqual(['bootstrap', 'creator', 'instance_type', 'name'])
+    expect(sent.creator).toBe(ADMIN)
     expect(sent.name).toBe('lima')
     expect(sent.instance_type).toBe('t3a.medium')
     expect(sent.bootstrap.files.map((f) => [f.path, f.owner, f.mode])).toEqual([
@@ -237,13 +238,15 @@ describe('a new agent', () => {
       `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='${GITHUB}'\n`,
     )
     expect(sent.bootstrap.script).not.toContain('greet-creator.sh')
+    // The VM still gets its creator: the control plane checks the ID itself.
+    expect(sent.creator).toBe(caller)
   })
 
   it('omits instance_type and GH_TOKEN when they are absent or empty', async () => {
     setup()
     await create(body({ instance_type: undefined, github_token: '' }))
     const sent = upstreamCreate()
-    expect(Object.keys(sent).sort()).toEqual(['bootstrap', 'name'])
+    expect(Object.keys(sent).sort()).toEqual(['bootstrap', 'creator', 'name'])
     expect(sent.bootstrap.files[2]?.content).toBe(
       `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nFABRIUM_CREATOR='${ADMIN}'\n`,
     )

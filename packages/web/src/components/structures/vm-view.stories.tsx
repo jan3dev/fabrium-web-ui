@@ -47,6 +47,7 @@ const meta = {
     noAccess: false,
     busyIds: new Set<string>(),
     onAction: () => {},
+    onSetAutoStop: () => {},
     onNew: () => {},
     onRetry: () => {},
   },
