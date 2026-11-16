@@ -7,7 +7,7 @@ Everything an instance runs comes from this repo as one Docker Compose project
 |---|---|---|
 | `tuwunel` | `ghcr.io/matrix-construct/tuwunel` pinned by digest | Matrix homeserver (chats, accounts, rooms). |
 | `zooid` | `fabrium-zooid:<git sha>`, built from `deploy/Dockerfile` | The daemon (`zooid start`). Starts one container per agent through the engine socket (podman's Docker-compatible socket on a box, Docker's on a laptop). |
-| `web` | `fabrium-web:<git sha>`, built from `deploy/Dockerfile` | Caddy serving `packages/web/dist`, `/config.json`, and proxying `/_matrix/*` to Tuwunel and `/_fabrium/*` to the daemon ([VM management](#vm-management-from-the-web-ui)). HTTPS is automatic for a public domain. |
+| `web` | `fabrium-web:<git sha>`, built from `deploy/Dockerfile` | Caddy serving `packages/web/dist`, `/config.json`, and proxying `/_matrix/*` to Tuwunel and `/_fabrium/*` to the daemon ([VM management](#vm-management-from-the-web-ui)), and the preview domain to the daemon when it is set ([Live app previews](#live-app-previews)). HTTPS is automatic for a public domain. |
 
 Per-instance state lives outside the repo, under `ZOOID_HOME` (default `~/zooid`):
 
@@ -580,3 +580,81 @@ The appservice of a VM acts as every user whose name starts with `<ws>.`. Before
 refuses the name (`409`) when a member of the workforce space has such a name, or when `@<ws>.<agent>` exists
 already. It cannot see a user who is not in the workforce space. A user outside the space with a name such as
 `lima.bob` still falls under a VM named `lima`: do not name a VM like the start of such a name.
+
+## Live app previews
+
+An agent starts an app (a dev server such as Vite or Next.js, or an Expo app), and the people in its room open it
+in the web UI beside the thread ([`PREVIEWS_SPEC.md`](../PREVIEWS_SPEC.md)). The app runs on the agent's machine.
+The daemon there tunnels it to the zooid daemon on this box over an outbound connection to
+`HOMESERVER_URL/_fabrium/v1/tunnel`, so agent VMs need no inbound port. Each viewer gets a session at
+`https://<random token>.<PREVIEW_DOMAIN>`: Caddy sends those hosts to the zooid daemon, which proxies them
+through the tunnel.
+
+Previews are off by default. Then the web UI shows none, the agents get no preview tools, and Caddy has no
+preview site.
+
+### Domain and DNS
+
+`PREVIEW_DOMAIN` must be a separate registrable domain, for example `fabrium-preview.net`, never a subdomain of
+`SITE_ADDRESS`. A preview runs code that the agent wrote, and the browser keeps it apart from Fabrium only when
+the sites differ. `deploy.sh` refuses a preview domain on Fabrium's site.
+
+| Record | Value |
+|---|---|
+| `*.<PREVIEW_DOMAIN>` `A` (and `AAAA` when the box has IPv6) | The public IP of this box |
+
+Optional: list `PREVIEW_DOMAIN` in the private section of the [Public Suffix List](https://github.com/publicsuffix/list).
+Without that, one preview's page script can set a cookie that other previews under the domain receive. The gateway
+already strips `Domain=` from cookies that apps set in responses.
+
+### Certificate
+
+The session hosts are random, so Caddy needs a wildcard certificate, which only the DNS-01 challenge gives.
+`deploy.sh` builds Caddy with the [caddy-dns](https://github.com/caddy-dns) module that `PREVIEW_DNS_PROVIDER`
+names, for example `cloudflare` (pin a version with `cloudflare@v0.2.1`). Caddy passes one token to the module:
+`dns <provider> {env.PREVIEW_DNS_TOKEN}`. That fits Cloudflare, Hetzner and DigitalOcean. For a provider that
+needs other settings, edit `deploy/Caddyfile.previews`.
+
+The token goes in its own file, `${ZOOID_HOME}/caddy.env` (mode 600), which only the `web` container reads.
+Never put it in `.env`: the daemon gets every key of `.env`, and agents inherit the daemon's environment.
+`backup.sh` includes `caddy.env`. Give the token only the right to edit DNS records of the preview domain.
+
+### Turn previews on
+
+1. Create the DNS record above.
+2. In `${ZOOID_HOME}/.env`:
+   ```sh
+   PREVIEW_DOMAIN=fabrium-preview.net
+   PREVIEW_DNS_PROVIDER=cloudflare
+   ```
+3. Create `${ZOOID_HOME}/caddy.env` with `PREVIEW_DNS_TOKEN=<token>`, and run `chmod 600` on it.
+4. Add this line to `${ZOOID_HOME}/workforce/zooid.yaml` (it reads the domain from `.env`):
+   ```yaml
+   previews: { origin: 'https://*.${PREVIEW_DOMAIN}' }
+   ```
+5. Run `deploy/deploy.sh`. It refuses to run while `.env` and `zooid.yaml` disagree.
+
+The domain is built into the images: the web UI may frame only `https://*.<PREVIEW_DOMAIN>` (its CSP), and the
+Caddy site exists only in an image built with the domain. A change of `PREVIEW_DOMAIN` therefore needs a deploy
+with a build, not `--no-build`.
+
+On this box, previews are only for `runtime: local` agents. The agents here run in containers, so the agents
+that run previews are on agent VMs.
+
+### Agent VMs
+
+A VM gets `previews: true` in its `zooid.yaml` when this box has `PREVIEW_DOMAIN` at the time the VM is admitted,
+by `add-workstation.sh` or by the VM API. The VM needs no other setting: it dials `HOMESERVER_URL`. For a VM that
+was admitted before, add `previews: true` to `~/zooid/workforce/zooid.yaml` on the VM and restart its service.
+The VM's security group stays SSH-only: the tunnel is outbound.
+
+`previews: true` lets the agent run shell commands on the VM through the daemon, outside its harness and its
+permission prompts. To allow only some agents, use `previews: { agents: [<name>] }`.
+
+### Turn previews off
+
+1. Remove the `previews:` line from `zooid.yaml` on this box, and `PREVIEW_DOMAIN` and `PREVIEW_DNS_PROVIDER`
+   from `.env`.
+2. Run `deploy/deploy.sh`. The web UI hides previews, and the preview site and its CSP entry are gone.
+3. Optional: set `previews: false` on the VMs. Until then their apps keep running, and their tunnels retry
+   against a box that refuses them.

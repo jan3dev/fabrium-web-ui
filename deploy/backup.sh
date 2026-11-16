@@ -63,14 +63,15 @@ else
   warn "--no-stop: the backup may be inconsistent while the stack runs"
 fi
 
-# Skip missing entries; workstations/ (agent VM tokens) exists only with agent VMs.
+# Skip missing entries; workstations/ (agent VM tokens) exists only with agent VMs,
+# caddy.env (DNS token) only with live app previews.
 INCLUDES=()
 for p in .env data/matrix/db data/matrix/media data/matrix/config \
-         workforce/zooid.yaml workforce/data home workforce/agents workstations; do
+         workforce/zooid.yaml workforce/data home workforce/agents workstations caddy.env; do
   if [ -e "$ZOOID_HOME/$p" ]; then
     INCLUDES+=("$p")
-  elif [ "$p" != workstations ]; then
-    warn "not found, skipped: $p"
+  else
+    case "$p" in workstations | caddy.env) ;; *) warn "not found, skipped: $p" ;; esac
   fi
 done
 # Back up the control plane key file under ZOOID_HOME: .env holds only its path.

@@ -15,6 +15,7 @@ const PREVIEW: PreviewState = {
   status: 'running',
   since: '2026-11-09T00:00:00.000Z',
   exit_code: null,
+  web: true,
 }
 // OpenID token → user; alice is in the room, mallory is not, the agent is.
 const USERS: Record<string, string> = { alice: '@alice:test', mallory: '@mallory:test', agent: AGENT }

@@ -60,6 +60,7 @@ export {
   Paperclip as PaperclipIcon,
   Pencil as PencilIcon,
   Plus as PlusIcon,
+  QrCode as QrCodeIcon,
   Quote as QuoteIcon,
   RotateCw as ReloadIcon,
   Search as SearchIcon,

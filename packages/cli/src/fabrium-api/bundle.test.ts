@@ -71,6 +71,7 @@ describe('renderers', () => {
       AGENT_NAME: 'echo',
       AGENT_ACP: "{ preset: 'opencode' }",
       AGENT_ROOMS: "'#general:example.org'",
+      AGENT_PREVIEWS: 'false',
     })
     const actual = renderYaml(spec)
     expect(withoutComments(actual)).toEqual(withoutComments(expected))
@@ -100,6 +101,10 @@ describe('renderers', () => {
     expect(withServer('#general', 'example.org')).toBe('#general:example.org')
     expect(withServer('#a:other.org', 'example.org')).toBe('#a:other.org')
     expect(withServer('!abc:example.org', 'example.org')).toBe('!abc:example.org')
+  })
+
+  it('turns previews on when the central box has them', () => {
+    expect(parse(renderYaml({ ...spec, previews: true })).previews).toBe(true)
   })
 
   it('writes every room of the spec into zooid.yaml', () => {

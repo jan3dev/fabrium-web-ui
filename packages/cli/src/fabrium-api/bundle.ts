@@ -26,6 +26,8 @@ export interface BundleSpec {
   space: string
   /** Rooms of the agent: `#alias`, `#alias:server`, or `!id:server`. */
   rooms: string[]
+  /** Live app previews: the central box has them on. */
+  previews?: boolean
 }
 
 export interface Tokens {
@@ -83,6 +85,9 @@ export function renderYaml(spec: BundleSpec): string {
     `workstation: '${spec.workstation}'`,
     '# The agent is a process of the VM, with the access of the VM user (Docker, sudo).',
     'runtime: local',
+    "# Live app previews: the daemon runs the agent's app and tunnels it to the central box (PREVIEWS_SPEC.md).",
+    '# true when the central box has PREVIEW_DOMAIN in its .env.',
+    `previews: ${spec.previews ? 'true' : 'false'}`,
     'transports:',
     '  matrix:',
     '    homeserver: "${HOMESERVER_URL}"',

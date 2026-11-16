@@ -421,6 +421,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
           serverName,
           workforceSpace: matrix.transport.space ?? 'dev',
           getSpaceRoomId: () => spaceRoomId,
+          previews: config.previews !== undefined,
         })
         console.log('[fabrium] VM management API at /_fabrium/v1')
       }

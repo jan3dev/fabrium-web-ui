@@ -1,6 +1,7 @@
 {
   "homeserver_url": "${HOMESERVER_URL}",
   "workforce_space": "${WORKFORCE_SPACE}",
+  "previews": ${PREVIEWS},
   "push_gateway_url": "${HOMESERVER_URL}/_matrix/push/v1/notify",
   "vapid_public_key": "${VAPID_PUBLIC_KEY}"
 }

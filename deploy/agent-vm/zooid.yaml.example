@@ -4,6 +4,9 @@
 workstation: '${WORKSTATION}'
 # The agent is a process of the VM, with the access of the VM user (Docker, sudo).
 runtime: local
+# Live app previews: the daemon runs the agent's app and tunnels it to the central box (PREVIEWS_SPEC.md).
+# true when the central box has PREVIEW_DOMAIN in its .env.
+previews: ${AGENT_PREVIEWS}
 transports:
   matrix:
     homeserver: "${HOMESERVER_URL}"

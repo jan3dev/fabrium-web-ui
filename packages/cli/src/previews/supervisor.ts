@@ -1,9 +1,9 @@
 // Workstation side: runs the agents' preview apps (PREVIEWS_SPEC.md §4.1, §4.2).
 // The daemon owns the process so the app outlives the agent's turn.
 import { spawn, type ChildProcess } from 'node:child_process'
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { resolve, sep } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import type { PreviewCallerRef } from '@zooid/context-mcp'
 import { LOG_LIMIT, NAME_RE, dialLoopback, previewKey, type PreviewKind, type PreviewState, type PreviewStatus } from './protocol.js'
 
@@ -14,6 +14,23 @@ const PORT_RANGE = [20000, 29999] as const
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 /** Set by the supervisor, or they change what runs: the loader, the shell, Node. */
 const RESERVED_ENV_RE = /^(PATH|HOME|PORT|SHELL|ENV|BASH_ENV|NODE_OPTIONS|LD_\w*|DYLD_\w*)$/
+
+/**
+ * Expo serves a web build only with react-native-web installed (spec §3.8). Without a readable
+ * package.json, assume it does: the frame then shows what Metro answers.
+ * The agent controls the file: a FIFO or `/dev/zero` behind it would block the daemon, so only a small regular file is read.
+ */
+function expoHasWeb(cwd: string): boolean {
+  try {
+    const file = join(cwd, 'package.json')
+    const stat = statSync(file)
+    if (!stat.isFile() || stat.size > 1_000_000) return true
+    const pkg = JSON.parse(readFileSync(file, 'utf8')) as Record<string, Record<string, unknown> | undefined>
+    return Boolean(pkg.dependencies?.['react-native-web'] ?? pkg.devDependencies?.['react-native-web'])
+  } catch {
+    return true
+  }
+}
 
 /** The real directory of `cwd` inside the agent's workdir; throws for anything outside it. */
 function workdirPath(workdir: string, cwd: string | undefined): string {
@@ -186,6 +203,7 @@ export class PreviewSupervisor {
           status: 'starting',
           since: new Date().toISOString(),
           exit_code: null,
+          web: true, // spawn() checks it on every launch
         },
       }
       this.entries.delete(key)
@@ -254,8 +272,9 @@ export class PreviewSupervisor {
     for (const s of saved) {
       const agent = this.deps.agents[s.agentName]
       if (!agent || agent.userId !== s.state?.agent_id) continue
-      // Registries saved before `kind` existed hold web apps.
-      const entry: Entry = { ...s, state: { ...s.state, kind: s.state.kind ?? 'web' }, stopping: false, log: '', startedAt: Date.now() }
+      // Registries saved before `kind` and `web` existed hold web apps.
+      const state = { ...s.state, kind: s.state.kind ?? 'web', web: s.state.web ?? true }
+      const entry: Entry = { ...s, state, stopping: false, log: '', startedAt: Date.now() }
       const key = previewKey(agent.userId, s.state.name)
       this.entries.set(key, entry)
       if (s.state.status === 'stopped') this.emit(entry)
@@ -324,6 +343,8 @@ export class PreviewSupervisor {
   }
 
   private spawn(entry: Entry): void {
+    // Rechecked per launch: the agent may add react-native-web before a restart.
+    entry.state = { ...entry.state, web: entry.state.kind === 'web' || expoHasWeb(entry.cwd) }
     this.setStatus(entry, 'starting')
     // A clean environment: the daemon's holds the appservice token and secrets.env.
     const child = spawn('sh', ['-c', entry.state.command], {

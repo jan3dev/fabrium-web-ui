@@ -42,6 +42,8 @@ export interface AdmissionDeps {
   getSpaceRoomId(): string | undefined
   /** Rooms of the new agent. */
   rooms: string[]
+  /** Live app previews are on: the bundle turns them on for the VM. */
+  previews?: boolean
   workstationsDir: string
   registrationsDir: string
   whoamiTimeoutMs?: number
@@ -154,6 +156,7 @@ export function createAdmission(deps: AdmissionDeps): { admitNew(agent: NewAgent
       homeserverUrl: deps.homeserverUrl,
       space: deps.workforceSpace,
       rooms: deps.rooms,
+      previews: deps.previews,
     }
     const step = async <T>(name: Step, fn: () => Promise<T>): Promise<T> => {
       try {

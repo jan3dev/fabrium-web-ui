@@ -24,6 +24,8 @@ export interface FabriumApiDeps extends FabriumApiConfig {
   /** Localpart of the workforce space. */
   workforceSpace: string
   getSpaceRoomId(): string | undefined
+  /** This daemon has `previews:` in zooid.yaml: new VMs get `previews: true`. */
+  previews: boolean
   // Test seams.
   now?: () => number
   controlPlaneTimeoutMs?: number
@@ -56,6 +58,7 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
     workforceSpace: deps.workforceSpace,
     getSpaceRoomId: deps.getSpaceRoomId,
     rooms: deps.vmRooms,
+    previews: deps.previews,
     workstationsDir,
     registrationsDir: join(deps.zooidHome, 'data', 'matrix', 'config', 'registrations'),
     whoamiTimeoutMs: deps.whoamiTimeoutMs,
