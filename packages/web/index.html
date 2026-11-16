@@ -3,9 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <!-- Artifact previews are sandboxed srcdoc frames; this stops one navigating itself off-origin to leak data.
-         Live app previews load from the preview gateway: `zooid dev` serves it on *.preview.localhost.
-         ponytail: a deployed preview domain is known only at deploy time; deploy must add it (PREVIEWS_SPEC.md M2). -->
-    <meta http-equiv="Content-Security-Policy" content="frame-src 'self' http://*.preview.localhost:*" />
+         Live app previews load from the preview gateway. vite.config.ts fills in its origin at build time:
+         `https://*.$PREVIEW_DOMAIN` in a deploy (deploy/Dockerfile), `*.preview.localhost` for `zooid dev`. -->
+    <meta http-equiv="Content-Security-Policy" content="frame-src 'self' __PREVIEW_FRAME_SRC__" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#070708" />
     <!-- Applies the saved theme before first paint. Mirrors components/theme-provider.tsx. -->

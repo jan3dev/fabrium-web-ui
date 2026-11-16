@@ -22,6 +22,8 @@ export interface VmBundleSpec {
   homeserverUrl: string
   /** Localpart of the workforce space. */
   space: string
+  /** Live app previews: the central box has them on. */
+  previews?: boolean
 }
 
 export interface Tokens {
@@ -47,6 +49,8 @@ export function renderEnv(spec: VmBundleSpec, tokens: Tokens): string {
     `SERVER_NAME=${spec.serverName}`,
     `HOMESERVER_URL=${spec.homeserverUrl}`,
     `WORKFORCE_SPACE=${spec.space}`,
+    // fabrium-agent-sync writes `previews: true` into zooid.yaml from this line (PREVIEWS_SPEC.md).
+    ...(spec.previews ? ['FABRIUM_PREVIEWS=true'] : []),
     `MATRIX_AS_TOKEN=${tokens.asToken}`,
     `MATRIX_HS_TOKEN=${tokens.hsToken}`,
     '',

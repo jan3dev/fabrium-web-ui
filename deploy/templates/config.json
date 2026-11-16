@@ -1,4 +1,5 @@
 {
   "homeserver_url": "${HOMESERVER_URL}",
-  "workforce_space": "${WORKFORCE_SPACE}"
+  "workforce_space": "${WORKFORCE_SPACE}",
+  "previews": ${PREVIEWS}
 }

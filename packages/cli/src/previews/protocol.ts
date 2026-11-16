@@ -30,6 +30,8 @@ export interface PreviewState {
   /** RFC 3339. */
   since: string
   exit_code: number | null
+  /** The app serves a page the panel can show. False for an Expo app without react-native-web. */
+  web: boolean
 }
 
 /** Workstation → gateway. */

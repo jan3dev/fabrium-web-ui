@@ -76,6 +76,35 @@ for k in SERVER_NAME SITE_ADDRESS HOMESERVER_URL MATRIX_AS_TOKEN MATRIX_HS_TOKEN
 done
 printf '%s' "$SERVER_NAME" | grep -Eq '^[A-Za-z0-9.-]+(:[0-9]+)?$' || die "SERVER_NAME is not a host name"
 printf '%s' "$MATRIX_AS_TOKEN$MATRIX_HS_TOKEN" | grep -Eq '^[A-Za-z0-9_-]+$' || die "Matrix tokens must be [A-Za-z0-9_-]"
+
+# Live app previews (deploy/README.md, Live app previews): on when PREVIEW_DOMAIN is set.
+PREVIEW_DOMAIN="${PREVIEW_DOMAIN:-}"
+PREVIEWS=false
+if [ -n "$PREVIEW_DOMAIN" ]; then
+  PREVIEWS=true
+  printf '%s' "$PREVIEW_DOMAIN" | grep -Eq '^[a-z0-9-]+(\.[a-z0-9-]+)+$' ||
+    die "PREVIEW_DOMAIN must be a lowercase domain name, e.g. fabrium-preview.net"
+  printf '%s' "${PREVIEW_DNS_PROVIDER:-}" | grep -Eq '^[a-z0-9_-]+(@v[0-9A-Za-z.+-]+)?$' ||
+    die "PREVIEW_DOMAIN needs PREVIEW_DNS_PROVIDER, a caddy-dns module such as cloudflare (wildcard certificate, DNS-01)"
+  case "$PREVIEW_DNS_PROVIDER" in *@v*) ;; *) warn "PREVIEW_DNS_PROVIDER has no @version: the build takes the module's latest" ;; esac
+  # Previews run agent code: on Fabrium's site they could set its cookies (PREVIEWS_SPEC.md §5.2).
+  # The only check in a deploy: the daemon compares against its internal homeserver (tuwunel:8448).
+  # Mirrors siteOf in packages/cli/src/previews/protocol.ts.
+  site_of() { printf '%s' "$1" | sed -E 's#^[a-z]+://##; s#[:/].*$##' | awk -F. '{ print (NF < 2 ? $0 : $(NF-1) "." $NF) }'; }
+  for h in "$SERVER_NAME" "$SITE_ADDRESS" "$HOMESERVER_URL"; do
+    [ "$(site_of "$PREVIEW_DOMAIN")" != "$(site_of "$h")" ] ||
+      die "PREVIEW_DOMAIN must be a separate domain, not on the site of $h"
+  done
+  CADDY_ENV="$ZOOID_HOME/caddy.env"
+  grep -Eq '^PREVIEW_DNS_TOKEN=.' "$CADDY_ENV" 2>/dev/null ||
+    die "PREVIEW_DOMAIN needs $CADDY_ENV with PREVIEW_DNS_TOKEN=<api token of the DNS provider>"
+  [ "$(file_mode "$CADDY_ENV")" = "600" ] || { warn "$CADDY_ENV mode is not 600; fixing"; chmod 600 "$CADDY_ENV"; }
+else
+  # Overrides .env in compose: no xcaddy build for a provider without a domain.
+  PREVIEW_DNS_PROVIDER=
+fi
+export PREVIEW_DOMAIN PREVIEWS PREVIEW_DNS_PROVIDER
+
 if [ -f "$ENV_FILE" ]; then
   left="$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=<' "$ENV_FILE" | cut -d= -f1 | tr '\n' ' ' || true)"
   [ -z "$left" ] || warn "placeholders still in $ENV_FILE: $left"
@@ -128,6 +157,19 @@ fi
 hs_val="$(matrix_key homeserver)"
 if printf '%s' "$hs_val" | grep -Eq 'localhost|127\.0\.0\.1'; then
   die "zooid.yaml homeserver points to localhost; inside the container use 'homeserver: http://tuwunel:8448'"
+fi
+
+# The daemon switch is `previews:` in zooid.yaml; it must agree with PREVIEW_DOMAIN.
+yaml_previews=0
+grep -Eq '^previews:' "$YAML" && ! grep -Eq '^previews:[[:space:]]*false' "$YAML" && yaml_previews=1
+# Without an origin on PREVIEW_DOMAIN the daemon hands out URLs that the web UI's CSP blocks.
+# shellcheck disable=SC2016 # the literal ${PREVIEW_DOMAIN}, as zooid.yaml holds it
+if [ "$PREVIEWS" = true ] && { [ "$yaml_previews" -eq 0 ] ||
+  ! grep -Fq -e '*.${PREVIEW_DOMAIN}' -e "*.$PREVIEW_DOMAIN" "$YAML"; }; then
+  die "PREVIEW_DOMAIN is set: add this line to zooid.yaml: previews: { origin: 'https://*.\${PREVIEW_DOMAIN}' }"
+fi
+if [ "$PREVIEWS" = false ] && [ "$yaml_previews" -eq 1 ]; then
+  die "zooid.yaml has previews: but .env has no PREVIEW_DOMAIN"
 fi
 
 RUN_DIR="$ZOOID_HOME/workforce/data/run"
@@ -187,10 +229,10 @@ render_web_config() {
     VAPID_PUBLIC_KEY="$key"
     export VAPID_PUBLIC_KEY
     render_template "$TPL/config.push.json" "$ZOOID_HOME/web/config.json" \
-      SERVER_NAME APPSERVICE_PORT HOMESERVER_URL WORKFORCE_SPACE VAPID_PUBLIC_KEY
+      SERVER_NAME APPSERVICE_PORT HOMESERVER_URL WORKFORCE_SPACE VAPID_PUBLIC_KEY PREVIEWS
   else
     render_template "$TPL/config.json" "$ZOOID_HOME/web/config.json" \
-      SERVER_NAME APPSERVICE_PORT HOMESERVER_URL WORKFORCE_SPACE
+      SERVER_NAME APPSERVICE_PORT HOMESERVER_URL WORKFORCE_SPACE PREVIEWS
   fi
 }
 

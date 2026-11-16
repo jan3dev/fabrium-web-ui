@@ -92,12 +92,14 @@ put() {
 
 # Builds the files from stdin as ubuntu, so a symbolic link reaches only what ubuntu can.
 apply_list() {
-  local env_file=$ZOOID_DIR/.env ws server space count i name dir base
+  local env_file=$ZOOID_DIR/.env ws server space previews count i name dir base
   [ -r "$env_file" ] || die "$env_file is missing"
   env_value() { sed -n "s/^$1=//p" "$env_file" | tail -n 1; }
   ws=$(env_value WORKSTATION)
   server=$(env_value SERVER_NAME)
   space=$(env_value WORKFORCE_SPACE)
+  # Live app previews follow the central box: its daemon writes this line into the bundle.
+  previews=$(env_value FABRIUM_PREVIEWS)
   [[ $ws =~ $VM_RE ]] || die "$env_file has no valid WORKSTATION"
   [ -n "$server" ] && [ -n "$space" ] || die "$env_file has no SERVER_NAME or no WORKFORCE_SPACE"
 
@@ -133,7 +135,7 @@ apply_list() {
   [ "$dry_run" -eq 1 ] || mkdir -p "$AGENTS_DIR" || die "cannot make $AGENTS_DIR"
 
   # ${HOMESERVER_URL} stays as text: zooid reads it from the environment.
-  jq --arg ws "$ws" --arg server "$server" --arg space "$space" '{
+  jq --arg ws "$ws" --arg server "$server" --arg space "$space" --arg previews "$previews" '({
       workstation: $ws,
       runtime: "local",
       transports: {matrix: {
@@ -147,7 +149,7 @@ apply_list() {
         acp: {preset: "opencode"},
         matrix: ({display_name: .name, rooms: .rooms, trigger: "mention"} + (if .senders then {senders} else {} end))
       }}) | from_entries)
-    }' "$work/list.json" >"$work/new" || die "cannot build zooid.yaml"
+    } + (if $previews == "true" then {previews: true} else {} end))' "$work/list.json" >"$work/new" || die "cannot build zooid.yaml"
   put "$WORKFORCE/zooid.yaml"
 
   echo '{}' >"$work/empty.json"

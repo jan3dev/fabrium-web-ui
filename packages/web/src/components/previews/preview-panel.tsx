@@ -34,6 +34,7 @@ import type { PreviewSession } from "@/model/types";
 import { addConsoleEntry, frameUrl, postToBridge, readBridgeMessage, sameSite, type BridgeCommand } from "./bridge";
 import { PreviewStatusBadge } from "./preview-card";
 import { logTail, PreviewConsole, type ConsoleTab } from "./preview-console";
+import { PreviewPhone } from "./preview-phone";
 import { PreviewState } from "./preview-state";
 import { DEVICE_WIDTH, PreviewToolbar, type PreviewDevice } from "./preview-toolbar";
 
@@ -230,6 +231,8 @@ export function PreviewPanel({
 
   const fatal = error && !info ? errorText(error.status) : null;
   const live = running && session !== null && src !== null;
+  // Only an Expo app without react-native-web has `web: false`.
+  const phoneOnly = info?.web === false;
   const width = DEVICE_WIDTH[device];
   const hidden = isMobile && mobileView === "thread";
 
@@ -269,6 +272,7 @@ export function PreviewPanel({
         </div>
         {isMobile ? <div className="flex-1" /> : null}
         {info ? <PreviewStatusBadge status={info.status} /> : null}
+        {live && info.kind === "expo" ? <PreviewPhone session={session} /> : null}
         <div className="flex shrink-0 items-center gap-0.5">
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
@@ -331,7 +335,7 @@ export function PreviewPanel({
             </div>
           ) : (
             <>
-              {live ? (
+              {live && !phoneOnly ? (
                 <iframe
                   key={`${session.url}#${loads}`}
                   ref={frame}
@@ -359,6 +363,7 @@ export function PreviewPanel({
                 exitCode={info.exit_code}
                 since={info.since}
                 log={log}
+                phoneOnly={phoneOnly}
                 onRestart={isHuman ? restart : undefined}
                 onStop={isHuman ? stop : undefined}
                 onAskFix={isHuman && log ? () => askToFix(logTail(log), "App log") : undefined}

@@ -1,5 +1,5 @@
 import { createServer, request, type IncomingMessage, type Server } from 'node:http'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connect, type AddressInfo, type Socket } from 'node:net'
@@ -150,6 +150,7 @@ describe('preview tunnel and gateway', () => {
       status: 'running',
       since: new Date().toISOString(),
       exit_code: null,
+      web: true,
     }
     const restarts: string[] = []
     const tunnel: TunnelClient = startTunnelClient({
@@ -294,6 +295,17 @@ describe('PreviewSupervisor', () => {
     expect(expo.logs_tail).toContain('ci=1')
     expect(events.at(-1)?.['dev.fabrium.preview']).toMatchObject({ name: 'phone', kind: 'expo' })
     await expect(supervisor.start(caller, { name: 'x', kind: 'ios' as never, command: 'true' })).rejects.toThrow(/invalid_kind/)
+    // An Expo app has a web build only with react-native-web.
+    const webOf = (name: string) => supervisor.snapshot().find((p) => p.preview.name === name)?.preview.web
+    expect(webOf('phone')).toBe(true)
+    mkdirSync(join(dir, 'native'))
+    writeFileSync(join(dir, 'native', 'package.json'), JSON.stringify({ dependencies: { expo: '54.0.0' } }))
+    await supervisor.start(caller, { name: 'native', kind: 'expo', command: 'true', cwd: 'native' })
+    expect(webOf('native')).toBe(false)
+    // A restart from the web UI rechecks it.
+    writeFileSync(join(dir, 'native', 'package.json'), JSON.stringify({ dependencies: { 'react-native-web': '0.21.0' } }))
+    await supervisor.restartById(AGENT, 'native')
+    expect(webOf('native')).toBe(true)
 
     await expect(supervisor.start({ ...caller, threadId: '' }, { name: 'x', command: 'true' })).rejects.toThrow(/threads/)
     // The app runs inside the workdir, with no loader or shell variables from the model.

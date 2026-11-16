@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { loadZooidConfig, mergeCliFlags } from './config.js'
 
 const BASE = `
@@ -29,6 +29,16 @@ describe('previews config', () => {
       agents: ['qa'],
     })
     expect(mergeCliFlags(cfg, {}).previews).toEqual(cfg.previews)
+  })
+
+  it('reads ${VAR} in the origin from the environment', () => {
+    vi.stubEnv('PREVIEW_DOMAIN', 'fabrium-preview.net')
+    try {
+      const cfg = loadZooidConfig(`${BASE}previews: { origin: 'https://*.\${PREVIEW_DOMAIN}' }\n`)
+      expect(cfg.previews?.origin).toBe('https://*.fabrium-preview.net')
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('rejects a bad origin, tunnel url, or max', () => {

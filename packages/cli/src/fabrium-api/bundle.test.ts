@@ -92,6 +92,13 @@ describe('renderers', () => {
   })
 })
 
+describe('renderEnv previews', () => {
+  it('adds FABRIUM_PREVIEWS only when the central box has previews', () => {
+    expect(renderEnv(spec, tokens)).not.toContain('FABRIUM_PREVIEWS')
+    expect(renderEnv({ ...spec, previews: true }, tokens)).toContain('\nFABRIUM_PREVIEWS=true\n')
+  })
+})
+
 describe('ensureVmBundle', () => {
   const dirOf = () => join(root, 'workstations', 'lima')
 

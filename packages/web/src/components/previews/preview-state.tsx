@@ -16,7 +16,7 @@ function LogTail({ log, lines }: { log: string; lines: number }) {
 
 /**
  * What covers the app frame while the app is not running, so the user never
- * looks at a blank frame. Renders nothing for a running app.
+ * looks at a blank frame. Renders nothing for a running app, unless it has no web build.
  */
 export function PreviewState({
   status,
@@ -25,6 +25,7 @@ export function PreviewState({
   exitCode,
   since,
   log,
+  phoneOnly = false,
   onRestart,
   onStop,
   onAskFix,
@@ -36,13 +37,15 @@ export function PreviewState({
   /** RFC 3339: when the app entered this status. */
   since: string;
   log: string;
+  /** An Expo app without a web build: it runs only in Expo Go. */
+  phoneOnly?: boolean;
   /** Absent: the viewer may not restart (agents never get the buttons). */
   onRestart?: () => void;
   onStop?: () => void;
   /** Crashed only: put the log tail into the thread composer for the agent. */
   onAskFix?: () => void;
 }) {
-  if (status === "running") return null;
+  if (status === "running" && !phoneOnly) return null;
   const time = new Date(since);
   const at = Number.isNaN(time.getTime())
     ? null
@@ -55,7 +58,9 @@ export function PreviewState({
       aria-live="polite"
       className="absolute inset-0 flex flex-col items-center justify-center gap-3 overflow-auto bg-background p-6 text-center"
     >
-      {status === "starting" ? (
+      {status === "running" ? (
+        <p className="text-body1 font-medium text-text-primary">This app has no web build. Open it in Expo Go on a phone.</p>
+      ) : status === "starting" ? (
         <>
           <Spinner size="medium" aria-hidden className="text-text-tertiary" />
           <p className="text-body1 font-medium text-text-primary">Starting {title}…</p>

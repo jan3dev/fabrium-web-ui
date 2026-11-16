@@ -263,8 +263,8 @@ These can start now against a mocked API and fixture events. Storybook and unit 
 - [x] M1: Add the e2e spec `e2e/previews.spec.ts` (Tuwunel; the preview API and origin are mocked with `page.route`).
 - [x] M1: Run it for real: an agent in `zooid dev` with `previews: true` starts a Vite app; open it, edit (HMR), crash, restart.
 - [x] M2: `kind` in the decoder and the view model (missing = `web`).
-- [ ] M2: **Open on phone** popover (`components/previews/preview-phone.tsx`, with a story): QR code of the `exps://` session URL, Copy link, expiry. Shown for `kind: "expo"` when the preview origin is https. Needs a QR encoder (D9).
-- [ ] M2: Panel message for an Expo app without a web build.
+- [x] M2: **Open on phone** popover (`components/previews/preview-phone.tsx`, with a story): QR code of the `exps://` session URL, Copy link, expiry. Shown for `kind: "expo"` when the preview origin is https. QR encoder: `uqr` (D9). In the panel header only; the card opens the panel.
+- [x] M2: Panel message for an Expo app without a web build. The supervisor reports `web: false` when the app's `package.json` has no `react-native-web`.
 - [x] M3: Bridge messages: path field, Back/Forward, Console tab and error badge.
 - [x] M3: **Ask agent to fix** fills the thread composer (agent @mention, error, path).
 - [x] M3: Device widths, stored in `fabrium:preview-device:v1`.
@@ -281,11 +281,11 @@ These can start now against a mocked API and fixture events. Storybook and unit 
 - [x] M1: Service API routes (`cli/src/fabrium-api/`): §5.4, a homeserver membership check, 404 when off.
 - [x] M1: `zooid dev` serves `*.preview.localhost:<port>` and writes `previews: true` into the generated `config.json`.
 - [x] M2: Session token expiry and revocation (stop, leave room, 12 h).
-- [ ] M2: Add the preview domain to the web UI's `frame-src` CSP (meta tag in `packages/web/index.html`; M1 allows only `http://*.preview.localhost:*`). Render it per deploy.
-- [ ] M2: Deploy: `PREVIEW_DOMAIN` in `.env.example`, a Caddy site block for `*.{$PREVIEW_DOMAIN}` to the gateway, a Caddy image with the DNS provider module (`deploy/Dockerfile` or a compose image), `deploy.sh` writes `previews` into `config.json`.
+- [x] M2: Add the preview domain to the web UI's `frame-src` CSP (meta tag in `packages/web/index.html`). Filled in at build time from `PREVIEW_DOMAIN` (`deploy/Dockerfile`, `vite.config.ts`).
+- [x] M2: Deploy: `PREVIEW_DOMAIN` in `.env.example`, a Caddy site block for `*.{$PREVIEW_DOMAIN}` to the gateway, a Caddy image with the DNS provider module (`deploy/Dockerfile` or a compose image), `deploy.sh` writes `previews` into `config.json`. The DNS token is in `caddy.env`, never in `.env`. Not yet run against a real domain.
 - [x] M2: Gateway: for `kind: "expo"`, pass the public Host through, with `X-Forwarded-Proto` from the preview origin (§5.3). Tested with a stub app.
 - [ ] M2: After the spike: integration test with a recorded Metro manifest: every URL in it points at the preview origin.
-- [ ] M2: Document it in `deploy/README.md`: DNS records, certificate, how to turn it off.
+- [x] M2: Document it in `deploy/README.md`: DNS records, certificate, how to turn it off.
 
 ### 9.3 VM side (workstation daemon, agent VM image)
 
@@ -298,7 +298,7 @@ The code is in this repo (`packages/cli`, `packages/context-mcp`, `packages/tran
 - [ ] M2: Spike first (D8): run `npx expo start --port $PORT` behind the gateway and check that the manifest URLs and Fast Refresh work through the tunnel from Expo Go on a real phone.
 - [x] M2: `kind` in the tool, the supervisor (`CI=1` for Expo), the tunnel state and the event. Tool text for Expo: the command, no `--tunnel`/`--lan`, the Expo Go SDK limit.
 - [x] M2: Reconnect with backoff after sleep, NAT drops and central restarts (heartbeat, §4.3).
-- [ ] M2: `deploy/agent-vm/zooid.yaml.example`: add the `previews:` block. `add-workstation.sh` and the VM API create flow write it.
+- [x] M2: `deploy/agent-vm/zooid.yaml.example`: add the `previews:` block. `add-workstation.sh` and the VM API create flow write it (`true` when the central box has `PREVIEW_DOMAIN`).
 - [ ] M2: VM image (`prepare-image.sh`): no change for JavaScript apps (Node 22, pnpm and Docker are already there). Decide whether to add Python and venv (D7).
 - [ ] M2: No inbound ports on the VM. Check that the security group stays SSH-only.
 
@@ -314,7 +314,7 @@ The code is in this repo (`packages/cli`, `packages/context-mcp`, `packages/tran
 | D6 | Auto-open on first start | On for desktop, off for mobile |
 | D7 | Toolchains in the VM image beyond Node | Python 3 ships with Ubuntu 24.04. Add `python3-venv` only if agents need it. |
 | D8 | How Metro learns the public URL | Pass the public Host through for Expo (§5.3), and confirm it in the spike. If Metro ignores it, set `EXPO_PACKAGER_PROXY_URL` per preview. That needs one stable origin per preview instead of one per user session, which weakens D3 for Expo previews. |
-| D9 | QR encoder in the web UI | A small, dependency-free package rendering SVG (e.g. `uqr`), vetted with `package-vetting` and noted in the PR. Writing an encoder ourselves is several hundred lines. |
+| D9 | QR encoder in the web UI | Decided: `uqr@0.1.3` (unjs, MIT, no dependencies), vetted with `package-vetting`. The panel draws its matrix as one SVG path. |
 
 ## 11. Backlog (after v1)
 
