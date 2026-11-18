@@ -516,6 +516,25 @@ describe("<LoggedInView /> VM and Agents buttons", () => {
     expect(screen.getByRole("button", { name: "VM" })).toBeInTheDocument();
   });
 
+  it("marks only Agents current on the Agents page, and Home leaves the page", async () => {
+    grantAccess("agents-manager");
+    mswServer.use(
+      http.get("/_fabrium/v1/agents", () => HttpResponse.json({ agents: [], vms: [] })),
+    );
+    const user = userEvent.setup();
+    render(<App config={{ homeserverUrl: HS }} />);
+
+    await user.click(await screen.findByRole("button", { name: "Agents" }));
+    expect(await screen.findByRole("heading", { name: "Agents" })).toBeInTheDocument();
+    expect(currentInRail()).toEqual(["Agents"]);
+
+    await user.click(screen.getByRole("button", { name: "Home" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Agents" })).toBeNull(),
+    );
+    expect(currentInRail()).toEqual(["Home"]);
+  });
+
   it("shows Agents and no VM to an agents-manager", async () => {
     grantAccess("agents-manager");
     render(<App config={{ homeserverUrl: HS }} />);

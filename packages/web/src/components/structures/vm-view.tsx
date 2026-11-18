@@ -38,7 +38,7 @@ const ACTIONS: Record<VmState, VmAction[]> = {
   "shutting-down": ["delete"],
 };
 
-const STATE_TONE: Record<VmState, "success" | "neutral" | "warning"> = {
+export const STATE_TONE: Record<VmState, "success" | "neutral" | "warning"> = {
   running: "success",
   stopped: "neutral",
   pending: "warning",
@@ -104,7 +104,7 @@ export function VmView({
             are one, VM management may be off for this workspace.
           </Notice>
         ) : vms === null ? (
-          <FirstLoad error={error} onRetry={onRetry} />
+          <FirstLoad what="VMs" error={error} onRetry={onRetry} />
         ) : vms.length === 0 ? (
           <Notice title="No VMs yet">
             Create one from an agent on the Agents page.
@@ -173,23 +173,28 @@ export function VmView({
 }
 
 /** Before the first answer: loading, or the reason there is none. */
-function FirstLoad({
+export function FirstLoad({
+  what,
   error,
   onRetry,
 }: {
+  /** What the page lists: "VMs", "agents". */
+  what: string;
   error: string | null;
   onRetry: () => void;
 }) {
   if (!error) {
     return (
       <p role="status" className="text-body2 text-text-secondary">
-        Loading VMs…
+        Loading {what}…
       </p>
     );
   }
   return (
     <Alert tone="danger" className="items-center justify-between">
-      <p>Could not load VMs. {error}</p>
+      <p>
+        Could not load {what}. {error}
+      </p>
       <Button variant="secondary" size="sm" onClick={onRetry}>
         Retry
       </Button>
@@ -249,7 +254,7 @@ function VmTable({
   );
 }
 
-function Notice({ title, children }: { title: string; children: ReactNode }) {
+export function Notice({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-2 rounded-card border border-dashed border-surface-border-secondary px-6 py-10 text-center">
       <h2 className="font-heading text-subtitle font-medium text-text-primary">
