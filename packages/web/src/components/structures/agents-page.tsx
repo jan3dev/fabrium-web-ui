@@ -1,11 +1,20 @@
 import { useContext, useEffect, useState } from "react";
-import { createAgent, isNoAccess, updateAgent } from "../../client/fabrium-api";
+import {
+  createAgent,
+  createVm,
+  deleteAgent,
+  isNoAccess,
+  updateAgent,
+} from "../../client/fabrium-api";
 import { useAgents } from "../../hooks/use-agents";
+import { useInstanceTypes } from "../../hooks/use-instance-types";
 import { useModels } from "../../hooks/use-models";
 import { useSpaceMembers } from "../../hooks/use-space-members";
 import { WorkforceSpaceContext } from "../../hooks/use-workforce";
-import type { AgentInput } from "../../model/types";
+import type { AgentInput, CreateVmRequest } from "../../model/types";
 import { AgentDialog } from "../dialogs/agent-dialog";
+import { CreateVmDialog } from "../dialogs/create-vm-dialog";
+import { DeleteAgentDialog } from "../dialogs/delete-agent-dialog";
 import { type AgentAction, AgentsView } from "./agents-view";
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -22,6 +31,7 @@ export function AgentsRoute() {
     open && open.kind !== "new" ? list?.agents.find((a) => a.id === open.id) : undefined;
   const editing = open?.kind === "new" || (open?.kind === "edit" && !!target);
   const { models, error: modelsError } = useModels(editing);
+  const { types, error: typesError } = useInstanceTypes(open?.kind === "create-vm" && !!target);
   const members = useSpaceMembers(useContext(WorkforceSpaceContext));
 
   // An agent that left the list takes its dialog with it.
@@ -36,6 +46,22 @@ export function AgentsRoute() {
     if (target) await updateAgent(target.id, input);
     else await createAgent(input);
     refresh();
+  };
+  // After a failure too: the list may be stale, and the dialog shows the agent as it is now.
+  const createVmFor = async (req: CreateVmRequest) => {
+    try {
+      await createVm(req);
+    } finally {
+      refresh();
+    }
+  };
+  const remove = async (withVm: boolean) => {
+    if (!target) return;
+    try {
+      await deleteAgent(target.id, withVm);
+    } finally {
+      refresh();
+    }
   };
 
   return (
@@ -58,6 +84,24 @@ export function AgentsRoute() {
         members={members.map((m) => ({ userId: m.userId, name: m.name }))}
         onSubmit={save}
       />
+      {target ? (
+        <>
+          <CreateVmDialog
+            open={open?.kind === "create-vm"}
+            onOpenChange={close}
+            agent={target}
+            types={types}
+            typesError={typesError}
+            onSubmit={createVmFor}
+          />
+          <DeleteAgentDialog
+            open={open?.kind === "delete"}
+            onOpenChange={close}
+            agent={target}
+            onConfirm={remove}
+          />
+        </>
+      ) : null}
     </>
   );
 }

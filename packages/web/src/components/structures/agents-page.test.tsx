@@ -7,6 +7,7 @@ import { signInForVmApi } from "../../../test/vm-api";
 import {
   CAN_NOTHING,
   INSTANCE_AGENT,
+  INSTANCE_TYPES,
   PROFILE,
   VM_GONE,
   makeAgent,
@@ -41,6 +42,16 @@ function serve(agents: Agent[], vms: AgentList["vms"] = [{ name: "lima", state: 
     http.put(`${API}/agents/:id`, async ({ params, request }) => {
       await record(request, `PUT ${params.id}`);
       return HttpResponse.json(api.list.agents.find((a) => a.id === params.id));
+    }),
+    http.delete(`${API}/agents/:id`, ({ params, request }) => {
+      api.calls.push(`DELETE ${params.id}${new URL(request.url).search}`);
+      api.list = { ...api.list, agents: api.list.agents.filter((a) => a.id !== params.id) };
+      return new HttpResponse(null, { status: 204 });
+    }),
+    http.get(`${API}/instance-types`, () => HttpResponse.json(INSTANCE_TYPES)),
+    http.post(`${API}/vms`, async ({ request }) => {
+      await record(request, "POST /vms");
+      return HttpResponse.json({ id: "i-0123456789abcdef9", name: "lima" }, { status: 201 });
     }),
   );
   return api;
@@ -193,6 +204,72 @@ describe("<AgentsRoute>", () => {
       `PUT ${makeAgent().id} {"tag":"Lead"}`,
       "GET /agents",
     ]);
+  });
+
+  it("creates a VM for an agent, closes, and refreshes the list", async () => {
+    const api = serve([VM_GONE]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Create VM for review" }));
+    const dialog = await screen.findByRole("dialog", { name: "Create a VM for review" });
+    await within(dialog).findByLabelText("Instance type");
+    await user.type(within(dialog).getByLabelText("Haven API key"), "hk-1");
+    await user.click(within(dialog).getByRole("button", { name: "Create VM" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(api.calls).toEqual([
+      "GET /agents",
+      `POST /vms {"agent":"${VM_GONE.id}","name":"kilo","instance_type":"t3a.medium","auto_stop_hours":12,"haven_api_key":"hk-1"}`,
+      "GET /agents",
+    ]);
+  });
+
+  it("deletes an agent, closes, and refreshes the list", async () => {
+    const api = serve([PROFILE]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Delete scout" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Delete scout?" });
+    await user.click(within(dialog).getByRole("button", { name: "Delete agent" }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(await screen.findByText("No agents yet")).toBeInTheDocument();
+    expect(api.calls).toEqual(["GET /agents", `DELETE ${PROFILE.id}`, "GET /agents"]);
+  });
+
+  it("refreshes the list after a failed delete", async () => {
+    // Another user deleted the sibling: the list still says echo has one.
+    const sibling = makeAgent({ can: { ...CAN_NOTHING, edit: true, delete: true } });
+    const api = serve([sibling]);
+    mswServer.use(
+      http.delete(`${API}/agents/:id`, ({ request }) => {
+        if (new URL(request.url).search === "?vm=1") return undefined; // the default handler
+        api.calls.push("DELETE (409)");
+        api.list = { ...api.list, agents: [makeAgent()] };
+        return HttpResponse.json({ error: "last agent of the vm" }, { status: 409 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Delete echo" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Delete echo?" });
+    expect(dialog).toHaveAccessibleDescription("The agent leaves its rooms. Its messages stay.");
+    await user.click(within(dialog).getByRole("button", { name: "Delete agent" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("last agent of the vm");
+    await waitFor(() => expect(api.calls).toEqual(["GET /agents", "DELETE (409)", "GET /agents"]));
+    await waitFor(() =>
+      expect(dialog).toHaveAccessibleDescription(
+        "echo is the last agent of the VM lima. This deletes the agent and the VM. The files on the VM are lost.",
+      ),
+    );
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete agent and VM" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(api.calls.slice(3)).toEqual([`DELETE ${sibling.id}?vm=1`, "GET /agents"]);
   });
 
   it("shows the empty state", async () => {
