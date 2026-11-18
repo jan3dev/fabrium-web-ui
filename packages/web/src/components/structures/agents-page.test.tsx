@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
@@ -17,13 +17,30 @@ import { AgentsRoute } from "./agents-page";
 
 const API = "/_fabrium/v1";
 
-/** A fake browser API: `GET /agents` answers `list`. */
+/** A fake browser API: `GET /agents` answers `list`; `calls` records each request, with its body. */
 function serve(agents: Agent[], vms: AgentList["vms"] = [{ name: "lima", state: "running" }]) {
   const api = { list: { agents, vms } as AgentList, calls: [] as string[] };
+  const record = async (request: Request, line: string) => {
+    const body = await request.text();
+    api.calls.push(body ? `${line} ${body}` : line);
+  };
   mswServer.use(
     http.get(`${API}/agents`, () => {
       api.calls.push("GET /agents");
       return HttpResponse.json(api.list);
+    }),
+    http.get(`${API}/models`, () =>
+      HttpResponse.json({ models: [{ id: "glm-5-3" }], default: "glm-5-3" }),
+    ),
+    http.post(`${API}/agents`, async ({ request }) => {
+      await record(request, "POST /agents");
+      const created = makeAgent({ ...PROFILE, id: "0f1e2d3c4b5a69788796a5b4c3d2e1f0", name: "nova" });
+      api.list = { ...api.list, agents: [...api.list.agents, created] };
+      return HttpResponse.json(created, { status: 201 });
+    }),
+    http.put(`${API}/agents/:id`, async ({ params, request }) => {
+      await record(request, `PUT ${params.id}`);
+      return HttpResponse.json(api.list.agents.find((a) => a.id === params.id));
     }),
   );
   return api;
@@ -136,6 +153,46 @@ describe("<AgentsRoute>", () => {
     renderPage();
     await screen.findByRole("rowheader", { name: /^echo/ });
     expect(within(rowOf("echo")).queryByRole("button", { name: /create vm/i })).toBeNull();
+  });
+
+  it("creates a profile from New agent, closes, and refreshes the list", async () => {
+    const api = serve([makeAgent()]);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("rowheader", { name: /^echo/ });
+
+    await user.click(screen.getByRole("button", { name: "New agent" }));
+    const dialog = await screen.findByRole("dialog", { name: "New agent" });
+    await waitFor(() => expect(within(dialog).getByLabelText("Model")).toHaveValue("glm-5-3"));
+    await user.type(within(dialog).getByLabelText("Name"), "nova");
+    await user.click(within(dialog).getByRole("button", { name: "Create agent" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(await screen.findByRole("rowheader", { name: /^nova/ })).toBeInTheDocument();
+    expect(api.calls).toEqual([
+      "GET /agents",
+      'POST /agents {"name":"nova","model":"glm-5-3"}',
+      "GET /agents",
+    ]);
+  });
+
+  it("edits an agent with the fields that changed", async () => {
+    const api = serve([makeAgent()]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Edit echo" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit agent" });
+    await user.clear(within(dialog).getByLabelText("Tag"));
+    await user.type(within(dialog).getByLabelText("Tag"), "Lead");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(api.calls).toEqual([
+      "GET /agents",
+      `PUT ${makeAgent().id} {"tag":"Lead"}`,
+      "GET /agents",
+    ]);
   });
 
   it("shows the empty state", async () => {
