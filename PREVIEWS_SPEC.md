@@ -192,7 +192,7 @@ The central box accepts the control and stream upgrades from §4.3, checks the a
 - **HTML response:** insert `<script src="/__fabrium/bridge.js"></script>` as the first child of `<head>`. It is same-origin, so `script-src 'self'` CSPs allow it.
 - **Every response:** `Referrer-Policy: no-referrer`, and `X-Frame-Options` / `frame-ancestors` replaced with `frame-ancestors <app origin>`.
 - **`/__fabrium/*`:** reserved for gateway routes. Everything else goes to the app.
-- **Bridge** (about 3.5 KB): on load, `popstate`, `pushState`, `replaceState` and `hashchange`, it posts `{href, title}` to the parent with `targetOrigin = <app origin>`. It forwards console errors (§3.4) and accepts `back`, `forward`, `reload` and `pick` from the parent. In pick mode it outlines the hovered element and reports the clicked one (selector, HTML, text, page) instead of letting the app act on the click.
+- **Bridge** (about 3.5 KB): on load, `popstate`, `pushState`, `replaceState` and `hashchange`, it posts `{href, title}` to the parent with `targetOrigin = <app origin>`. It forwards console errors (§3.4) and accepts `back`, `forward`, `reload` and `pick` from the parent. In pick mode it outlines the hovered element and reports the clicked one (selector, HTML, text, page, and the computed values of the style properties in `STYLE_PROPS`) instead of letting the app act on the click. `style` sets one of those properties inline on the picked element, so the user sees an edit at once. The edit is a draft: `style-reset`, a new pick or the end of pick mode restores the element, and `style-keep` leaves it in the page after the user adds it to the reply. Nothing the bridge does changes the app's code.
 
 ### 5.4 Service API (`/_fabrium/v1`, OpenID auth as today)
 
@@ -272,6 +272,7 @@ These can start now against a mocked API and fixture events. Storybook and unit 
 - [x] M3: Mobile `Preview | Thread` segmented control.
 - [x] M3: **Annotate:** pick an element in the preview and attach it to the reply, reusing the artifact annotation refs (`dev.fabrium.artifact_refs`). The bridge highlights on hover and reports selector, HTML, text and path (§5.3).
 - [x] M3: Extend the axe sweep to the panel and card in both themes.
+- [x] **Style inspector:** beside a picked element, controls for fill, text color, opacity, radius, border, shadows, blurs, filter, rotate and blend mode (`components/artifacts/style-inspector.tsx`, shared with the artifact panel). An edit shows in the app through the bridge and rides in the annotation's note as CSS; the agent writes it into the code. Desktop only.
 
 ### 9.2 Central box (`packages/core`, `packages/cli`, `deploy/`)
 

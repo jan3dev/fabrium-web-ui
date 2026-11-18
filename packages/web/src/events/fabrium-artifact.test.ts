@@ -24,6 +24,11 @@ describe("decodeArtifactVersion", () => {
     });
   });
 
+  it("decodes the slides, design and design-system kinds", () => {
+    for (const type of ["slides", "design", "design-system"])
+      expect(decodeArtifactVersion(event({ identifier: "p", type, body: "x" }))?.kind).toBe(type);
+  });
+
   it("rejects unknown types and media without a hash", () => {
     expect(decodeArtifactVersion(event({ identifier: "p", type: "mermaid", body: "x" }))).toBeNull();
     expect(decodeArtifactVersion(event({ identifier: "p", type: "html", url: "mxc://h/x" }))).toBeNull();

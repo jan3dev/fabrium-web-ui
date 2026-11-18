@@ -32,6 +32,15 @@ export const ComponentV3: Story = {
 export const Code: Story = {
   args: { artifact: { ...artifact, kind: "code", language: "python", title: "Invoice parser" } },
 };
+export const Slides: Story = {
+  args: { artifact: { ...artifact, kind: "slides", title: "Launch deck" } },
+};
+export const Design: Story = {
+  args: { artifact: { ...artifact, kind: "design", title: "Checkout screens" } },
+};
+export const DesignSystem: Story = {
+  args: { artifact: { ...artifact, kind: "design-system", title: "Payments design system" } },
+};
 export const LongTitle: Story = {
   args: { artifact: { ...artifact, kind: "markdown", title: "Quarterly planning document for the payments team, draft two" } },
 };

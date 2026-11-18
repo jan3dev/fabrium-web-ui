@@ -5,7 +5,7 @@ import { MatrixClientPeg } from "../../client/peg";
 import { useRoomTopic } from "../../hooks/use-room-topic";
 import type { SpaceChild } from "../../hooks/use-space-hierarchy";
 import { useRoomBrowser } from "../dialogs/browse-rooms";
-import { useSpaceName } from "../../hooks/use-space-name";
+import { useRoomName } from "../../hooks/use-room-name";
 import { TopicText } from "../timeline/topic-text";
 import { EmptyRoom } from "./empty-room";
 import type { LoggedInOutletContext } from "./logged-in-view";
@@ -35,7 +35,7 @@ export function Lobby({
   setScope: (scope: Scope) => void;
 }) {
   const navigate = useNavigate();
-  const name = useSpaceName(spaceId) ?? MatrixClientPeg.safeGet()?.getRoom(spaceId)?.name ?? spaceId;
+  const name = useRoomName(spaceId) ?? spaceId;
   const topic = useRoomTopic(spaceId);
   const memberCount = MatrixClientPeg.safeGet()?.getRoom(spaceId)?.getJoinedMemberCount() ?? 0;
   const { term, setTerm, query: q, joinedOnly, setJoinedOnly, rooms, projects: spaces, activate, joiningId } =

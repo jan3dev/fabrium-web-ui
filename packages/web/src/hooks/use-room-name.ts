@@ -1,23 +1,25 @@
 import { ClientEvent, RoomEvent } from "matrix-js-sdk";
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { MatrixClientPeg } from "../client/peg";
 
-function snapshot(spaceId: string | null): string | null {
-  if (!spaceId) return null;
-  const room = MatrixClientPeg.safeGet()?.getRoom(spaceId);
+function snapshot(roomId: string | null): string | null {
+  if (!roomId) return null;
+  const room = MatrixClientPeg.safeGet()?.getRoom(roomId);
   return room?.name ?? null;
 }
 
-export function useSpaceName(spaceId: string | null): string | null {
-  return useSyncExternalStore(
-    (cb) => {
+/** A room's name, followed live: `room.name` read in a render does not update on a rename. */
+export function useRoomName(roomId: string | null): string | null {
+  // Stable per room, so a re-render does not unsubscribe and subscribe again.
+  const subscribe = useCallback(
+    (cb: () => void) => {
       const client = MatrixClientPeg.safeGet();
-      if (!client || !spaceId) return MatrixClientPeg.subscribe(cb);
+      if (!client || !roomId) return MatrixClientPeg.subscribe(cb);
 
       let nameOff: (() => void) | null = null;
       const attach = () => {
         if (nameOff) return;
-        const room = client.getRoom(spaceId);
+        const room = client.getRoom(roomId);
         if (!room) return;
         const onName = () => cb();
         room.on(RoomEvent.Name, onName);
@@ -37,7 +39,8 @@ export function useSpaceName(spaceId: string | null): string | null {
         unsubPeg();
       };
     },
-    () => snapshot(spaceId),
-    () => null,
+    [roomId],
   );
+  return useSyncExternalStore(subscribe, () => snapshot(roomId), () => null);
 }
+

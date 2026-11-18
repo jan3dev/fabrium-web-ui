@@ -16,17 +16,20 @@ import { useMemberRoles } from "../../hooks/use-member-roles";
 import { useRoomFavorite } from "../../hooks/use-room-favorite";
 import { useRoomNotifState } from "../../hooks/use-room-notif-state";
 import { useRoomTopic } from "../../hooks/use-room-topic";
+import { useRoomName } from "../../hooks/use-room-name";
 import { useWorkforce } from "../../hooks/use-workforce";
 import { RoomPreviewMenu } from "../previews/preview-menu";
 import { MemberStack } from "./member-stack";
 import { RoomStatusBadge } from "./room-status-badge";
 
-interface RoomHeaderProps {
+export interface RoomHeaderProps {
   workforceSpaceId?: string | null;
   membersOpen?: boolean;
   infoOpen?: boolean;
   onToggleMembers?: () => void;
   onToggleInfo?: () => void;
+  /** The top bar's search: the header then sits in the top bar, title and actions on either side of it. */
+  children?: React.ReactNode;
 }
 
 /** Room title row: glyph, name (opens room info), status markers, members and actions. */
@@ -36,6 +39,7 @@ export function RoomHeader({
   infoOpen,
   onToggleMembers,
   onToggleInfo,
+  children,
 }: RoomHeaderProps) {
   const roomId = useMatch("/room/:roomId")?.params.roomId ?? "";
   const client = useSyncExternalStore(
@@ -52,11 +56,11 @@ export function RoomHeader({
   const { isAgent } = roster;
   const isDm = useDirectRooms().some((r) => r.roomId === roomId);
   const avatarMxc = useRoomAvatarMxc(roomId);
+  const roomName = useRoomName(roomId) ?? roomId;
 
   const room = client?.getRoom(roomId);
-  if (!roomId || !client) return null;
+  if (!roomId || !client) return children ?? null;
 
-  const roomName = room?.name ?? roomId;
   const dmUserId = isDm ? (room?.guessDMUserId() ?? null) : null;
   const isAgentDm = !!dmUserId && isAgent(dmUserId);
   const archived = !!room?.currentState.getStateEvents("m.room.tombstone", "");
@@ -64,7 +68,11 @@ export function RoomHeader({
 
   return (
     <header
-      className="relative z-30 flex h-12 min-w-0 shrink-0 cursor-default items-center gap-2.5 border-b border-border px-3 select-none md:px-4"
+      className={
+        children
+          ? "flex min-w-0 flex-1 items-center gap-2"
+          : "relative z-30 flex h-12 min-w-0 shrink-0 cursor-default items-center gap-2.5 border-b border-border px-3 select-none md:px-4"
+      }
       data-testid="room-header"
     >
       <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -102,7 +110,9 @@ export function RoomHeader({
           </span>
         ) : null}
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+      {children}
+      {/* Beside the search, both sides take equal room, so the search stays centered. */}
+      <div className={cn("flex items-center gap-1", children ? "min-w-fit flex-1 justify-end" : "shrink-0")}>
         <RoomPreviewMenu roomId={roomId} agentLabel={(id) => toActor(id, room ?? null, roster).displayName} />
         {members.length > 0 ? (
           <MemberStack

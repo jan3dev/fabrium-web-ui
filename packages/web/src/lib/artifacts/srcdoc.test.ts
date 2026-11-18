@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildArtifactSrcdoc, PREVIEW_CSP, PREVIEW_SANDBOX } from "./srcdoc";
+import { buildArtifactSrcdoc, PREVIEW_CSP, PREVIEW_SANDBOX, PRINT_SANDBOX } from "./srcdoc";
 
 describe("artifact srcdoc", () => {
   it("never lets the frame share the app's origin", () => {
@@ -35,5 +35,36 @@ describe("artifact srcdoc", () => {
     const src = 'import {\n  useState,\n} from "react";\nimport "./x.css";\nconst importance = 1;';
     expect(src.replace(strip, "").trim()).toBe("const importance = 1;");
   });
-});
 
+  it("adds the frames runtime for slides and design only, after the CSP", () => {
+    const deck = "<!doctype html><html><body><section><h1>A</h1></section></body></html>";
+    for (const kind of ["slides", "design"] as const) {
+      const doc = buildArtifactSrcdoc(kind, deck, "c1");
+      expect(doc.startsWith('<!doctype html><head><meta http-equiv="Content-Security-Policy"')).toBe(true);
+      expect(doc).toContain("body > section");
+      expect(doc).toContain(`var SLIDES = ${kind === "slides"}, PRINT = false;`);
+    }
+    expect(buildArtifactSrcdoc("html", deck, "c1")).not.toContain("body > section");
+  });
+
+  it("emits a hook script that parses, also for print", () => {
+    for (const print of [false, true]) {
+      const doc = buildArtifactSrcdoc("slides", "<section></section>", "c1", print);
+      const script = /<script>([\s\S]*?)<\/script>/.exec(doc)![1]!;
+      expect(() => new Function(script)).not.toThrow();
+      expect(doc).toContain(`PRINT = ${print}`);
+    }
+  });
+
+  it("hides notes on the frame and animates only without reduced motion", () => {
+    const doc = buildArtifactSrcdoc("slides", "<section></section>", "c1");
+    expect(doc).toContain("body>section>aside[data-notes]{display:none!important}");
+    expect(doc).toContain("@media (prefers-reduced-motion:no-preference)");
+  });
+
+  it("gives only the print frame dialogs, and never the app's origin", () => {
+    expect(PRINT_SANDBOX).toContain("allow-modals");
+    expect(PRINT_SANDBOX).not.toContain("allow-same-origin");
+    expect(PREVIEW_SANDBOX).not.toContain("allow-modals");
+  });
+});

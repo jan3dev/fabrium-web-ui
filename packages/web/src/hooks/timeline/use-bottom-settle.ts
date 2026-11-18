@@ -1,6 +1,7 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/messages/ui/useVirtualizedBottomSettle.ts. Modified.
 import * as React from "react";
 import type { VListHandle } from "virtua";
+import { isEditableKeyboardTarget } from "@/lib/keyboard-shortcuts";
 
 const SCROLL_INTENT_KEYS = new Set([
   "ArrowDown",
@@ -12,13 +13,6 @@ const SCROLL_INTENT_KEYS = new Set([
   " ",
 ]);
 
-function isEditableKeyboardTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  return (
-    target.closest("input, textarea, select, [contenteditable='true']") !== null
-  );
-}
 
 export function useBottomSettle(
   hostRef: React.RefObject<HTMLDivElement | null>,

@@ -78,7 +78,16 @@ export interface TimelineEntry {
   thread: ThreadSummary | null;
 }
 
-export const ARTIFACT_KINDS = ["html", "svg", "react", "markdown", "code"] as const;
+export const ARTIFACT_KINDS = [
+  "html",
+  "svg",
+  "react",
+  "markdown",
+  "code",
+  "slides",
+  "design",
+  "design-system",
+] as const;
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 
 /** One version of an agent's artifact, numbered per thread + identifier. */

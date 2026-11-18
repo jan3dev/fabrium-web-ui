@@ -69,6 +69,11 @@ export function useThreadPreviews(
 /** How often the room header asks which previews run; the open panel polls its own preview faster. */
 const ROOM_POLL_MS = 10_000;
 
+/** The mounted room polls. */
+const roomPolls = new Set<() => void>();
+/** A preview changed status (the open panel saw it): the room header asks now, not at its next poll. */
+export const refreshRoomPreviews = () => roomPolls.forEach((poll) => poll());
+
 /** The room's previews that are running or starting, for the room header. Empty when previews are off. */
 export function useRoomPreviews(roomId: string): PreviewInfo[] {
   const [state, setState] = useState<{ roomId: string; list: PreviewInfo[] }>({ roomId: "", list: [] });
@@ -76,10 +81,14 @@ export function useRoomPreviews(roomId: string): PreviewInfo[] {
     if (!roomId || !isPreviewsEnabled()) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // A refresh can start a poll while one is in flight: only the newest sets state and the next timer.
+    let run = 0;
     const poll = async () => {
+      const mine = ++run;
+      clearTimeout(timer);
       try {
         const all = await listPreviews(roomId);
-        if (!live) return;
+        if (!live || mine !== run) return;
         const list = all.filter((p) => p.status === "running" || p.status === "starting");
         setState((s) =>
           s.roomId === roomId && JSON.stringify(s.list) === JSON.stringify(list) ? s : { roomId, list },
@@ -87,12 +96,15 @@ export function useRoomPreviews(roomId: string): PreviewInfo[] {
       } catch {
         // Off on this server, or not reachable: the button stays hidden.
       }
-      if (live) timer = setTimeout(() => void poll(), ROOM_POLL_MS);
+      if (live && mine === run) timer = setTimeout(() => void poll(), ROOM_POLL_MS);
     };
-    void poll();
+    const now = () => void poll();
+    roomPolls.add(now);
+    now();
     return () => {
       live = false;
       clearTimeout(timer);
+      roomPolls.delete(now);
     };
   }, [roomId]);
   return state.roomId === roomId ? state.list : [];
