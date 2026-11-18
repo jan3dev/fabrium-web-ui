@@ -1,13 +1,13 @@
 import { createRequire } from "node:module";
 import type { Page } from "@playwright/test";
 import type { AxeResults } from "axe-core";
-import { makeVm } from "../test/vm-fixtures";
+import { INSTANCE_AGENT, PROFILE, makeAgent, makeVm } from "../test/vm-fixtures";
 import { HS_URL, expect, test } from "./fixtures/daemon-impersonator";
 
 const AXE_PATH = createRequire(import.meta.url).resolve("axe-core/axe.min.js");
 const BLOCKING = new Set(["serious", "critical"]);
 
-// One VM per look of /vm: each state tone, Confidential, expired setup, no IP or agent.
+// One VM per look of /vm: each state tone, Confidential, expired setup, no IP, no agent, two agents.
 const VMS = [
   makeVm(),
   makeVm({ id: "i-0123456789abcdef1", name: "kilo", state: "stopped", public_ip: null }),
@@ -17,7 +17,7 @@ const VMS = [
     state: "pending",
     setup: "pending",
     public_ip: null,
-    agent_id: null,
+    agents: [],
   }),
   makeVm({
     id: "i-0123456789abcdef3",
@@ -25,9 +25,18 @@ const VMS = [
     instance_type: "c6a.large",
     sev_snp: true,
     setup: "expired",
-    agent_id: "@tango.echo:example.org",
+    agents: [
+      { id: "0a1b2c3d4e5f60718293a4b5c6d7e8f9", name: "echo", agent_id: "@tango.echo:example.org" },
+      { id: "1b2c3d4e5f60718293a4b5c6d7e8f90a", name: "reviewer", agent_id: "@tango.reviewer:example.org" },
+    ],
   }),
 ];
+
+// One agent per look of /agents: on a VM, a profile (Create VM disabled with its reason), an instance agent.
+const AGENTS = {
+  agents: [makeAgent(), PROFILE, INSTANCE_AGENT],
+  vms: [{ name: "lima", state: "running" }],
+};
 
 // The homeserver answers on another origin, so a stubbed answer needs CORS headers.
 const CORS = {
@@ -103,7 +112,7 @@ for (const theme of ["light", "dark"] as const) {
       toolCallId: "tc-axe",
     });
 
-    // No Fabrium API in the fixture: stub it and its OpenID request, so the rail and /vm show VMs.
+    // No Fabrium API in the fixture: stub it and its OpenID request, so the rail, /vm, and /agents have data.
     await page.route("**/openid/request_token", (route) =>
       route.request().method() === "OPTIONS"
         ? route.fulfill({ status: 204, headers: CORS })
@@ -122,6 +131,12 @@ for (const theme of ["light", "dark"] as const) {
     );
     await page.route("**/_fabrium/v1/vms", (route) =>
       route.fulfill({ json: VMS }),
+    );
+    await page.route("**/_fabrium/v1/agents", (route) =>
+      route.fulfill({ json: AGENTS }),
+    );
+    await page.route("**/_fabrium/v1/models", (route) =>
+      route.fulfill({ json: { models: [{ id: "glm-5-3" }], default: "glm-5-3" } }),
     );
 
     const found: string[] = [];
@@ -163,6 +178,7 @@ for (const theme of ["light", "dark"] as const) {
     );
     await sweep("/invites", () => page.getByRole("main").waitFor());
     await sweep("/vm", text("tango"));
+    await sweep("/agents", text(AGENTS.agents[0].name));
 
     expect(found, found.join("\n\n")).toEqual([]);
   });
