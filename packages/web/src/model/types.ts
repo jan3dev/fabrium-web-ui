@@ -114,8 +114,8 @@ export interface Vm {
   setup: VmSetup;
   /** Hours of uptime after which the VM stops itself; null or absent when unknown. */
   auto_stop_hours?: number | null;
-  /** From the agent bundle of the VM; null when there is none. */
-  agent_id: string | null;
+  /** The agents of the VM, sorted by name. Only the live VM of a name has agents. */
+  agents: { id: string; name: string; agent_id: string }[];
   /** The Matrix user who created the VM; null or absent for a VM from before the registry. */
   creator?: string | null;
   /** False for a VM from before the registry: its auto-stop hours cannot change. */
@@ -130,36 +130,81 @@ export interface VmInstanceType {
   default: boolean;
 }
 
-export interface VmAgent {
-  workstation: string;
-  agent_id: string;
-  preset: string;
-  /** No VM that is not terminated has this workstation name. */
-  free: boolean;
-}
+export type FabriumRole = "agents-manager" | "vm-creator" | "admin" | "owner";
 
-export interface VmAccess {
+export interface FabriumAccess {
   user_id: string;
-  role: "vm-creator" | "admin" | "owner";
+  role: FabriumRole;
 }
 
-/** What the New VM dialog offers. */
-export interface VmFormOptions {
-  instanceTypes: VmInstanceType[];
-  agents: VmAgent[];
+/** What the caller may do with an agent. The daemon computes it; the web holds no rule. */
+export interface AgentCan {
+  edit: boolean;
+  set_owner: boolean;
+  assign: boolean;
+  create_vm: boolean;
+  delete: boolean;
+  delete_needs_vm: boolean;
 }
 
-export type CreateVmAgent =
-  | { mode: "new"; name: string; persona?: string; project?: string }
-  | { mode: "existing"; name: string };
+/** `id` and `state` are absent when the VM name has no live VM. */
+export interface AgentVm {
+  name: string;
+  id?: string;
+  state?: VmState;
+  owner?: string | null;
+}
 
-export interface CreateVmRequest {
-  /** The VM name, which is also the workstation name. */
+export interface Agent {
+  id: string;
+  name: string;
+  /** `@<vm>.<name>:<server>`; null for a profile. */
+  agent_id: string | null;
+  owner: string | null;
+  description: string | null;
+  model: string | null;
+  tag: string | null;
+  project: string | null;
+  /** Null for a profile. */
+  vm: AgentVm | null;
+  /** `instance`: an agent of the config of the central zooid. Read-only. */
+  source: "control-plane" | "instance";
+  can: AgentCan;
+}
+
+export interface AgentList {
+  agents: Agent[];
+  /** The live VMs that the caller can assign an agent to. */
+  vms: { name: string; state: VmState }[];
+}
+
+/** The body of a create or an edit. An edit sends only the fields that changed; "" clears tag and project. */
+export interface AgentInput {
+  name?: string;
+  description?: string;
+  model?: string;
+  tag?: string;
+  project?: string;
+  owner?: string;
+  vm?: string;
+}
+
+export interface ModelList {
+  models: { id: string }[];
+  default: string | null;
+}
+
+export interface VmCredentials {
+  haven_api_key: string;
+  github_token?: string;
+}
+
+export interface CreateVmRequest extends VmCredentials {
+  /** The id of the agent record the VM is for. */
+  agent: string;
+  /** The VM name. */
   name: string;
   instance_type?: string;
   /** Integer from 1 to 168. */
   auto_stop_hours?: number;
-  agent: CreateVmAgent;
-  haven_api_key: string;
-  github_token?: string;
 }

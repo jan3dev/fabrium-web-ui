@@ -1,5 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useId, useState } from "react";
-import { PlusIcon, ShieldCheckIcon } from "@/components/icons";
+import { ShieldCheckIcon } from "@/components/icons";
 import { Alert } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -46,7 +46,7 @@ const STATE_TONE: Record<VmState, "success" | "neutral" | "warning"> = {
   "shutting-down": "warning",
 };
 
-const HEADERS = ["Name", "Agent", "Owner", "Type", "State", "IP", "Launched"];
+const HEADERS = ["Name", "Agents", "Owner", "Type", "State", "IP", "Launched"];
 
 function launchedLabel(iso: string): string {
   const ts = Date.parse(iso);
@@ -66,8 +66,6 @@ interface VmViewProps {
   onAction: (vm: Vm, action: VmAction, autoStopHours?: number) => void;
   /** Sets the hours of uptime after which the VM stops itself. */
   onSetAutoStop: (vm: Vm, hours: number) => void;
-  /** Opens the New VM dialog. Without it, the button is not shown. */
-  onNew?: () => void;
   onRetry: () => void;
 }
 
@@ -78,7 +76,6 @@ export function VmView({
   busyIds,
   onAction,
   onSetAutoStop,
-  onNew,
   onRetry,
 }: VmViewProps) {
   // The VM whose delete confirmation is open, by id.
@@ -99,12 +96,6 @@ export function VmView({
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex items-center justify-between gap-4 border-b border-border px-6 py-4">
         <h1 className="font-heading text-subtitle font-medium">VMs</h1>
-        {onNew && !noAccess ? (
-          <Button size="sm" onClick={onNew}>
-            <PlusIcon aria-hidden />
-            New VM
-          </Button>
-        ) : null}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
         {noAccess ? (
@@ -115,7 +106,9 @@ export function VmView({
         ) : vms === null ? (
           <FirstLoad error={error} onRetry={onRetry} />
         ) : vms.length === 0 ? (
-          <Notice title="No VMs yet">Each VM runs one agent.</Notice>
+          <Notice title="No VMs yet">
+            Create one from an agent on the Agents page.
+          </Notice>
         ) : (
           <>
             {error ? (
@@ -292,7 +285,17 @@ function VmRow({
         {vm.name}
       </th>
       <td className="px-4 py-3 text-body2 break-all text-text-secondary">
-        {vm.agent_id ?? "None"}
+        {vm.agents.length === 0 ? (
+          "No agents"
+        ) : (
+          <ul>
+            {vm.agents.map((agent) => (
+              <li key={agent.id} title={agent.agent_id}>
+                {agent.name}
+              </li>
+            ))}
+          </ul>
+        )}
       </td>
       <td className="px-4 py-3 text-body2 break-all text-text-secondary">
         {vm.creator ?? "Unknown"}

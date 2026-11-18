@@ -473,7 +473,7 @@ describe("<LoggedInView /> workforce space from runtime config", () => {
   });
 });
 
-describe("<LoggedInView /> VM button", () => {
+describe("<LoggedInView /> VM and Agents buttons", () => {
   beforeEach(() => {
     relaxUnhandled();
     stubStartClient(HS);
@@ -502,14 +502,27 @@ describe("<LoggedInView /> VM button", () => {
     localStorage.clear();
   });
 
-  /** The API says this user is an admin, and lists one VM. */
-  const grantAccess = () =>
+  /** The API gives this user `role`, and lists one VM. */
+  const grantAccess = (role = "admin") =>
     mswServer.use(
-      http.get("/_fabrium/v1/access", () =>
-        HttpResponse.json({ user_id: me, role: "admin" }),
-      ),
+      http.get("/_fabrium/v1/access", () => HttpResponse.json({ user_id: me, role })),
       http.get("/_fabrium/v1/vms", () => HttpResponse.json([makeVm()])),
     );
+
+  it.each(["vm-creator", "admin", "owner"])("shows VM and Agents to the role %s", async (role) => {
+    grantAccess(role);
+    render(<App config={{ homeserverUrl: HS }} />);
+    expect(await screen.findByRole("button", { name: "Agents" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "VM" })).toBeInTheDocument();
+  });
+
+  it("shows Agents and no VM to an agents-manager", async () => {
+    grantAccess("agents-manager");
+    render(<App config={{ homeserverUrl: HS }} />);
+    expect(await screen.findByRole("button", { name: "Agents" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "VM" })).toBeNull();
+  });
+
 
   it("shows the VM button when the API grants access, and opens the VM page", async () => {
     grantAccess();
@@ -574,7 +587,7 @@ describe("<LoggedInView /> VM button", () => {
           headers: { "content-type": "text/html" },
         }),
     ],
-  ])("has no VM button after %s", async (_, reply) => {
+  ])("has no VM and no Agents button after %s", async (_, reply) => {
     let answered!: () => void;
     const done = new Promise<void>((resolve) => (answered = resolve));
     mswServer.use(
@@ -591,5 +604,6 @@ describe("<LoggedInView /> VM button", () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
     expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "VM" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Agents" })).toBeNull();
   });
 });

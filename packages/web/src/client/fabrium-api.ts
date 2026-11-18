@@ -1,11 +1,15 @@
-// Client for the Fabrium service API (VM management). The zooid daemon serves it
+// Client for the Fabrium service API (agent and VM management). The zooid daemon serves it
 // under /_fabrium/v1 and checks a Matrix OpenID token; see FABRIUM_WEB_UI_PLAN.md, section 5.
 import type { MatrixClient } from "matrix-js-sdk";
 import type {
+  Agent,
+  AgentInput,
+  AgentList,
   CreateVmRequest,
+  FabriumAccess,
+  ModelList,
   Vm,
-  VmAccess,
-  VmAgent,
+  VmCredentials,
   VmInstanceType,
 } from "../model/types";
 import { MatrixClientPeg } from "./peg";
@@ -28,7 +32,7 @@ export class FabriumApiError extends Error {
   }
 }
 
-/** 403 means the user is not an admin or an owner. 404 means VM management is off. */
+/** 403 means the role of the user is too low. 404 means the API is off. */
 export function isNoAccess(e: unknown): boolean {
   return e instanceof FabriumApiError && (e.status === 403 || e.status === 404);
 }
@@ -96,12 +100,22 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 const vmPath = (id: string, verb = "") => `/vms/${encodeURIComponent(id)}${verb}`;
+const agentPath = (id: string) => `/agents/${encodeURIComponent(id)}`;
 
-export const getAccess = () => call<VmAccess>("GET", "/access");
+export const getAccess = () => call<FabriumAccess>("GET", "/access");
+export const listAgents = () => call<AgentList>("GET", "/agents");
+export const createAgent = (input: AgentInput) => call<Agent>("POST", "/agents", input);
+export const updateAgent = (id: string, input: AgentInput) =>
+  call<Agent>("PUT", agentPath(id), input);
+/** `withVm` also deletes the VM: the daemon needs it for the last agent of a live VM. */
+export const deleteAgent = (id: string, withVm: boolean) =>
+  call<void>("DELETE", `${agentPath(id)}${withVm ? "?vm=1" : ""}`);
+export const listModels = () => call<ModelList>("GET", "/models");
 export const listVms = () => call<Vm[]>("GET", "/vms");
 export const listInstanceTypes = () => call<VmInstanceType[]>("GET", "/instance-types");
-export const listAgents = () => call<VmAgent[]>("GET", "/agents");
 export const createVm = (req: CreateVmRequest) => call<Vm>("POST", "/vms", req);
+export const recreateVm = (id: string, creds: VmCredentials) =>
+  call<Vm>("POST", vmPath(id, "/recreate"), creds);
 export const startVm = (id: string, autoStopHours?: number) =>
   call<Vm>(
     "POST",

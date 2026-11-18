@@ -3,7 +3,7 @@ import { type Room } from "matrix-js-sdk";
 import type * as React from "react";
 import { useMemo } from "react";
 
-import { CircleCheckIcon, CpuIcon, HomeIcon } from "@/components/icons";
+import { BotIcon, CircleCheckIcon, CpuIcon, HomeIcon } from "@/components/icons";
 import { useRoomAvatarMxc } from "@/components/room-avatar";
 import {
   ContextMenu,
@@ -187,16 +187,19 @@ export function WorkspaceRail({
   scope,
   onSelect,
   vm,
+  agents,
   className,
 }: {
   scope: Scope;
   onSelect: (scope: Scope) => void;
   /** The VM button, below Home, for VM managers only. While `active`, no workspace is current. */
   vm?: { active: boolean; onSelect: () => void };
+  /** The Agents button, below VM, for every Fabrium role. While `active`, no workspace is current. */
+  agents?: { active: boolean; onSelect: () => void };
   className?: string;
 }) {
   const workspaces = useWorkspaces();
-  const scopeCurrent = !vm?.active;
+  const scopeCurrent = !vm?.active && !agents?.active;
 
   return (
     <nav
@@ -216,6 +219,11 @@ export function WorkspaceRail({
       {vm ? (
         <RailButton label="VM" isActive={vm.active} onSelect={vm.onSelect}>
           <CpuIcon aria-hidden />
+        </RailButton>
+      ) : null}
+      {agents ? (
+        <RailButton label="Agents" isActive={agents.active} onSelect={agents.onSelect}>
+          <BotIcon aria-hidden />
         </RailButton>
       ) : null}
       {workspaces.length > 0 ? (

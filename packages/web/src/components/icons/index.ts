@@ -17,6 +17,7 @@ export {
   Bell as BellIcon,
   BellOff as BellOffIcon,
   Bold as BoldIcon,
+  Bot as BotIcon,
   Check as CheckIcon,
   ChevronDown as ChevronDownIcon,
   ChevronLeft as ChevronLeftIcon,
