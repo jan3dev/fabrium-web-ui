@@ -3,17 +3,19 @@ import type { MatrixClient } from '@zooid/transport-matrix'
 import { Hono } from 'hono'
 import { createAdmission } from './admission.js'
 import { fetchRecords } from './agent-records.js'
-import { isAdmin, managesVms, requireRole, type Caller } from './auth.js'
+import { agentRoutes } from './agents.js'
+import { managesVms, requireRole, type Caller } from './auth.js'
 import { listBundles } from './bundle.js'
 import type { FabriumApiConfig } from './config.js'
 import { createControlPlane, relay } from './control-plane.js'
 import { createVm, parseAutoStopHours, parseCreateRequest } from './create.js'
 import { ApiError, apiErrorHandler } from './errors.js'
 import type { MatrixConn } from './matrix.js'
+import { createModels } from './models.js'
 import { FULL_COMMIT_RE } from './payload.js'
 import { createQueue } from './queue.js'
 import { createRoster } from './roster.js'
-import { agentsWithFree, fetchVms, liveWorkstations, type LiveDeps } from './vms.js'
+import { fetchVms, type LiveDeps } from './vms.js'
 
 export interface FabriumApiDeps extends FabriumApiConfig {
   // From the daemon.
@@ -122,6 +124,20 @@ export function fabriumApi(deps: FabriumApiDeps): {
     })
   }
 
+  agentRoutes(app, {
+    controlPlane,
+    admission,
+    roster,
+    models: createModels({ fetch: deps.conn.fetch, now: deps.now }),
+    queue,
+    conn: deps.conn,
+    asToken: deps.asToken,
+    getSpaceRoomId: deps.getSpaceRoomId,
+    serverName: deps.serverName,
+    instanceAgents: deps.instanceAgents ?? [],
+    havenModel: deps.havenModel,
+  })
+
   app.get('/access', (c) => {
     const { userId, role } = c.get('caller')
     return c.json({ user_id: userId, role })
@@ -142,15 +158,6 @@ export function fabriumApi(deps: FabriumApiDeps): {
   })
 
   app.get('/instance-types', async () => relay(await controlPlane.request('GET', '/v1/instance-types')))
-
-  app.get('/agents', async (c) => {
-    const result = await fetchVms(controlPlane)
-    if ('failure' in result) return result.failure
-    const caller = c.get('caller')
-    const all = await listBundles(workstationsDir)
-    const bundles = isAdmin(caller.role) ? all : all.filter((b) => b.creator === caller.userId)
-    return c.json(agentsWithFree(bundles, result.vms, await liveWorkstations(live, bundles)))
-  })
 
   app.post('/vms', async (c) => {
     if (!deps.havenModel) throw new ApiError(503, { error: 'FABRIUM_HAVEN_MODEL is not set' })

@@ -6,6 +6,7 @@ export interface FabriumApiConfig {
   controlPlaneUrl: string
   /** The tenant API key. It never leaves the daemon. */
   controlPlaneKey: string
+  /** FABRIUM_HAVEN_MODEL: the model that the agent dialog selects first, when it is on the Haven list. */
   havenModel?: string
   /** Rooms of a new agent: `#alias`, `#alias:server`, or `!id:server`. */
   vmRooms: string[]

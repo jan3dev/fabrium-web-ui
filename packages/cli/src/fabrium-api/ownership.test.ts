@@ -78,19 +78,6 @@ describe('the vm-creator role', () => {
     expect(res.status).toBe(202)
     expect(writes().map((r) => r.path)).toEqual([`/v1/vms/${OWN.id}/start`])
   })
-
-  it('sees only its own agents', async () => {
-    await api.bundle('kilo', 'delta')
-    await api.bundle('lima', 'echo')
-    await recordCreator(join(api.workstationsDir, 'lima'), CARA)
-    const mine = await (await api.request('GET', '/agents', { token: cara })).json()
-    expect(mine.map((a: { workstation: string }) => a.workstation)).toEqual(['lima'])
-    const all = await (await api.request('GET', '/agents')).json()
-    expect(all).toHaveLength(2)
-    // An agents-manager is not an admin: it sees only what it created, here nothing.
-    const dan = api.fake.openIdToken(DAN)
-    expect(await (await api.request('GET', '/agents', { token: dan })).json()).toEqual([])
-  })
 })
 
 describe('PUT /vms/:id/auto-stop', () => {

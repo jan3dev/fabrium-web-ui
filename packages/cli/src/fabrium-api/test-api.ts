@@ -13,6 +13,7 @@ import type { AgentRecord } from './agent-records.js'
 import { MARKER, ensureBundle, type BundleSpec } from './bundle.js'
 import { createFakeMatrix } from './fake-matrix.js'
 import { mountFabriumApi, type FabriumApiDeps } from './index.js'
+import { HAVEN_PRICING_URL } from './models.js'
 
 export const CONTROL_PLANE_URL = 'https://control.example.org'
 export const CONTROL_PLANE_KEY = 'tenant-key-0123456789'
@@ -147,10 +148,14 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
     if (!match) return jsonResponse(404, { error: 'not found' })
     return typeof match.reply === 'function' ? match.reply(req) : match.reply.clone()
   }
+  /** The public Haven model list. With `up` false it answers 503. No test reaches the network. */
+  const haven = { up: true, models: [{ id: 'glm-5-3' }] as unknown[] }
   const fetchAll = ((input: string, init?: RequestInit) =>
     input.startsWith(CONTROL_PLANE_URL)
       ? controlPlaneFetch(input, init)
-      : fake.fetch(input, init)) as typeof fetch
+      : input.startsWith(HAVEN_PRICING_URL)
+        ? Promise.resolve(haven.up ? jsonResponse(200, haven.models) : jsonResponse(503, {}))
+        : fake.fetch(input, init)) as typeof fetch
 
   const homeserver = 'http://tuwunel:8448'
   const deps: FabriumApiDeps = {
@@ -183,6 +188,7 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
     fake,
     deps,
     controlPlane,
+    haven,
     zooidHome,
     workstationsDir,
     registrationsDir,

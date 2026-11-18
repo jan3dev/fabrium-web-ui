@@ -313,16 +313,12 @@ describe('a new agent', () => {
   it.each([
     [409, { error: 'name in use' }],
     [502, { error: 'ec2 failed' }],
-  ])('passes a control plane %i through and keeps the agent free', async (status, expected) => {
+  ])('passes a control plane %i through', async (status, expected) => {
     setup()
     api.controlPlane.on('POST', '/v1/vms', jsonResponse(status, expected))
     const res = await create(body())
     expect(res.status).toBe(status)
     expect(await res.json()).toEqual(expected)
-    const agents = await (await api.request('GET', '/agents')).json()
-    expect(agents).toEqual([
-      expect.objectContaining({ workstation: 'lima', free: true, preset: 'opencode' }),
-    ])
   })
 
   describe('when the create went through but its answer is lost', () => {
@@ -342,14 +338,6 @@ describe('a new agent', () => {
       const res = await create(body())
       expect(res.status).toBe(502)
       expect(await res.json()).toEqual({ error: lost })
-    })
-
-    it('keeps the identity free for the next try, like any control plane failure', async () => {
-      setup({ controlPlaneTimeoutMs: 30 })
-      api.controlPlane.on('POST', '/v1/vms', stalledResponse(201))
-      await create(body())
-      const agents = (await (await api.request('GET', '/agents')).json()) as { free: boolean }[]
-      expect(agents.map((a) => a.free)).toEqual([true])
     })
 
     it('answers 502 control plane unreachable when an error answer stalls', async () => {
@@ -437,16 +425,12 @@ describe('an existing agent', () => {
 
   it('takes the agent once a new-agent request has finished its admission', async () => {
     setup({ whoamiTimeoutMs: 60, pollIntervalMs: 5 })
-    const free = async () =>
-      ((await (await api.request('GET', '/agents')).json()) as { free: boolean }[]).map((a) => a.free)
     api.fake.knobs.adminCommandWorks = false
     expect((await create(body())).status).toBe(502)
-    expect(await free()).toEqual([false])
     expect((await create(existing())).status).toBe(409)
 
     api.fake.knobs.adminCommandWorks = true
     expect((await create(body())).status).toBe(201)
-    expect(await free()).toEqual([true])
     expect((await create(existing())).status).toBe(201)
   })
 
@@ -481,18 +465,15 @@ describe('an existing agent', () => {
       () => {},
     ],
   ])(
-    'keeps an agent whose admission failed at %s (%s) out of the free list until a new-agent request finishes it',
+    'refuses an agent whose admission failed at %s (%s) as an existing agent until a new-agent request finishes it',
     async (step, _what, over, arrange, repair) => {
       setup(over)
       arrange()
-      const free = async () =>
-        ((await (await api.request('GET', '/agents')).json()) as { free: boolean }[]).map((a) => a.free)
       const vmCreates = () => api.controlPlane.requests.filter((r) => r.method === 'POST')
 
       const failed = await create(body())
       expect(failed.status).toBe(502)
       expect(await failed.json()).toMatchObject({ step })
-      expect(await free()).toEqual([false])
 
       const asked = await create(existing())
       expect(asked.status).toBe(409)
@@ -503,7 +484,6 @@ describe('an existing agent', () => {
 
       repair()
       expect((await create(body())).status).toBe(201)
-      expect(await free()).toEqual([true])
       expect((await create(existing())).status).toBe(201)
     },
   )
