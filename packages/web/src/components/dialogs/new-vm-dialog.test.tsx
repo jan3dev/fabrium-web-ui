@@ -41,9 +41,9 @@ const optionTexts = (select: HTMLElement) =>
     .map((o) => o.textContent);
 
 describe("<NewVmDialog>", () => {
-  it("starts in New mode with VM name, agent name, persona, and project", () => {
+  it("starts in New mode with VM name, agent name, tag, and project", () => {
     setup();
-    for (const label of [/^vm name/i, /^agent name/i, /persona/i, /project/i]) {
+    for (const label of [/^vm name/i, /^agent name/i, /^tag/i, /project/i]) {
       expect(screen.getByLabelText(label)).toBeInTheDocument();
     }
     expect(screen.queryByLabelText("Agent")).toBeNull();
@@ -101,7 +101,7 @@ describe("<NewVmDialog>", () => {
     const { user, onSubmit } = setup();
     await user.type(screen.getByLabelText(/^vm name/i), "lima");
     await user.type(screen.getByLabelText(/^agent name/i), "sierra");
-    await user.type(screen.getByLabelText(/persona/i), "Reviewer");
+    await user.type(screen.getByLabelText(/^tag/i), "Reviewer");
     await user.type(screen.getByLabelText(/project/i), "Fabrium");
     await user.type(screen.getByLabelText(/haven api key/i), "hk-1");
     await user.type(screen.getByLabelText(/github token/i), "gh-1");
@@ -124,7 +124,7 @@ describe("<NewVmDialog>", () => {
     const { user, onSubmit } = setup();
     await user.type(screen.getByLabelText(/^vm name/i), " lima ");
     await user.type(screen.getByLabelText(/^agent name/i), " sierra ");
-    await user.type(screen.getByLabelText(/persona/i), "   ");
+    await user.type(screen.getByLabelText(/^tag/i), "   ");
     await user.type(screen.getByLabelText(/haven api key/i), " hk-1 ");
     await user.type(screen.getByLabelText(/github token/i), " ");
     await user.selectOptions(screen.getByLabelText("Instance type"), "c6a.large");

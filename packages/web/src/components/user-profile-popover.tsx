@@ -113,7 +113,7 @@ function AgentFacts({
     .filter((r) => r?.getMyMembership() === "join");
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-body2">
-      <dt className="text-text-tertiary">Persona</dt>
+      <dt className="text-text-tertiary">Tag</dt>
       <dd className="truncate">{actor.persona}</dd>
       {actor.project ? (
         <>

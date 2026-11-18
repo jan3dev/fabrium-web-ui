@@ -267,7 +267,7 @@ export function NewVmDialog({
                   placeholder="echo"
                 />
               </Field>
-              <Field id="agent-persona" label="Persona" optional>
+              <Field id="agent-persona" label="Tag" optional>
                 <Input
                   id="agent-persona"
                   value={form.persona}
