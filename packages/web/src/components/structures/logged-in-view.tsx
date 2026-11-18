@@ -220,12 +220,21 @@ export function LoggedInView({
     />
   );
 
+  const roomHeader = {
+    workforceSpaceId: spaceId,
+    membersOpen: pane === "members",
+    infoOpen: pane === "info",
+    onToggleMembers: () => togglePane("members"),
+    onToggleInfo: () => togglePane("info"),
+  };
+
   return (
     <WorkforceSpaceContext.Provider value={spaceId}>
       <SidebarProvider className="h-svh overflow-hidden bg-sidebar">
         {isMobile ? null : rail}
         <div className="flex min-w-0 flex-1 flex-col">
-          <TopBar workforceSpaceId={spaceId} />
+          {/* On desktop the room header shares the top bar's row; a phone has no room for both. */}
+          <TopBar workforceSpaceId={spaceId} room={roomId && !isMobile ? roomHeader : undefined} />
           <div className="relative flex min-h-0 flex-1">
             <Sidebar>
               {isMobile ? rail : null}
@@ -244,15 +253,7 @@ export function LoggedInView({
               data-testid="logged-in-view"
               className="overflow-hidden border-border md:rounded-tl-card md:border-t md:border-l"
             >
-              {roomId ? (
-                <RoomHeader
-                  workforceSpaceId={spaceId}
-                  membersOpen={pane === "members"}
-                  infoOpen={pane === "info"}
-                  onToggleMembers={() => togglePane("members")}
-                  onToggleInfo={() => togglePane("info")}
-                />
-              ) : null}
+              {roomId && isMobile ? <RoomHeader {...roomHeader} /> : null}
               <div className="relative flex min-h-0 flex-1">
                 {/* Hidden, not unmounted: the timeline keeps its scroll position. */}
                 <div className={cn("min-w-0 flex-1 overflow-hidden", (artifactId || preview) && "hidden")}>

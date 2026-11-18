@@ -5,6 +5,7 @@ import { useJoinRule } from "../../hooks/use-join-rule";
 import { useLoadMoreHistory } from "../../hooks/use-load-more-history";
 import { MatrixClientPeg } from "../../client/peg";
 import { useRoomTopic } from "../../hooks/use-room-topic";
+import { useRoomName } from "../../hooks/use-room-name";
 import { useTimelineEntries } from "../../hooks/use-timeline-entries";
 import type { ThreadSummary, TimelineEntry } from "../../model/types";
 import { RoomGlyph } from "../room-glyph";
@@ -46,12 +47,13 @@ function firstUnreadAfter(
 function RoomIntroFor({ roomId }: { roomId: string }) {
   const room = MatrixClientPeg.safeGet()?.getRoom(roomId);
   const topic = useRoomTopic(roomId);
+  const name = useRoomName(roomId) ?? roomId;
   const { rule } = useJoinRule(roomId);
   const isDm = useDirectRooms().some((r) => r.roomId === roomId);
   const dmUserId = isDm ? (room?.guessDMUserId() ?? null) : null;
   return (
     <RoomIntro
-      name={room?.name ?? roomId}
+      name={name}
       topic={topic}
       isDm={isDm}
       glyph={

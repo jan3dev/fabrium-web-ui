@@ -26,11 +26,19 @@ describe("preview bridge", () => {
 
   it("reads a picked element with its page, on one line", () => {
     expect(
-      msg({ type: "picked", href: `${ORIGIN}/todos`, selector: "ul >\nli", html: "<li>Milk</li>", text: "Milk" }),
+      msg({
+        type: "picked",
+        href: `${ORIGIN}/todos`,
+        selector: "ul >\nli",
+        html: "<li>Milk</li>",
+        text: "Milk",
+        styles: { opacity: "0.5", position: "fixed" },
+      }),
     ).toEqual({
       type: "picked",
       path: "/todos",
       target: { kind: "element", selector: "ul > li", html: "<li>Milk</li>", text: "Milk" },
+      styles: { opacity: "0.5" },
     });
     expect(msg({ type: "picked", href: `${ORIGIN}/`, html: "<li/>" })).toBeNull();
   });
