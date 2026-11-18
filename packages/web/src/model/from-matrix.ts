@@ -7,7 +7,12 @@ import {
 } from "matrix-js-sdk";
 import { ApprovalEventType, decodeApprovalRequest, decodeApprovalResponse } from "@/events/approval";
 import { ElicitationEventType } from "@/events/elicitation";
-import { ArtifactEventType, decodeArtifactVersion, type DecodedArtifact } from "@/events/fabrium-artifact";
+import {
+  ArtifactEventType,
+  decodeArtifactVersion,
+  type DecodedArtifact,
+  mayAuthorArtifact,
+} from "@/events/fabrium-artifact";
 import { decodePreview } from "@/events/fabrium-preview";
 import { isPreviewsEnabled } from "@/client/feature-flags";
 import { readArtifactRefs, stripArtifactRefs } from "@/lib/artifacts/refs";
@@ -89,8 +94,8 @@ interface RelationIndex {
   edits: Map<string, MatrixEvent[]>;
   threads: Map<string, MatrixEvent[]>;
   turns: TurnIndex;
-  /** Each trusted artifact event, decoded, with its version counted per thread + identifier. */
-  artifacts: Map<string, { decoded: DecodedArtifact; version: number }>;
+  /** Each trusted artifact event, by event ID: the version it starts or folds into. */
+  artifacts: Map<string, { build: VersionBuild; folded: boolean }>;
 }
 
 interface TurnIndex {
@@ -192,19 +197,63 @@ function isRedacted(ev: MatrixEvent, redactions: RelationIndex["redactions"], ro
   });
 }
 
-function indexArtifacts(events: readonly MatrixEvent[], roster: Roster | null): RelationIndex["artifacts"] {
-  const counts = new Map<string, number>();
+/** A version while the events are folded: its number, its newest event, its saves. */
+interface VersionBuild {
+  version: number;
+  summary?: string;
+  head: { id: string; decoded: DecodedArtifact };
+  saves: { sender: string; ts: number; count: number; summary?: string } | null;
+  madeFromOlder?: { version: number | null };
+}
+
+/**
+ * Versions per thread + identifier, from allowed authors only (spec D2). An agent's event
+ * starts a version; a person's event folds into the version before it (an autosave), or
+ * starts version 1 when there is none. An event whose `based_on` is not the content
+ * before it marks its version as made from older content.
+ */
+function indexArtifacts(
+  events: readonly MatrixEvent[],
+  room: Room | null,
+  roster: Roster | null,
+  redactions: RelationIndex["redactions"],
+): RelationIndex["artifacts"] {
+  const latest = new Map<string, VersionBuild>();
   const out: RelationIndex["artifacts"] = new Map();
+  const allowed = new Map<string, boolean>();
+  const mayAuthor = (sender: string) => {
+    let ok = allowed.get(sender);
+    if (ok === undefined) allowed.set(sender, (ok = mayAuthorArtifact(room, sender, roster?.isAgent(sender) ?? false)));
+    return ok;
+  };
   for (const ev of events) {
-    // Only an agent's artifact counts (plan §5 trust rule); a human could send the same event type.
-    if (ev.getType() !== ArtifactEventType || !roster?.isAgent(ev.getSender() ?? "")) continue;
+    // Anyone in the room could send the event type; only an allowed author's counts.
+    if (ev.getType() !== ArtifactEventType || !mayAuthor(ev.getSender() ?? "")) continue;
+    // A send that failed or was cancelled, or a redacted one, is no content.
+    if (ev.status === EventStatus.NOT_SENT || ev.status === EventStatus.CANCELLED) continue;
+    if (isRedacted(ev, redactions, room)) continue;
     const decoded = decodeArtifactVersion(ev);
     const id = ev.getId();
     if (!decoded || !id) continue;
     const key = `${ev.getRelation()?.event_id ?? ""}|${decoded.identifier}`;
-    const version = (counts.get(key) ?? 0) + 1;
-    counts.set(key, version);
-    out.set(id, { decoded, version });
+    const before = latest.get(key);
+    const sender = ev.getSender() ?? "";
+    const stale =
+      before && decoded.basedOn && decoded.basedOn !== before.head.id
+        ? { version: out.get(decoded.basedOn)?.build.version ?? null }
+        : undefined;
+    let build: VersionBuild;
+    if (before && !roster?.isAgent(sender)) {
+      build = before;
+      build.head = { id, decoded };
+      build.saves = { sender, ts: ev.getTs(), count: (build.saves?.count ?? 0) + 1, summary: decoded.summary };
+      out.set(id, { build, folded: true });
+    } else {
+      build = { version: (before?.version ?? 0) + 1, summary: decoded.summary, head: { id, decoded }, saves: null };
+      latest.set(key, build);
+      out.set(id, { build, folded: false });
+    }
+    if (stale && !build.madeFromOlder) build.madeFromOlder = stale;
   }
   return out;
 }
@@ -249,7 +298,7 @@ function indexRelations(
     edits,
     threads,
     turns: indexTurns(events),
-    artifacts: indexArtifacts(events, roster),
+    artifacts: indexArtifacts(events, room, roster, redactions),
   };
 }
 
@@ -356,12 +405,26 @@ function classify(
     return raw ? { kind: "approval", body: "", raw } : null;
   }
   if (type === ArtifactEventType) {
+    // A save folded into its version renders nothing of its own: the version's row shows it.
     const hit = artifacts.get(ev.getId() ?? "");
-    if (!hit || isRedacted(ev, redactions, room)) return null;
+    if (!hit || hit.folded) return null;
+    const { build } = hit;
+    const { basedOn: _basedOn, summary: _summary, ...content } = build.head.decoded;
     const raw: ArtifactVersion = {
-      ...hit.decoded,
+      ...content,
       eventId: ev.getId()!,
-      version: hit.version,
+      headEventId: build.head.id,
+      summary: build.summary,
+      edited: build.saves
+        ? {
+            by: toActor(build.saves.sender, room, roster),
+            at: build.saves.ts,
+            saves: build.saves.count,
+            summary: build.saves.summary,
+          }
+        : undefined,
+      madeFromOlder: build.madeFromOlder,
+      version: build.version,
       createdAt: ev.getTs(),
       author: toActor(ev.getSender() ?? "", room, roster),
       threadRootId: ev.getRelation()?.event_id ?? null,

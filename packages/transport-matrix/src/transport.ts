@@ -63,6 +63,7 @@ import { toMatrixHtml } from './markdown-to-matrix-html.js'
 import { PendingMediaStore, type PendingMediaItem } from './pending-media.js'
 import { MediaClient, MAX_INLINE_IMAGE_BYTES, INLINE_IMAGE_MIMES } from './media-client.js'
 import { writeAttachment } from './attachments.js'
+import { userEditedArtifactLines } from './artifacts.js'
 import { SyncLoop } from './sync-loop.js'
 import { NO_PENDING_INPUT } from '@zooid/core'
 import { TaskRegistry, MAX_OPEN_TASKS_PER_ROOM, type TaskJournal, type TaskRecord } from './task-registry.js'
@@ -1465,6 +1466,10 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
 
   async function runTurnBody(agent: AgentBinding, input: TurnInput): Promise<void> {
     const { roomId, threadRoot, sessionKey } = input
+    // Homeserver clock when a Matrix event triggered the turn (the "user edited"
+    // cutoff compares it with origin_server_ts); the daemon's clock otherwise.
+    const startedTs =
+      typeof input.event?.origin_server_ts === 'number' ? input.event.origin_server_ts : Date.now()
     // Agent-promotion: top-level inbound becomes a thread root via the agent's
     // first reply.
     // [[ZOD071]]: the session key is the agent's current handoff arc when it
@@ -1506,22 +1511,33 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         input.event ? inboundThreadRoot(input.event) : undefined,
         input.event?.sender ?? '',
       )
-      const { blocks, pathLines } = await buildMediaBlocks(pendingItems, {
-        agent,
-        media: mediaClient,
-        writeAttachmentFn,
-        onError: (item, err) => {
-          console.warn(`[matrix:${agent.name}] media_failed for ${item.body}:`, err)
-          void sendMediaError(
-            { agent, roomId, threadRoot },
-            err,
-            `Could not process attachment: ${item.body}`,
-            client,
-          )
-        },
-      })
-
-      const fullPromptText = [promptText, ...pathLines].filter(Boolean).join('\n')
+      const [{ blocks, pathLines }, editedLines] = await Promise.all([
+        buildMediaBlocks(pendingItems, {
+          agent,
+          media: mediaClient,
+          writeAttachmentFn,
+          onError: (item, err) => {
+            console.warn(`[matrix:${agent.name}] media_failed for ${item.body}:`, err)
+            void sendMediaError(
+              { agent, roomId, threadRoot },
+              err,
+              `Could not process attachment: ${item.body}`,
+              client,
+            )
+          },
+        }),
+        // Design modes §5.2: the agent learns which artifacts a user changed since its last turn.
+        userEditedArtifactLines(client, {
+          roomId,
+          threadId: threadRoot,
+          asUserId: agent.userId,
+          isHuman: (userId) => !isNotHuman(userId),
+        }).catch((err) => {
+          console.warn(`[matrix:${agent.name}] artifact edit check failed:`, err)
+          return [] as string[]
+        }),
+      ])
+      const fullPromptText = [promptText, ...pathLines, ...editedLines].filter(Boolean).join('\n')
       const promptResult = await agents.prompt(agent.name, {
         threadId: sessionKey,
         channelId: roomId,
@@ -1592,6 +1608,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
               lastMessage: lastFlushed.get(sessionId),
               turnId,
               stopReason,
+              startedTs,
             },
             threadRoot,
           ),

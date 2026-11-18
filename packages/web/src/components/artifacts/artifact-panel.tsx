@@ -10,11 +10,13 @@ import {
   DownloadIcon,
   EyeIcon,
   FileDiffIcon,
+  InfoIcon,
   PointerClickIcon,
   PrinterIcon,
   WarningIcon,
 } from "@/components/icons";
 import { DiffView } from "@/components/timeline/diff-view";
+import { ArtifactEventType } from "@/events/fabrium-artifact";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,7 +36,10 @@ import {
   useThreadArtifacts,
 } from "@/hooks/use-artifacts";
 import { useActor } from "@/hooks/use-actor";
+import { headAuthor, useArtifactDraft } from "@/hooks/use-artifact-draft";
+import { useGuestIds } from "@/hooks/use-member-roles";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useMyPowerLevel } from "@/hooks/use-my-power-level";
 import { useStyleDraft } from "@/hooks/use-style-draft";
 import {
   addArtifactRefDraft,
@@ -47,10 +52,34 @@ import {
   designSystemSections,
   type DesignSystemSection,
   parseDesignSystem,
+  sectionLabel,
   type TokenSection,
 } from "@/lib/artifacts/design-system";
 import {
+  addFrame,
+  addToken,
+  artboardSection,
+  changedFrames,
+  deleteFrame,
+  duplicateFrame,
+  frameSources,
+  moveFrame,
+  pasteFrame,
+  renameFrame,
+  resizeFrame,
+  setComponentDescription,
+  setFrameNotes,
+  setFrameSkip,
+  setOverview,
+  setTokenField,
+  slideLayouts,
+  withFrames,
+} from "@/lib/artifacts/edit";
+import {
+  FRAME_SIZE,
+  type FrameKind,
   isFrameKind,
+  MAX_NAME,
   type PresenterMessage,
   presenterChannel,
   readFrames,
@@ -64,16 +93,31 @@ import { annotationNote } from "@/lib/artifacts/styles";
 import { copyToClipboard, downloadBlob } from "@/lib/browser-actions";
 import { isEditableKeyboardTarget } from "@/lib/keyboard-shortcuts";
 import { cn } from "@/lib/utils";
-import type { ArtifactKind } from "@/model/types";
+import type { ActorKind, ArtifactKind } from "@/model/types";
 import { ArtifactKindIcon, artifactKindLabel } from "./artifact-card";
+import {
+  ArtifactTitleMenu,
+  type FrameAction,
+  FrameMenu,
+  type FrameSize,
+  frameUnit,
+  NameDialog,
+  SizeDialog,
+  VersionMenu,
+} from "./artifact-menus";
 import { ArtifactPreview, type ArtifactPreviewHandle, PrintFrame } from "./artifact-preview";
 import { AnnotationForm } from "./artifact-refs";
 import { ArtifactTextView } from "./artifact-text-view";
+import { DesignSystemEditor } from "./design-system-editor";
+import { SpeakerNotesField } from "./speaker-notes-field";
 import { DesignSystemNav } from "./design-system-nav";
+import { LayoutPicker } from "./layout-picker";
 import { FrameControls, FrameRail, type PresentMode } from "./frame-rail";
 import { StyleInspector } from "./style-inspector";
 
 type Tab = "preview" | "code" | "changes";
+
+const DEFAULT_ARTBOARD = { width: FRAME_SIZE.design[0], height: FRAME_SIZE.design[1] };
 
 const EXTENSION: Record<ArtifactKind, string> = {
   html: "html",
@@ -113,7 +157,13 @@ export function ArtifactPanel({
     : versions.length - 1;
   const current = versions[index];
   const previous = index > 0 ? versions[index - 1] : undefined;
-  const { text, error } = useArtifactText(current);
+  const latest = versions.at(-1);
+  const onLatest = current !== undefined && current === latest;
+  const { text: versionText, error } = useArtifactText(current);
+  const latestState = useArtifactText(latest);
+  const edits = useArtifactDraft(roomId, threadRootId, latest, latestState.text);
+  // The user's edits, unsent or on their way, show in place of the latest version.
+  const text = onLatest && edits.text !== null ? edits.text : versionText;
 
   const previewable = current !== undefined && current.kind !== "code";
   const [tabChoice, setTab] = useState<Tab>("preview");
@@ -123,7 +173,10 @@ export function ArtifactPanel({
       : tabChoice === "preview" && !previewable
         ? "code"
         : tabChoice;
-  const prevState = useArtifactText(tab === "changes" ? previous : undefined);
+  // Slides and design also need it for the changed marks.
+  const prevState = useArtifactText(
+    tab === "changes" || (current && isFrameKind(current.kind)) ? previous : undefined,
+  );
 
   // Design system: parsed once per version; the open section is kept per artifact and
   // falls back to the first one with content.
@@ -156,7 +209,29 @@ export function ArtifactPanel({
           : buildArtifactSrcdoc(current.kind, text, channel),
     [framed, current?.kind, text, channel, system, section],
   );
-  const viewer = useActor(MatrixClientPeg.safeGet()?.getUserId() ?? "", roomId);
+  // Add slide: the layout picker for a new slide after `picker`, in the deck's design.
+  const [picker, setPicker] = useState<number | null>(null);
+  const layoutChoice = useMemo(() => {
+    if (picker === null || frameKind !== "slides" || text === null) return null;
+    const layouts = slideLayouts(text, picker);
+    const deck = withFrames(text, layouts.map((l) => l.section));
+    return { layouts, srcdoc: buildArtifactSrcdoc("slides", deck, channel) };
+  }, [picker, frameKind, text, channel]);
+  const me = MatrixClientPeg.safeGet()?.getUserId() ?? "";
+  const viewer = useActor(me, roomId);
+  // Spec D2 (as `mayAuthorArtifact`, but live): a human who may send the event type and is
+  // no guest edits; agents see the viewer.
+  const canSend = useMyPowerLevel(roomId).canSendEvent(ArtifactEventType);
+  const guest = useGuestIds(roomId, null).has(me);
+  const mayEdit = viewer.kind === "human" && canSend && !guest;
+  // Frames the shown version changed against the one before, both as edited; null while either loads.
+  const changed = useMemo(
+    () =>
+      frameKind && previous && prevState.text !== null && versionText !== null
+        ? changedFrames(prevState.text, versionText)
+        : null,
+    [frameKind, previous, prevState.text, versionText],
+  );
 
   const [annotating, setAnnotating] = useState(false);
   const [target, setTarget] = useState<ArtifactRefTarget | null>(null);
@@ -177,6 +252,48 @@ export function ArtifactPanel({
   );
   const [zoom, setZoom] = useState<number | null>(null);
   const [grid, setGrid] = useState(false);
+  const [dsEditing, setDsEditing] = useState(false);
+  const [dialog, setDialog] = useState<
+    { type: "rename" } | { type: "rename-frame"; index: number } | { type: "size"; index: number; add: boolean } | null
+  >(null);
+  // Changed marks (spec §6.8). Content from someone else that arrives while the panel is
+  // open, a new version or a save into one, marks the frames it changed against the
+  // content shown before; the panel jumps to the first and outlines the stage for two seconds.
+  const seen = useRef<{ head: string; text: string } | null>(null);
+  const [arrival, setArrival] = useState<{
+    version: string;
+    head: string;
+    indexes: number[];
+    actor: ActorKind;
+    jumped: boolean;
+  } | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+  const latestText = latestState.text;
+  useEffect(() => {
+    if (!latest || latestText === null || latest.headEventId.startsWith("~")) return;
+    const prev = seen.current;
+    if (prev?.head === latest.headEventId) return;
+    seen.current = { head: latest.headEventId, text: latestText };
+    const author = headAuthor(latest);
+    if (!prev || author.id === me || !isFrameKind(latest.kind)) return;
+    setArrival({
+      version: latest.eventId,
+      head: latest.headEventId,
+      indexes: changedFrames(prev.text, latestText),
+      actor: author.kind,
+      jumped: false,
+    });
+  }, [latest, latestText, me]);
+  const currentId = current?.eventId;
+  useEffect(() => {
+    if (!arrival || arrival.jumped || !current || currentId !== arrival.version) return;
+    setArrival({ ...arrival, jumped: true });
+    if (arrival.indexes.length === 0) return;
+    setFrameState({ id: current.identifier, index: arrival.indexes[0]! });
+    setFlash(arrival.head);
+    setTimeout(() => setFlash((f) => (f === arrival.head ? null : f)), 2000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per arrival
+  }, [arrival, currentId]);
   const stage = useRef<HTMLDivElement>(null);
   // Present: skipped slides are left out. Fullscreen is separate (F toggles it), so a
   // presentation run from the presenter window can stay in a normal window.
@@ -248,19 +365,157 @@ export function ArtifactPanel({
   }
 
   const frameErrors = errors.id === current.eventId ? errors.list : [];
-  const latest = versions[versions.length - 1]!;
   const dsInvalid = tab === "preview" && current.kind === "design-system" && text !== null && !system;
   const dsEmpty = tab === "preview" && system !== null && dsSections.length === 0;
   const framing = frameKind !== null && srcdoc !== null && frames.length > 0;
-  const canAnnotate = tab !== "changes" && text !== null && !dsInvalid && !dsEmpty && !(framing && grid);
+  // Edit controls: the latest version, for users with edit rights (spec D2), never while presenting.
+  const editable = mayEdit && onLatest && text !== null && !presenting;
+  const dsEditor =
+    dsEditing && editable && system !== null && section !== undefined && tab === "preview" ? section : null;
+  const canAnnotate =
+    tab !== "changes" && text !== null && !dsInvalid && !dsEmpty && !(framing && grid) && dsEditor === null;
   const deckNotes = frameKind === "slides" && frames.some((f) => f.notes);
+  // Marks: what arrived from someone else into this version; else, for a version nobody saved
+  // into yet, what it changed against the one before (in its author's color, so a person's
+  // edit never shows in the agent's). The user's own edits on top shift the frames: none then.
+  const marks =
+    arrival?.version === current.eventId && arrival.indexes.length > 0
+      ? { indexes: arrival.indexes, actor: arrival.actor }
+      : !current.edited && changed && changed.length > 0
+        ? { indexes: changed, actor: current.author.kind }
+        : undefined;
+  const frameEdit =
+    editable && frameKind ? { kind: frameKind, onAction: frameAction, onMove: moveByDrag } : undefined;
   const rail = framing
-    ? { label: frameKind === "slides" ? "Slides" : "Screens", frames, srcdoc: srcdoc!, channel, active: frameIndex }
+    ? {
+        label: frameKind === "slides" ? "Slides" : "Screens",
+        frames,
+        srcdoc: srcdoc!,
+        channel,
+        active: frameIndex,
+        edit: frameEdit,
+        changed: onLatest && edits.text !== null ? undefined : marks,
+      }
     : null;
   presenterLink.current = {
     deck: text === null ? null : { type: "deck", title: current.title, text, index: frameIndex },
     go: selectFrame,
   };
+
+  /**
+   * One user edit to the shown text; it autosaves into the latest version (spec §5.2). The
+   * route names the version by its first event, which a save does not change, so the panel
+   * stays on it. A field that commits as it unmounts may still call this while the panel closes.
+   */
+  function edit(change: (text: string) => string, summary: string, select?: number) {
+    if (!current || !edits.apply(change, summary)) return;
+    if (select !== undefined) setFrameState({ id: current.identifier, index: select });
+  }
+
+  function frameAction(i: number, action: FrameAction) {
+    if (!frameKind || text === null) return;
+    const unit = frameUnit(frameKind);
+    const n = i + 1;
+    switch (action.type) {
+      case "add":
+        // A slide starts from a layout the user picks; an artboard from a size (its own if none).
+        if (frameKind === "slides") return setPicker(i);
+        return addArtboard(i, action.size ?? frames[i] ?? DEFAULT_ARTBOARD);
+      case "duplicate":
+        return edit((t) => duplicateFrame(t, i), `Duplicated ${unit} ${n}`, i + 1);
+      case "copy":
+        return copyToClipboard(frameSources(text)[i] ?? "", `${unit === "slide" ? "Slide" : "Artboard"} copied`);
+      case "paste":
+        return void paste(frameKind, i);
+      case "move":
+        return edit((t) => moveFrame(t, i, i + action.by), `Moved ${unit} ${n}`, i + action.by);
+      case "skip": {
+        const skip = !frames[i]?.skip;
+        return edit((t) => setFrameSkip(t, i, skip), `${skip ? "Skipped" : "Included"} ${unit} ${n}`);
+      }
+      case "delete":
+        return edit((t) => deleteFrame(t, i), `Deleted ${unit} ${n}`, Math.max(0, Math.min(i, frames.length - 2)));
+      case "resize":
+        return resize(frameKind, i, action.size);
+      case "rename":
+        return setDialog({ type: "rename-frame", index: i });
+      case "add-custom":
+      case "resize-custom":
+        return setDialog({ type: "size", index: i, add: action.type === "add-custom" });
+    }
+  }
+
+  function resize(kind: FrameKind, i: number, size: FrameSize) {
+    edit(
+      (t) => resizeFrame(t, i, size.width, size.height),
+      `Resized ${frameUnit(kind)} ${i + 1} to ${size.width}×${size.height}`,
+    );
+  }
+
+  function addArtboard(i: number, size: FrameSize) {
+    edit((t) => addFrame(t, i, artboardSection(size)), `Added artboard ${i + 2}`, i + 1);
+  }
+
+  function moveByDrag(from: number, to: number) {
+    if (frameKind) edit((t) => moveFrame(t, from, to), `Moved ${frameUnit(frameKind)} ${from + 1}`, to);
+  }
+
+  /** The clipboard's text is markup from outside: only a section parsed from it is kept. */
+  async function paste(kind: FrameKind, i: number) {
+    let clip: string;
+    try {
+      clip = await navigator.clipboard.readText();
+    } catch {
+      toast.error("Could not read the clipboard");
+      return;
+    }
+    // `edits.apply` shows a thrown message as a toast.
+    edit(
+      (t) => {
+        const next = pasteFrame(t, i, clip);
+        if (next === null) throw new Error(`The clipboard holds no ${frameUnit(kind)}`);
+        return next;
+      },
+      `Pasted ${frameUnit(kind)} ${i + 2}`,
+      i + 1,
+    );
+  }
+
+  function rename(title: string) {
+    edits.flush();
+    void edits.send({ title: title.slice(0, 200), summary: `Renamed to ${title}` }).catch(() => {});
+  }
+
+  /** The shown version under a new identifier in the same thread, then opens it. */
+  function duplicate() {
+    if (!current || text === null) return;
+    edits.flush();
+    const taken = new Set(all.map((v) => v.identifier));
+    const stem = `${current.identifier.slice(0, 70)}-copy`;
+    let identifier = stem;
+    for (let n = 2; taken.has(identifier); n++) identifier = `${stem}-${n}`;
+    void edits
+      .send({
+        identifier,
+        title: `${current.title} (copy)`.slice(0, 200),
+        text,
+        basedOn: current.headEventId,
+        summary: `Duplicated from ${current.title} v${current.version}`,
+      })
+      .then(() => route.open(identifier), () => {});
+  }
+
+  /** The shown older version's content, saved into the latest version (not a new version). */
+  function restore() {
+    if (!current || versionText === null) return;
+    if (latestState.text === null) {
+      toast.error("The latest version is still loading. Try again in a moment.");
+      return;
+    }
+    const restored = versionText;
+    if (edits.apply(() => restored, `Restored v${current.version}`)) edits.flush();
+    route.open(current.identifier);
+  }
 
   function selectFrame(i: number) {
     if (!current || i === frameIndex || i < 0 || i >= frames.length) return;
@@ -339,6 +594,7 @@ export function ArtifactPanel({
   function goTo(i: number) {
     const v = versions[i];
     if (!v) return;
+    edits.flush();
     resetAnnotation();
     route.open(v.identifier, v.eventId);
   }
@@ -351,6 +607,7 @@ export function ArtifactPanel({
   }
 
   function selectTab(next: Tab) {
+    edits.flush();
     resetAnnotation();
     setTab(next);
   }
@@ -377,6 +634,10 @@ export function ArtifactPanel({
   }
 
   function addValue(s: TokenSection, name: string, value: string) {
+    if (editable) {
+      edit((t) => addToken(t, s, name, value), `Added ${name} to ${sectionLabel(s)}`);
+      return;
+    }
     const ref = addValueRef(s, name, value);
     if (addRef(ref.target, ref.note)) toast("Added to your reply");
   }
@@ -421,9 +682,27 @@ export function ArtifactPanel({
   const nextTab = tabs.length > 1 ? tabs[(tabs.findIndex((t) => t.value === tab) + 1) % tabs.length] : undefined;
 
   return (
-    <PanelShell mobile={isMobile} title={current.title}>
+    <PanelShell
+      mobile={isMobile}
+      title={current.title}
+      // Undo and redo of the user's edits, outside text fields (they keep their own).
+      onKeyDown={(e) => {
+        if (editable && !isEditableKeyboardTarget(e.target) && edits.onKey(e)) e.preventDefault();
+      }}
+    >
       <Header
         title={current.title}
+        titleMenu={
+          mayEdit && text !== null ? (
+            <ArtifactTitleMenu
+              title={current.title}
+              older={!onLatest}
+              onRename={() => setDialog({ type: "rename" })}
+              onDuplicate={duplicate}
+              onRestore={restore}
+            />
+          ) : undefined
+        }
         subtitle={artifactKindLabel(current.kind, current.language)}
         kind={current.kind}
         onClose={route.close}
@@ -436,19 +715,42 @@ export function ArtifactPanel({
               disabled={index === 0}
               onClick={() => goTo(index - 1)}
             />
-            <span className="text-caption1 text-text-secondary tabular-nums">
-              v{current.version} of {latest.version}
-            </span>
+            <VersionMenu
+              versions={versions}
+              current={current.eventId}
+              onSelect={(id) => goTo(versions.findIndex((v) => v.eventId === id))}
+            />
             <IconButton
               size="small"
               icon={<ChevronRightIcon />}
               label="Next version"
-              disabled={current === latest}
+              disabled={onLatest}
               onClick={() => goTo(index + 1)}
             />
           </>
         }
       />
+
+      {current.madeFromOlder ? (
+        <div
+          role="note"
+          data-testid="artifact-older-base"
+          className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-caption1 text-text-secondary"
+        >
+          <InfoIcon className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1">
+            {current.madeFromOlder.version === current.version
+              ? "Saved over newer changes to this version."
+              : `Made from an older version${current.madeFromOlder.version ? ` (v${current.madeFromOlder.version})` : ""}.`}{" "}
+            Changes made since then may be missing.
+          </span>
+          {tab === "changes" || !previous ? null : (
+            <Button size="xs" variant="utility" onClick={() => selectTab("changes")}>
+              Show changes
+            </Button>
+          )}
+        </div>
+      ) : null}
 
       {system && section && tab === "preview" ? (
         <DesignSystemNav
@@ -456,6 +758,8 @@ export function ArtifactPanel({
           section={section}
           onSectionChange={selectSection}
           onAdd={viewer.kind === "human" ? addValue : undefined}
+          editing={dsEditor !== null}
+          onEditChange={editable ? setDsEditing : undefined}
         />
       ) : null}
 
@@ -513,6 +817,16 @@ export function ArtifactPanel({
                 onEnd={endPresent}
               />
             ) : null}
+            {/* On a phone there is no rail: the open slide's menu sits here. */}
+            {isMobile && frameEdit && framing && !grid ? (
+              <FrameMenu
+                kind={frameEdit.kind}
+                index={frameIndex}
+                count={frames.length}
+                skip={frames[frameIndex]?.skip}
+                onAction={(action) => frameAction(frameIndex, action)}
+              />
+            ) : null}
             {presenting ? null : (
               <>
                 <IconButton
@@ -555,6 +869,13 @@ export function ArtifactPanel({
           </div>
           {/* The Present target: fullscreen shows the stage alone. */}
           <div ref={stage} tabIndex={-1} className="relative min-h-0 min-w-0 flex-1 bg-background focus:outline-none">
+            {flash !== null && arrival?.head === flash && arrival.version === current.eventId ? (
+              <div
+                aria-hidden
+                data-testid="artifact-changed-outline"
+                className={cn("pointer-events-none absolute inset-0 z-[5] ring-2 ring-inset", RING[arrival.actor])}
+              />
+            ) : null}
             {error ? (
               <p role="alert" className="p-4 text-body2 text-accent-danger">
                 {error}
@@ -585,6 +906,23 @@ export function ArtifactPanel({
               <p role="alert" className="p-4 text-body2 text-text-secondary">
                 This design system can&apos;t be shown: its content is not a valid JSON object.
               </p>
+            ) : dsEditor !== null && system ? (
+              <DesignSystemEditor
+                // Not per version: the user's own versions must not reset the field being typed in.
+                key={`${edits.generation}:${dsEditor}`}
+                system={system}
+                section={dsEditor}
+                onOverview={(v) => edit((t) => setOverview(t, v), "Edited the overview")}
+                onToken={(s, name, field, v) =>
+                  edit(
+                    (t) => setTokenField(t, s, name, field, v),
+                    field === "value" ? `Changed ${name} in ${sectionLabel(s)}` : `Edited the note on ${name}`,
+                  )
+                }
+                onComponent={(name, v) =>
+                  edit((t) => setComponentDescription(t, name, v), `Edited the note on ${name}`)
+                }
+              />
             ) : dsEmpty ? (
               <p className="p-4 text-body2 text-text-secondary">
                 This design system is empty. Ask the agent to add colors, type or components.
@@ -644,14 +982,24 @@ export function ArtifactPanel({
             )}
           </div>
           {/* Read-only here; never on the slide (the frame hides `aside[data-notes]`). */}
-          {framing && deckNotes && !grid ? (
+          {framing && frameKind === "slides" && (deckNotes || editable) && !grid ? (
             <details open data-testid="speaker-notes" className="shrink-0 border-t border-border">
               <summary className="cursor-pointer px-3 py-1.5 text-caption1 font-medium text-text-secondary">
                 Speaker notes
               </summary>
-              <p className="max-h-40 overflow-y-auto px-3 pb-3 text-body2 whitespace-pre-line text-text-primary">
-                {frames[frameIndex]?.notes || "No notes for this slide."}
-              </p>
+              {editable ? (
+                <SpeakerNotesField
+                  key={`${edits.generation}:${frameIndex}`}
+                  value={frames[frameIndex]?.notes ?? ""}
+                  onCommit={(notes) =>
+                    edit((t) => setFrameNotes(t, frameIndex, notes), `Edited the notes on slide ${frameIndex + 1}`)
+                  }
+                />
+              ) : (
+                <p className="max-h-40 overflow-y-auto px-3 pb-3 text-body2 whitespace-pre-line text-text-primary">
+                  {frames[frameIndex]?.notes || "No notes for this slide."}
+                </p>
+              )}
             </details>
           ) : null}
         </div>
@@ -712,6 +1060,58 @@ export function ArtifactPanel({
         <PrintFrame srcdoc={printDoc} channel={channel} onDone={() => setPrintDoc(null)} />
       ) : null}
 
+      {layoutChoice && picker !== null ? (
+        <LayoutPicker
+          open
+          layouts={layoutChoice.layouts}
+          srcdoc={layoutChoice.srcdoc}
+          channel={channel}
+          onPick={(name) =>
+            edit(
+              (t) => addFrame(t, picker, slideLayouts(t, picker).find((l) => l.name === name)!.section),
+              `Added slide ${picker + 2}`,
+              picker + 1,
+            )
+          }
+          onOpenChange={(open) => !open && setPicker(null)}
+        />
+      ) : null}
+      {dialog?.type === "rename" ? (
+        <NameDialog
+          open
+          title="Rename artifact"
+          value={current.title}
+          maxLength={200}
+          onSubmit={rename}
+          onOpenChange={(open) => !open && setDialog(null)}
+        />
+      ) : null}
+      {dialog?.type === "rename-frame" && frameKind ? (
+        <NameDialog
+          open
+          optional
+          title={`Rename ${frameUnit(frameKind)} ${dialog.index + 1}`}
+          value={frames[dialog.index]?.name ?? ""}
+          maxLength={MAX_NAME}
+          onSubmit={(name) =>
+            edit(
+              (t) => renameFrame(t, frameKind, dialog.index, name),
+              `Renamed ${frameUnit(frameKind)} ${dialog.index + 1}`,
+            )
+          }
+          onOpenChange={(open) => !open && setDialog(null)}
+        />
+      ) : null}
+      {dialog?.type === "size" && frameKind ? (
+        <SizeDialog
+          open
+          title={dialog.add ? "Add artboard" : `Resize artboard ${dialog.index + 1}`}
+          value={frames[dialog.index] ?? DEFAULT_ARTBOARD}
+          onSubmit={(size) => (dialog.add ? addArtboard(dialog.index, size) : resize(frameKind, dialog.index, size))}
+          onOpenChange={(open) => !open && setDialog(null)}
+        />
+      ) : null}
+
       <AlertDialog
         open={link !== null}
         onOpenChange={(open) => !open && setLink(null)}
@@ -743,15 +1143,18 @@ function PanelShell({
   mobile,
   title,
   children,
+  onKeyDown,
 }: {
   mobile: boolean;
   title?: string;
   children: React.ReactNode;
+  onKeyDown?: React.KeyboardEventHandler<HTMLElement>;
 }) {
   return (
     <section
       aria-label={title ? `Artifact: ${title}` : "Artifact"}
       data-testid="artifact-panel"
+      onKeyDown={onKeyDown}
       className={cn(
         "flex min-w-0 flex-col bg-background",
         mobile
@@ -766,12 +1169,15 @@ function PanelShell({
 
 function Header({
   title,
+  titleMenu,
   subtitle,
   kind,
   actions,
   onClose,
 }: {
   title: string;
+  /** Replaces the plain title: the title menu, for users with edit rights. */
+  titleMenu?: React.ReactNode;
   subtitle?: string;
   kind?: ArtifactKind;
   actions?: React.ReactNode;
@@ -786,9 +1192,11 @@ function Header({
         />
       ) : null}
       <div className="min-w-0 flex-1">
-        <h2 className="truncate font-heading text-subtitle font-semibold">
-          {title}
-        </h2>
+        {titleMenu ?? (
+          <h2 className="truncate font-heading text-subtitle font-semibold">
+            {title}
+          </h2>
+        )}
         {subtitle ? (
           <p className="truncate text-caption1 text-text-tertiary">
             {subtitle}
@@ -807,3 +1215,9 @@ function Header({
     </div>
   );
 }
+
+const RING: Record<ActorKind, string> = {
+  agent: "ring-actor-agent",
+  human: "ring-actor-human",
+  system: "ring-actor-system",
+};

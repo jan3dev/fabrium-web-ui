@@ -26,7 +26,7 @@ We did not inspect the reference product's code. Everything here is from its doc
 
 ### 1.2 Where Fabrium already differs
 
-- **Versions.** Every change is a version with a diff (Changes tab). The reference has no version history. We keep ours and add Restore.
+- **Versions.** Every change by an agent is a version with a diff (Changes tab). A user's edits autosave into the current version (§5.2). The reference has no version history. We keep ours and add Restore.
 - **The agent is a coding agent with a workspace.** "Hand off to a coding agent", "export as PowerPoint" and "render as MP4" are requests to the agent in the same thread, not separate products (§6.9).
 - **Sharing is room membership.** Everyone in the room sees the artifact. There is no share dialog.
 
@@ -229,7 +229,7 @@ Columns: what the reference does, the source (§1.1), what we have, and the leve
 
 1. **One document per artifact, in a web format.** Slides and designs stay HTML with one `<section>` per frame. A design system stays JSON. An agent can write and edit all of them with the tools it has, and a download works without Fabrium.
 2. **The frame is untrusted.** Agent markup runs only in the sandboxed frame with no network. The frame reports gestures; the app decides what changes (§5.3). No HTML ever travels from the frame into a saved version.
-3. **Every change is a version.** A user edit and an agent edit are the same event type in the same thread. Undo, Restore, the diff and the audit trail come from that.
+3. **Every change is an event.** A user edit and an agent edit are the same event type in the same thread. Undo, Restore, the diff and the audit trail come from that. Only an agent's event counts as a new version in the UI; a user's edits are saves into the current one (§5.2).
 4. **The agent stays the default editor.** Direct editing is for small, exact changes. Structure and content changes go through the thread, where the agent's design-system rules apply.
 5. **Build only what works without a new backend service** until level 4 (which needs one new state event) and level 5 (which needs agent-side render tools).
 
@@ -246,6 +246,7 @@ All are plain attributes and elements the agent writes. Unknown ones are ignored
 | `<aside data-notes>` as a child of the section | Speaker notes, plain text or simple inline markup. Never shown on the slide. | 1 |
 | `data-skip` on the section | Left out of Present and exports | 1 |
 | `data-transition="none\|fade\|slide"` on `body` or a section | Transition into that slide. Off under `prefers-reduced-motion`. | 1 |
+| `<template data-layout="NAME">` in `head` (slides) | A slide layout in the deck's own design: one `<section>` with placeholder text. Names: `blank`, `title`, `section`, `title-body`, `bullets`, `two-columns`, `table`, `quote`, `image-caption`, `closing`. Not a slide, never shown. Add slide offers them (§6.2). | 2 |
 | `data-layer="Name"` on any element | Its name in the layers list; else tag and first text | 3 |
 | `data-free` on an element | Free-placed: `position: absolute` with `left`, `top`, `width`, `height` in px on the canvas. Move and resize write these four. Other elements are in flow and only swap with siblings. | 3 |
 | `data-lock` on an element | Cannot be selected by hand (layout-owned) | 3 |
@@ -274,6 +275,8 @@ Rules:
 - If a new version's `based_on` is not the version before it, the panel marks it "Made from an older version" and offers the diff. No merge.
 - The daemon resolves `edits` against the latest version from any allowed author, not only the agent's own.
 - The agent must learn that the user changed the artifact. The daemon adds one line to the next turn ("The user edited artifact `<identifier>`: `<summary>`") and the agent can read the current content with `zooid_artifact` `{ identifier, read: true }`.
+- **A user's edits are saves, not versions.** In the UI a version event from a human folds into the version before it: it replaces that version's content, adds no version number and shows no card in the thread. An agent's event always starts a new version. A human's event with no version before it (Duplicate) is version 1. The version list shows that a version was edited, by whom and when. On the wire nothing differs: the daemon reads a save as the latest version.
+- A turn's `dev.zooid.turn.end` carries `started_ts`. The "user edited" line covers every save since the previous turn started, so an edit made while the agent worked is reported on the next turn.
 - A user version is still a draft until sent: edits collect in memory with a 1.5 s idle debounce and an explicit flush on blur, tab change and close, so a drag does not produce twenty events. Undo and redo work on the unsent stack and, past it, send the older content as a new version.
 
 ### 5.3 Edit pipeline
@@ -333,7 +336,7 @@ dev.fabrium.design_systems   (state_key "")
 └────────────────┴────────────────────────────────────────────────────────┴─────────────────────────────┘
 ```
 
-- The title menu holds Rename, Duplicate, Restore this version.
+- The title menu holds Rename, Duplicate, Restore this version. Restore saves the old content into the current version.
 - Properties is closed by default and remembers its state per user. While it is closed, a floating toolbar over the selection holds the five most used controls.
 - Mobile: no rail and no properties panel. Preview cards are a horizontal strip, properties open as a sheet, direct editing is limited to retype, delete and the slide menu.
 - Only humans see edit controls. Agents see the viewer (as for Annotate today).
@@ -342,8 +345,8 @@ dev.fabrium.design_systems   (state_key "")
 ### 6.2 Slides
 
 - **Rail:** preview cards with number and name; the active card has `aria-current`. A skipped card is dimmed and marked "Skipped". A card changed in the latest version has a dot in the agent's actor color.
-- **Slide menu** (button on the card, right-click, `Shift+F10`): Add slide after, Duplicate slide, Copy, Paste after, Move left, Move right, Skip slide / Include slide, Delete slide. Drag a card to move it. A deck keeps at least one slide.
-- **Add slide:** a new `<section>` after the active one, copied from the deck's last used layout with its text emptied. "Add" at the end of the rail does the same. A blank slide is the fallback.
+- **Slide menu** (button on the card, right-click, `Shift+F10`): Add slide after, Duplicate slide, Copy, Paste after, Move up, Move down, Skip slide / Include slide, Delete slide. Drag a card to move it. A deck keeps at least one slide.
+- **Add slide:** opens a layout picker with ten choices, each a live preview in the deck's design: Blank, Title, Section, Title and body, Bullets, Two columns, Table, Quote, Image and caption, Closing. The layouts are the deck's `<template data-layout>` elements (§5.1), which the agent writes with every deck. For a layout the deck does not provide, the app builds the section from plain elements with the deck's slide classes. The chosen layout becomes a new `<section>` after the active one. "Add" at the end of the rail does the same.
 - **Copy and paste:** the slide's markup goes to the system clipboard as text. Paste works in any deck in Fabrium; the pasted markup is parsed into the inert source and shows only in the frame.
 - **Grid view:** a toggle beside zoom. All slides as cards; click opens one, drag moves, the slide menu works.
 - **Zoom:** Fit, 50%, 100%, 200%, and `Cmd+Plus`, `Cmd+Minus`, `Cmd+0`.
@@ -509,12 +512,14 @@ Level 1:
 
 Level 2:
 
-- [ ] `lib/artifacts/edit.ts`: pure operations on the inert source for sections and notes, and on design-system JSON; unit tests.
-- [ ] Send a version from the client (`client/` + `events/fabrium-artifact.ts`: `based_on`, `summary`); debounce, flush, undo stack.
-- [ ] Decide and enforce who may author a version (D2). The decoder has no sender rule today.
-- [ ] Slide and artboard menus, drag to reorder, clipboard; "Made from an older version" notice; Restore and Duplicate in the title menu.
-- [ ] Design-system page: edit and add in place (the Add form writes instead of annotating; annotation stays for users without edit rights).
-- [ ] Changed marks from the diff of two versions.
+- [x] `lib/artifacts/edit.ts`: pure operations on the inert source for sections and notes, and on design-system JSON; unit tests.
+- [x] Send a version from the client (`client/` + `events/fabrium-artifact.ts`: `based_on`, `summary`); debounce, flush, undo stack.
+- [x] Decide and enforce who may author a version (D2). The decoder has no sender rule today.
+- [x] Slide and artboard menus, drag to reorder, clipboard; "Made from an older version" notice; Restore and Duplicate in the title menu.
+- [x] Design-system page: edit and add in place (the Add form writes instead of annotating; annotation stays for users without edit rights).
+- [x] Changed marks from the diff of two versions. The changed slide or artboard is outlined; outlines per layer need the element ids of level 3.
+- [x] A user's saves fold into the current version (§5.2): no version number, no card in the thread; the version list shows who edited it.
+- [x] Layout picker for Add slide (`layout-picker.tsx`); `<template data-layout>` reader and fallbacks in `edit.ts`.
 
 Level 3:
 
@@ -542,7 +547,7 @@ Level 5:
 ### 9.2 Daemon (`packages/core`, `packages/context-mcp`, `packages/transport-matrix`, `packages/pi-extension`)
 
 - [x] L1: tool text for `<aside data-notes>`, `data-skip`, `data-transition`.
-- [ ] L2: `latestArtifact` resolves the newest version from any allowed author; `zooid_artifact` `read`; the "user edited" line in the next turn; `based_on` on agent versions.
+- [x] L2: `latestArtifact` resolves the newest version from any allowed author; `zooid_artifact` `read`; the "user edited" line in the next turn; `based_on` on agent versions; `started_ts` on `dev.zooid.turn.end`; tool text for `<template data-layout>`.
 - [ ] L3: `assets` input on `zooid_artifact`; tool text for `data-layer`, `data-free`, `data-lock`, `data-note`.
 - [ ] L4: `zooid_design_system` tool; tool text for questions, variations, placeholders, tweaks and the conformance check; honor `dev.fabrium.artifact_hint`; `focus` live state for the cursor; confirm that thread attachments reach the agent, and add it if not.
 - [ ] L5: kinds `whiteboard` and `motion` with validation; tool text for the export and build requests; render tooling on the agent VM image (headless browser, `ffmpeg`, a PPTX writer) — each needs `package-vetting`.

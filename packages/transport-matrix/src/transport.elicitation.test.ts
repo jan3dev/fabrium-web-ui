@@ -57,6 +57,7 @@ function setup(o: { members?: string[]; failPublish?: number; workstation?: stri
     }),
     setTyping: vi.fn(async () => {}),
     setPresence: vi.fn(async () => {}),
+    fetchThreadRelations: vi.fn(async () => ({ chunk: [] })),
     getJoinedMembers: vi.fn(async () => ({
       joined: Object.fromEntries((o.members ?? [AGENT, CODER, ALICE, BOB]).map((m) => [m, {}])),
     })),

@@ -20,6 +20,9 @@ const REACT = `export default function Counter() {
 const activeSlide = (panel: ReturnType<Page["getByTestId"]>) =>
   panel.getByRole("navigation", { name: "Slides" }).locator("[aria-current]");
 
+/** The cards' select buttons: their names start with the frame number (menu buttons and Add do not). */
+const cards = (rail: ReturnType<Page["getByTestId"]>) => rail.getByRole("button", { name: /^\d/ });
+
 /**
  * A rostered agent's thread, with the human signed in. `artifact` sends an artifact
  * version into the thread as the agent; `open` shows the thread.
@@ -62,7 +65,7 @@ async function openThread({ page, human, daemon }: { page: Page; human: FreshHum
         r: string,
         t: string,
         c: Record<string, unknown>,
-      ) => Promise<unknown>
+      ) => Promise<{ event_id: string }>
     )(roomId, "dev.fabrium.artifact.version", { ...content, ...thread });
   await page.route("**/config.json", (route) =>
     route.fulfill({
@@ -128,7 +131,8 @@ test("an agent's artifact previews sandboxed, and an annotation reaches the agen
   // The agent reads the style edit as CSS, then the user's note.
   expect(body).toContain("Note: Apply these style changes to the element:\nborder-radius: 12px;\n\nmake it blue");
   // The reply shows the comment and the annotation, not the agent-facing text.
-  await expect(threadPane.getByText("please", { exact: true })).toBeVisible();
+  // In the replies: the composer may still hold the text for a moment after the send.
+  await expect(threadPane.getByTestId("message-thread-replies").getByText("please", { exact: true })).toBeVisible();
 
   // A version arriving while the thread is open opens itself; React runs from the vendored runtime.
   await artifact({ identifier: "counter", type: "react", title: "Counter", body: REACT });
@@ -156,7 +160,7 @@ test("slides and design artifacts open in their frame modes", async ({ page, hum
   await card.click();
   const panel = page.getByTestId("artifact-panel");
   const rail = panel.getByRole("navigation", { name: "Slides" });
-  await expect(rail.getByRole("button")).toHaveText(["1Launch plan", "2Why now", "3Pricing"]);
+  await expect(cards(rail)).toHaveText(["1Launch plan", "2Why now", "3Pricing"]);
   const frame = page.frameLocator('[data-testid="artifact-preview"]');
   await expect(frame.getByText("Welcome")).toBeVisible();
 
@@ -209,7 +213,7 @@ test("a 30-slide deck with notes is reviewed and presented from two windows", as
 
   // Preview cards: every slide listed, only the visible ones live, at most 12.
   const rail = panel.getByRole("navigation", { name: "Slides" });
-  await expect(rail.getByRole("button")).toHaveCount(30);
+  await expect(cards(rail)).toHaveCount(30);
   const counter = activeSlide(panel);
   await expect(rail.getByRole("button", { name: /^3\s*Topic 3\s*Skipped$/ })).toBeVisible();
   await expect(rail.locator("iframe").first()).toBeAttached();
@@ -326,12 +330,12 @@ const DESIGN_SYSTEM = JSON.stringify({
   ],
 });
 
-test("a design-system artifact shows its sections, and Add puts a value in the reply", async ({
+test("a design-system artifact shows its sections, and a member adds and edits values in place", async ({
   page,
   human,
   daemon,
 }) => {
-  const { artifact, open } = await openThread({ page, human, daemon });
+  const { roomId, artifact, open } = await openThread({ page, human, daemon });
   await artifact({ identifier: "tokens", type: "design-system", title: "Tokens", body: DESIGN_SYSTEM });
   await open();
 
@@ -368,15 +372,27 @@ test("a design-system artifact shows its sections, and Add puts a value in the r
   expect((await blockedImage).failure()?.errorText).toBe("csp");
   expect(completed).toEqual([]);
 
+  // A member with edit rights: Add writes a version instead of annotating (spec §9.1, level 2).
   await nav.getByRole("button", { name: /Colors/ }).click();
   const add = panel.getByRole("form", { name: "Add to colors" });
   await add.getByLabel("Name").fill("accent");
   await add.getByLabel("Value").fill("rgb(255, 0, 0)");
   await add.getByRole("button", { name: "Add" }).click();
-  await expect(page.getByText("Added to your reply")).toBeVisible();
-  await expect(
-    page.getByTestId("thread-pane").getByRole("list", { name: /artifact annotations/i }),
-  ).toContainText('Colors: "accent: rgb(255, 0, 0)"');
+  await expect(frame.locator("#color-accent")).toContainText("rgb(255, 0, 0)");
+  const added = await daemon.waitForMessage(
+    roomId,
+    (e) => e.type === "dev.fabrium.artifact.version" && e.sender === human.userId,
+  );
+  expect(added.content).toMatchObject({ identifier: "tokens", type: "design-system", summary: "Added accent to Colors" });
+  expect(JSON.parse((added.content as { body: string }).body).colors[2]).toEqual({ name: "accent", value: "rgb(255, 0, 0)" });
+
+  // Edit mode: a value changes in place and autosaves into the same version.
+  await panel.getByRole("button", { name: "Edit" }).click();
+  await panel.getByLabel("Value of ink").fill("rgb(1, 2, 3)");
+  await panel.getByLabel("Value of ink").press("Enter");
+  await panel.getByRole("button", { name: "Done" }).click();
+  await expect(frame.locator("#color-ink")).toContainText("rgb(1, 2, 3)");
+  await expect(panel.getByTestId("artifact-versions")).toHaveText(/v1 of 1/);
 
   // Content that is not a JSON object: a message in Preview, the source in Code.
   await artifact({ identifier: "broken", type: "design-system", title: "Broken", body: "{not json" });
@@ -385,4 +401,342 @@ test("a design-system artifact shows its sections, and Add puts a value in the r
   await panel.getByTestId("artifact-tab-code").click();
   await expect(panel.getByRole("button", { name: "Show preview" })).toBeVisible();
   await expect(panel).toContainText("{not json");
+});
+
+type Event = { type: string; sender: string; event_id: string; content: Record<string, unknown> };
+
+test("the user's edits autosave into the current version, and the agent's next version keeps them", async ({
+  page,
+  human,
+  daemon,
+}) => {
+  test.setTimeout(120_000);
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  const { roomId, artifact, open } = await openThread({ page, human, daemon });
+  const { event_id: v1 } = await artifact({ identifier: "launch-deck", type: "slides", title: "Launch deck", body: SLIDES });
+  await open();
+  await page.getByTestId("artifact-card").click();
+  const panel = page.getByTestId("artifact-panel");
+  const rail = panel.getByRole("navigation", { name: "Slides" });
+  await expect(cards(rail)).toHaveText(["1Launch plan", "2Why now", "3Pricing"]);
+  /** The user's version with this summary, other than the ones in `seen`. */
+  const userVersion = (summary: string, seen: string[] = []) =>
+    daemon.waitForMessage(
+      roomId,
+      (e) =>
+        e.type === "dev.fabrium.artifact.version" &&
+        e.sender === human.userId &&
+        (e.content as Event["content"]).summary === summary &&
+        !seen.includes(e.event_id),
+    ) as Promise<Event>;
+
+  const threadCards = page.getByTestId("thread-pane").getByTestId("artifact-card");
+  const versionCount = panel.getByTestId("artifact-versions");
+
+  // The slide menu's Move up; the save goes out after the idle time, as the user, and
+  // folds into v1: no new version, no new card in the thread.
+  await rail.getByRole("button", { name: "Slide 3 actions" }).click();
+  await page.getByRole("menuitem", { name: "Move up" }).click();
+  await expect(cards(rail)).toHaveText(["1Launch plan", "2Pricing", "3Why now"]);
+  const v2 = await userVersion("Moved slide 3");
+  expect(v2.content).toMatchObject({ identifier: "launch-deck", type: "slides", title: "Launch deck", based_on: v1 });
+  expect(v2.content["m.relates_to"]).toMatchObject({ rel_type: "m.thread" });
+  await expect(versionCount).toHaveText(/v1 of 1/);
+  await expect(threadCards).toHaveCount(1);
+
+  // Delete on a card, undone before it is sent: nothing goes out.
+  await cards(rail).nth(2).focus();
+  await page.keyboard.press("Delete");
+  await expect(cards(rail)).toHaveCount(2);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(cards(rail)).toHaveText(["1Launch plan", "2Pricing", "3Why now"]);
+
+  // Right-click opens the same menu: skip the first slide.
+  await cards(rail).first().click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Skip slide" }).click();
+  await expect(cards(rail).first()).toHaveText(/Skipped/);
+  const v3 = await userVersion("Skipped slide 1");
+  expect(v3.content.based_on).toBe(v2.event_id);
+
+  // Undo past what was sent sends the older content; redo brings the skip back.
+  await cards(rail).first().focus();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(cards(rail).first()).not.toHaveText(/Skipped/);
+  await userVersion("Undid: Skipped slide 1");
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(cards(rail).first()).toHaveText(/Skipped/);
+  const v5 = await userVersion("Skipped slide 1", [v3.event_id]);
+
+  // Still one version: the list shows the agent's v1, edited by the user.
+  await expect(versionCount).toHaveText(/v1 of 1/);
+  await expect(threadCards).toHaveCount(1);
+  await versionCount.click();
+  const list = page.getByRole("menu");
+  await expect(list.getByRole("menuitemradio")).toHaveCount(1);
+  await expect(list.getByRole("menuitemradio")).toContainText("agent");
+  await expect(list.getByRole("menuitemradio")).toContainText(`Edited by${human.username}`);
+  await expect(list.getByRole("menuitemradio")).toContainText("Last of 4 edits: Skipped slide 1");
+  await page.keyboard.press("Escape");
+
+  // The agent edits slide 2 of the user's latest version (as `edits` would).
+  const body = v5.content.body as string;
+  expect(body).toContain("Third slide text");
+  await artifact({
+    identifier: "launch-deck",
+    type: "slides",
+    title: "Launch deck",
+    body: body.replace("Third slide text", "Agent text"),
+    based_on: v5.event_id,
+    summary: "Edited slide 2",
+  });
+  // A new version: it keeps both of the user's changes, and the panel jumps to the slide it changed.
+  await expect(versionCount).toHaveText(/v2 of 2/);
+  await expect(threadCards).toHaveCount(2);
+  await expect(cards(rail)).toHaveText(["1Launch planSkipped", /^2Pricing/, "3Why now"]);
+  await expect(activeSlide(panel)).toHaveText(/^2Pricing/);
+  await expect(page.frameLocator('[data-testid="artifact-preview"]').getByText("Agent text")).toBeVisible();
+  await expect(cards(rail).nth(1)).toHaveText(/Changed/);
+  await expect(panel.getByTestId("artifact-older-base")).toBeHidden();
+
+  // Copy slide 2 and paste it after slide 3.
+  await rail.getByRole("button", { name: "Slide 2 actions" }).click();
+  await page.getByRole("menuitem", { name: "Copy" }).click();
+  await rail.getByRole("button", { name: "Slide 3 actions" }).click();
+  await page.getByRole("menuitem", { name: "Paste after" }).click();
+  await expect(cards(rail)).toHaveText(["1Launch planSkipped", /^2Pricing/, "3Why now", "4Pricing"]);
+  await userVersion("Pasted slide 4");
+  await expect(versionCount).toHaveText(/v2 of 2/);
+
+  // A version made from an older one gets the notice and the way to the diff.
+  await artifact({ identifier: "launch-deck", type: "slides", title: "Launch deck", body: SLIDES, based_on: v1 });
+  await expect(panel.getByTestId("artifact-older-base")).toContainText("Made from an older version (v1)");
+  await panel.getByTestId("artifact-older-base").getByRole("button", { name: "Show changes" }).click();
+  await expect(panel.getByText(/v2 → v3/)).toBeVisible();
+});
+
+test("speaker notes are edited under the slide and autosaved", async ({ page, human, daemon }) => {
+  const { roomId, artifact, open } = await openThread({ page, human, daemon });
+  await artifact({ identifier: "launch-deck", type: "slides", title: "Launch deck", body: SLIDES });
+  await open();
+  await page.getByTestId("artifact-card").click();
+  const notes = page.getByTestId("speaker-notes").getByLabel("Speaker notes");
+  await notes.fill("Open with the launch date.");
+  const sent = await daemon.waitForMessage(
+    roomId,
+    (e) => e.type === "dev.fabrium.artifact.version" && e.sender === human.userId,
+  );
+  expect((sent.content as { summary: string }).summary).toBe("Edited the notes on slide 1");
+  expect((sent.content as { body: string }).body).toContain("<aside data-notes=\"\">Open with the launch date.</aside>");
+});
+
+/** The user's version of `identifier` with this summary, waited for in the room. */
+const userVersionOf =
+  (daemon: DaemonImpersonator, roomId: string, human: FreshHuman) =>
+  (summary: string, identifier = "launch-deck") =>
+    daemon.waitForMessage(
+      roomId,
+      (e) =>
+        e.type === "dev.fabrium.artifact.version" &&
+        e.sender === human.userId &&
+        (e.content as Event["content"]).identifier === identifier &&
+        (e.content as Event["content"]).summary === summary,
+    ) as Promise<Event>;
+
+test("the slide menu renames by dialog, Shift+F10 opens it, a drag reorders, and the title menu restores and duplicates", async ({
+  page,
+  human,
+  daemon,
+}) => {
+  test.setTimeout(120_000);
+  const { roomId, artifact, open } = await openThread({ page, human, daemon });
+  await artifact({ identifier: "launch-deck", type: "slides", title: "Launch deck", body: SLIDES });
+  await open();
+  await page.getByTestId("artifact-card").click();
+  const panel = page.getByTestId("artifact-panel");
+  const rail = panel.getByRole("navigation", { name: "Slides" });
+  const userVersion = userVersionOf(daemon, roomId, human);
+  await expect(cards(rail)).toHaveText(["1Launch plan", "2Why now", "3Pricing"]);
+
+  // Shift+F10 on a focused card opens its menu; Rename opens the dialog.
+  await cards(rail).nth(1).focus();
+  await page.keyboard.press("Shift+F10");
+  await expect(page.getByRole("menuitem", { name: "Add slide after" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Rename slide…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Rename slide 2" });
+  await expect(dialog.getByLabel("Name")).toHaveValue("Why now");
+  await dialog.getByLabel("Name").fill("The problem");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(cards(rail)).toHaveText(["1Launch plan", "2The problem", "3Pricing"]);
+  const renamed = await userVersion("Renamed slide 2");
+  expect(renamed.content.body).toContain('<section data-title="The problem">');
+
+  // Drag the first card onto the last.
+  await cards(rail).first().dragTo(cards(rail).last());
+  await expect(cards(rail)).toHaveText(["1The problem", "2Pricing", "3Launch plan"]);
+  const dragged = await userVersion("Moved slide 1");
+  await expect(panel.getByTestId("artifact-versions")).toHaveText(/v1 of 1/);
+
+  // The agent makes v2. Restore v1 (as the user edited it) from the version list: a save
+  // into v2, by the user, with v1's content; still two versions.
+  const { event_id: v2 } = await artifact({
+    identifier: "launch-deck",
+    type: "slides",
+    title: "Launch deck",
+    body: SLIDES.replace("Third slide text", "Agent text"),
+    based_on: dragged.event_id,
+  });
+  await expect(panel.getByTestId("artifact-versions")).toHaveText(/v2 of 2/);
+  await panel.getByTestId("artifact-versions").click();
+  await page.getByRole("menuitemradio", { name: /^v1/ }).click();
+  await expect(panel.getByTestId("artifact-versions")).toHaveText(/v1 of 2/);
+  await expect(cards(rail)).toHaveText(["1The problem", "2Pricing", "3Launch plan"]);
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await panel.getByTestId("artifact-title-menu").click();
+  await page.getByRole("menuitem", { name: "Restore this version" }).click();
+  const restored = await userVersion("Restored v1");
+  expect(restored.content.body).toBe(dragged.content.body);
+  expect(restored.content.based_on).toBe(v2);
+  await expect(panel.getByTestId("artifact-versions")).toHaveText(/v2 of 2/);
+  await expect(cards(rail)).toHaveText(["1The problem", "2Pricing", "3Launch plan"]);
+  await expect(page.getByTestId("thread-pane").getByTestId("artifact-card")).toHaveCount(2);
+
+  // Duplicate: a second artifact with the same content, opened in the panel.
+  // The Restore menu must be gone first: a click during its exit animation counts as outside it.
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await panel.getByTestId("artifact-title-menu").click();
+  await page.getByRole("menuitem", { name: "Duplicate" }).click();
+  const copy = await userVersion("Duplicated from Launch deck v2", "launch-deck-copy");
+  expect(copy.content).toMatchObject({
+    title: "Launch deck (copy)",
+    type: "slides",
+    body: dragged.content.body,
+    based_on: restored.event_id,
+  });
+  await expect(panel.getByRole("heading", { name: "Launch deck (copy)" })).toBeVisible();
+  await expect(panel.getByTestId("artifact-versions")).toHaveText(/v1 of 1/);
+  await expect(page).toHaveURL(/artifact=launch-deck-copy/);
+});
+
+test("the artboard menu adds an artboard from a preset and resizes one through the size dialog", async ({
+  page,
+  human,
+  daemon,
+}) => {
+  const { roomId, artifact, open } = await openThread({ page, human, daemon });
+  await artifact({ identifier: "checkout", type: "design", title: "Checkout", body: DESIGN });
+  await open();
+  await page.getByTestId("artifact-card").click();
+  const screens = page.getByTestId("artifact-panel").getByRole("navigation", { name: "Screens" });
+  const userVersion = userVersionOf(daemon, roomId, human);
+
+  await screens.getByRole("button", { name: "Artboard 1 actions" }).click();
+  await page.getByRole("menuitem", { name: "Add artboard" }).click();
+  await page.getByRole("menuitem", { name: /^Tablet/ }).click();
+  await expect(cards(screens)).toHaveCount(3);
+  const added = await userVersion("Added artboard 2", "checkout");
+  // A blank artboard of the preset's size.
+  expect(added.content.body).toContain('<section data-width="834" data-height="1194"></section>');
+
+  await screens.getByRole("button", { name: "Artboard 3 actions" }).click();
+  await page.getByRole("menuitem", { name: "Resize" }).click();
+  await page.getByRole("menuitem", { name: "Custom…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Resize artboard 3" });
+  await expect(dialog.getByLabel("Width (px)")).toHaveValue("390");
+  await dialog.getByLabel("Width (px)").fill("50");
+  await expect(dialog.getByRole("button", { name: "Save" })).toBeDisabled();
+  await dialog.getByLabel("Width (px)").fill("800");
+  await dialog.getByLabel("Height (px)").fill("600");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  const resized = await userVersion("Resized artboard 3 to 800×600", "checkout");
+  expect(resized.content.body).toContain('<section data-name="Phone" data-width="800" data-height="600">');
+});
+
+test("on a phone the open slide's menu sits in the toolbar", async ({ page, human, daemon }) => {
+  const { roomId, artifact } = await openThread({ page, human, daemon });
+  await artifact({ identifier: "launch-deck", type: "slides", title: "Launch deck", body: SLIDES });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const root = (await daemon.waitForMessage(roomId, (e) => e.type === "dev.fabrium.artifact.version")).content as {
+    "m.relates_to": { event_id: string };
+  };
+  await page.goto(`/room/${roomId}?thread=${encodeURIComponent(root["m.relates_to"].event_id)}&artifact=launch-deck`);
+  const panel = page.getByTestId("artifact-panel");
+  await expect(panel.getByRole("navigation", { name: "Slides" })).toBeHidden();
+  await panel.getByTestId("artifact-toolbar").getByRole("button", { name: "Slide 1 actions" }).click();
+  await page.getByRole("menuitem", { name: "Skip slide" }).click();
+  const skipped = await userVersionOf(daemon, roomId, human)("Skipped slide 1");
+  expect(skipped.content.body).toContain('<section data-title="Launch plan" data-skip>');
+  // Notes are edited on a phone too.
+  await expect(panel.getByTestId("speaker-notes").getByLabel("Speaker notes")).toBeVisible();
+});
+
+// A deck whose agent wrote its own Table layout in its design.
+const LAYOUT_SLIDES = SLIDES.replace(
+  "</head>",
+  '<template data-layout="table"><section class="deck-table"><h2>Agent table</h2><table><tr><td>Q1</td><td>Q2</td></tr></table></section></template></head>',
+);
+
+test("Add slide opens a layout picker in the deck's design and autosaves the chosen layout", async ({
+  page,
+  human,
+  daemon,
+}) => {
+  test.setTimeout(90_000);
+  const { roomId, artifact, open } = await openThread({ page, human, daemon });
+  await artifact({ identifier: "launch-deck", type: "slides", title: "Launch deck", body: LAYOUT_SLIDES });
+  await open();
+  await page.getByTestId("artifact-card").click();
+  const panel = page.getByTestId("artifact-panel");
+  const rail = panel.getByRole("navigation", { name: "Slides" });
+  const userVersion = userVersionOf(daemon, roomId, human);
+  const threadCards = page.getByTestId("thread-pane").getByTestId("artifact-card");
+
+  // From the end of the rail; ten layouts, each a sandboxed, inert preview.
+  await rail.getByRole("button", { name: "Add slide" }).click();
+  const picker = page.getByRole("dialog", { name: "Add slide" });
+  const layouts = picker.getByRole("group", { name: "Layouts" });
+  await expect(layouts.getByRole("button")).toHaveText([
+    "Blank",
+    "Title",
+    "Section",
+    "Title and body",
+    "Bullets",
+    "Two columns",
+    "Table",
+    "Quote",
+    "Image and caption",
+    "Closing",
+  ]);
+  await expect(layouts.locator("iframe")).toHaveCount(10);
+  await expect(layouts.locator("iframe").first()).toHaveAttribute("sandbox", "allow-scripts allow-forms allow-pointer-lock");
+  await expect(layouts.locator("iframe").first()).toHaveAttribute("inert", "");
+  // Arrow keys and Enter: five per row, so Down then Right lands on Table.
+  await expect(layouts.getByRole("button", { name: "Blank" })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowRight");
+  await expect(layouts.getByRole("button", { name: "Table" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(picker).toBeHidden();
+  // After the open slide (1), selected, in the agent's own layout.
+  await expect(cards(rail)).toHaveText(["1Launch plan", "2Agent table", "3Why now", "4Pricing"]);
+  await expect(activeSlide(panel)).toHaveText(/^2Agent table/);
+  const fromTemplate = await userVersion("Added slide 2");
+  expect(fromTemplate.content.body).toContain(
+    '<section data-title="Launch plan"><h1>Welcome</h1></section>\n<section class="deck-table"><h2>Agent table</h2><table><tbody><tr><td>Q1</td><td>Q2</td></tr></tbody></table></section>',
+  );
+  await expect(panel.getByTestId("artifact-versions")).toHaveText(/v1 of 1/);
+  await expect(threadCards).toHaveCount(1);
+
+  // A deck without templates, from the slide menu: the app builds the layout from plain elements.
+  await artifact({ identifier: "plain-deck", type: "slides", title: "Plain deck", body: SLIDES });
+  await expect(panel.getByRole("heading", { name: "Plain deck" })).toBeVisible();
+  await rail.getByRole("button", { name: "Slide 3 actions" }).click();
+  await page.getByRole("menuitem", { name: "Add slide after" }).click();
+  await picker.getByRole("button", { name: "Table" }).click();
+  await expect(cards(rail)).toHaveText(["1Launch plan", "2Why now", "3Pricing", "4Slide title"]);
+  const fallback = await userVersion("Added slide 4", "plain-deck");
+  expect(fallback.content.body).toContain(
+    "<section><h2>Slide title</h2><table><thead><tr><th>Heading</th><th>Heading</th><th>Heading</th></tr></thead>",
+  );
+  await expect(panel.getByTestId("artifact-versions")).toHaveText(/v1 of 1/);
+  await expect(threadCards).toHaveCount(2);
 });
