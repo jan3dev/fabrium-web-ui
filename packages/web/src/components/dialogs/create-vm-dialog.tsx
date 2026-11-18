@@ -94,7 +94,9 @@ function CreateVmForm({
   const autoStopHours = parseAutoStopHours(form.autoStopHours);
   const havenKey = form.havenKey.trim();
   const githubToken = form.githubToken.trim();
+  // The agent as the list shows it now: a refresh can take the right away, or give it a live VM.
   const canCreate =
+    agent.can.create_vm &&
     types !== null &&
     VM_NAME_RE.test(vmName) &&
     autoStopHours !== null &&

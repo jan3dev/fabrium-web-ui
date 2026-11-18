@@ -4,13 +4,16 @@ import { INSTANCE_TYPES, PROFILE, VM_GONE } from "../../../test/vm-fixtures";
 import { FabriumApiError } from "../../client/fabrium-api";
 import { CreateVmDialog } from "./create-vm-dialog";
 
+/** A profile, seen by a VM creator: it may get a VM. */
+const forVmCreator = { ...PROFILE, can: { ...PROFILE.can, create_vm: true } };
+
 const meta = {
   title: "Dialogs/CreateVm",
   component: CreateVmDialog,
   args: {
     open: true,
     onOpenChange: () => {},
-    agent: PROFILE,
+    agent: forVmCreator,
     types: INSTANCE_TYPES,
     typesError: null,
     onSubmit: async () => {},

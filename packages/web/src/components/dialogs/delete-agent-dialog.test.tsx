@@ -96,6 +96,24 @@ describe("<DeleteAgentDialog>", () => {
     expect(onConfirm.mock.calls).toEqual([[false], [true]]);
   });
 
+  it("disables the confirm button when a refresh takes away can.delete", async () => {
+    // The sibling of a VM owned by another user was deleted: only the VM owner may delete now.
+    const onConfirm = vi
+      .fn<(withVm: boolean) => Promise<void>>()
+      .mockRejectedValueOnce(new FabriumApiError(403, "forbidden"));
+    const { user, rerender } = setup({ onConfirm });
+    await user.click(screen.getByRole("button", { name: "Delete agent" }));
+    await screen.findByRole("alert");
+
+    rerender({ agent: makeAgent({ can: { ...CAN_NOTHING, edit: true, delete_needs_vm: true } }) });
+    expect(screen.getByRole("alert")).toHaveTextContent("forbidden");
+    const confirm = screen.getByRole("button", { name: "Delete agent and VM" });
+    expect(confirm).toBeDisabled();
+    await user.click(confirm);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+  });
+
   it("the submit button is disabled while the request runs", async () => {
     let finish!: () => void;
     const onConfirm = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));

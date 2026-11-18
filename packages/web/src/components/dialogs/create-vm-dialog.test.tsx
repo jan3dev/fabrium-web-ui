@@ -2,12 +2,15 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { INSTANCE_TYPES, PROFILE, VM_GONE } from "../../../test/vm-fixtures";
+import { CAN_NOTHING, INSTANCE_TYPES, PROFILE, VM_GONE } from "../../../test/vm-fixtures";
 import { FabriumApiError } from "../../client/fabrium-api";
 import type { CreateVmRequest } from "../../model/types";
 import { CreateVmDialog } from "./create-vm-dialog";
 
 type Props = ComponentProps<typeof CreateVmDialog>;
+
+/** A profile, seen by a VM creator: it may get a VM. */
+const FOR_VM_CREATOR = { ...PROFILE, can: { ...PROFILE.can, create_vm: true } };
 
 function setup({
   onSubmit = vi.fn(async (_req: CreateVmRequest) => {}),
@@ -17,7 +20,7 @@ function setup({
   const props: Props = {
     open: true,
     onOpenChange,
-    agent: PROFILE,
+    agent: FOR_VM_CREATOR,
     types: INSTANCE_TYPES,
     typesError: null,
     onSubmit,
@@ -53,7 +56,7 @@ describe("<CreateVmDialog>", () => {
     expect(onSubmit.mock.calls).toStrictEqual([
       [
         {
-          agent: PROFILE.id,
+          agent: FOR_VM_CREATOR.id,
           name: "lima",
           instance_type: "c6a.large",
           auto_stop_hours: 24,
@@ -111,7 +114,7 @@ describe("<CreateVmDialog>", () => {
     expect(onSubmit.mock.calls).toStrictEqual([
       [
         {
-          agent: PROFILE.id,
+          agent: FOR_VM_CREATOR.id,
           name: "lima",
           instance_type: "t3a.medium",
           auto_stop_hours: 12,
@@ -178,6 +181,25 @@ describe("<CreateVmDialog>", () => {
     expect(alert).toHaveTextContent("Failed at step: join. Select Create VM to retry from that step.");
     expect(onOpenChange).not.toHaveBeenCalled();
     expect(field("Haven API key")).toHaveValue("hk-1");
+  });
+
+  it("disables Create VM when a refresh takes away can.create_vm", async () => {
+    const { user, rerender, onSubmit } = setup();
+    await user.type(field("VM name"), "lima");
+    await user.type(field("Haven API key"), "hk-1");
+    expect(create()).toBeEnabled();
+
+    // Another user created the VM in the meantime: the agent has a live VM now.
+    rerender({
+      agent: {
+        ...FOR_VM_CREATOR,
+        vm: { name: "lima", id: "i-0123456789abcdef0", state: "pending" },
+        can: { ...CAN_NOTHING, edit: true, delete: true, delete_needs_vm: true },
+      },
+    });
+    expect(create()).toBeDisabled();
+    await user.click(create());
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("shows why the instance types did not load, and keeps Create VM disabled", async () => {

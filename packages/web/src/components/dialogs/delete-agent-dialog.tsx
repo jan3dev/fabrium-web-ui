@@ -101,7 +101,8 @@ function DeleteAgentBody({
           type="button"
           variant="utility"
           tone="danger"
-          disabled={running}
+          // A refresh can take the right away, for example when the agent became the last of its VM.
+          disabled={running || !agent.can.delete}
           onClick={confirm}
         >
           {confirmLabel}
