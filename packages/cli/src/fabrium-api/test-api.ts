@@ -158,6 +158,8 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
         : fake.fetch(input, init)) as typeof fetch
 
   const homeserver = 'http://tuwunel:8448'
+  /** The central appservice client, `@zooid`, without the timeout of the API. */
+  const client = new MatrixClient({ homeserver, asToken: fake.centralToken, fetch: fetchAll })
   const deps: FabriumApiDeps = {
     controlPlaneUrl: CONTROL_PLANE_URL,
     controlPlaneKey: CONTROL_PLANE_KEY,
@@ -167,7 +169,6 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
     homeserverUrl: 'https://chat.example.org',
     zooidHome,
     conn: { homeserver, fetch: fetchAll },
-    client: new MatrixClient({ homeserver, asToken: fake.centralToken, fetch: fetchAll }),
     asToken: fake.centralToken,
     asUserId: '@zooid:example.org',
     serverName: 'example.org',
@@ -187,6 +188,7 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
     app,
     fake,
     deps,
+    client,
     controlPlane,
     haven,
     zooidHome,
@@ -211,7 +213,7 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
     admit(vm: string, agent: string) {
       return createAdmission({
         conn: deps.conn,
-        client: deps.client,
+        client,
         asToken: deps.asToken,
         asUserId: deps.asUserId,
         serverName: deps.serverName,

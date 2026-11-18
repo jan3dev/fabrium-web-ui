@@ -21,7 +21,7 @@ function admission(over: Partial<AdmissionDeps> = {}) {
   const d = api.deps
   return createAdmission({
     conn: d.conn,
-    client: d.client,
+    client: api.client,
     asToken: d.asToken,
     asUserId: d.asUserId,
     serverName: d.serverName,
@@ -334,7 +334,7 @@ describe('admit and remove on a VM name', () => {
     await settle(adm.remove(placed('reviewer', true)))
     // The command takes effect late.
     api.fake.knobs.adminCommandWorks = true
-    await api.deps.client.sendMessage({
+    await api.client.sendMessage({
       roomId: api.fake.adminRoomId,
       asUserId: '@zooid:example.org',
       content: { msgtype: 'm.text', body: '!admin appservices unregister lima' },

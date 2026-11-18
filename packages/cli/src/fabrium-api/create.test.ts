@@ -463,6 +463,24 @@ describe('a VM for an agent', () => {
   })
 })
 
+describe('a homeserver that does not answer', () => {
+  it.each([
+    ['a call of the central client', 'GET', /\/directory\/room\//, 'register_appservice'],
+    ['a call of the VM client', 'POST', /\/join\//, 'join'],
+    ['a call of the API itself', 'GET', /\/register\/available$/, 'bundle'],
+  ])('ends %s as a 502, and the next write in the queue still runs', { timeout: 2000 }, async (_case, method, path, step) => {
+    setup({ matrixTimeoutMs: 30 })
+    api.fake.hangOnce(method, path)
+    const answers = await Promise.all([
+      create(body(), as(LUIS)),
+      create(body({ agent: 'p2', name: 'quito' }), as(VERA)),
+    ])
+    const [ok, failed] = answers.sort((a, b) => a.status - b.status)
+    expect(ok!.status).toBe(201)
+    expect([failed!.status, await failed!.json()]).toEqual([502, expect.objectContaining({ step })])
+  })
+})
+
 describe('POST /vms/:id/recreate', () => {
   const recreate = (json: unknown, token?: string) => api.request('POST', `/vms/${VM.id}/recreate`, { json, token })
   const upstream = () => api.controlPlane.requests.find((r) => r.path === `/v1/vms/${VM.id}/recreate`)

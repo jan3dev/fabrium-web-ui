@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import type { MatrixClient } from '@zooid/transport-matrix'
+import { MatrixClient } from '@zooid/transport-matrix'
 import { Hono } from 'hono'
 import { createAdmission } from './admission.js'
 import { fetchRecords } from './agent-records.js'
@@ -21,8 +21,7 @@ export interface FabriumApiDeps extends FabriumApiConfig {
   // From the daemon.
   /** Internal homeserver URL and `fetch`. The control plane calls use the same `fetch`. */
   conn: MatrixConn
-  /** Central appservice client, `@zooid`. */
-  client: MatrixClient
+  /** The token of the central appservice, `@zooid`. */
   asToken: string
   asUserId: string
   serverName: string
@@ -34,6 +33,7 @@ export interface FabriumApiDeps extends FabriumApiConfig {
   // Test seams.
   now?: () => number
   controlPlaneTimeoutMs?: number
+  matrixTimeoutMs?: number
   whoamiTimeoutMs?: number
   pollIntervalMs?: number
 }
@@ -50,10 +50,18 @@ export function fabriumApi(deps: FabriumApiDeps): {
     fetch: deps.conn.fetch,
     timeoutMs: deps.controlPlaneTimeoutMs,
   })
+  // A Matrix request that never answers would block the one queue of the writes: each one ends after 15 s,
+  // as a control plane request does. The timeout covers the body too. No call here sets a signal of its own.
+  // The daemon keeps its own client and fetch, without this timeout.
+  const matrixFetch: typeof fetch = (input, init) =>
+    deps.conn.fetch(input, { ...init, signal: AbortSignal.timeout(deps.matrixTimeoutMs ?? 15_000) })
+  const conn: MatrixConn = { homeserver: deps.conn.homeserver, fetch: matrixFetch }
+  // The central appservice client, `@zooid`.
+  const client = new MatrixClient({ homeserver: conn.homeserver, asToken: deps.asToken, fetch: matrixFetch })
   const workstationsDir = join(deps.zooidHome, 'workstations')
   const admission = createAdmission({
-    conn: deps.conn,
-    client: deps.client,
+    conn,
+    client,
     asToken: deps.asToken,
     asUserId: deps.asUserId,
     serverName: deps.serverName,
@@ -69,8 +77,8 @@ export function fabriumApi(deps: FabriumApiDeps): {
   // ponytail: one queue for every agent write, and the roster rebuild at start.
   const queue = createQueue()
   const roster = createRoster({
-    conn: deps.conn,
-    client: deps.client,
+    conn,
+    client,
     asToken: deps.asToken,
     asUserId: deps.asUserId,
     serverName: deps.serverName,
@@ -98,8 +106,8 @@ export function fabriumApi(deps: FabriumApiDeps): {
   app.use(
     '*',
     requireRole({
-      conn: deps.conn,
-      client: deps.client,
+      conn,
+      client,
       serverName: deps.serverName,
       asToken: deps.asToken,
       asUserId: deps.asUserId,
@@ -122,7 +130,7 @@ export function fabriumApi(deps: FabriumApiDeps): {
     roster,
     models: createModels({ fetch: deps.conn.fetch, now: deps.now }),
     queue,
-    conn: deps.conn,
+    conn,
     asToken: deps.asToken,
     getSpaceRoomId: deps.getSpaceRoomId,
     serverName: deps.serverName,

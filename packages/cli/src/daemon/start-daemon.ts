@@ -355,7 +355,6 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         fabriumApi = mountFabriumApi(transport.app, {
           ...vmApi,
           conn: { homeserver: matrix.transport.homeserver, fetch: opts.fetch ?? fetch },
-          client,
           asToken: matrix.transport.as_token,
           asUserId,
           serverName,

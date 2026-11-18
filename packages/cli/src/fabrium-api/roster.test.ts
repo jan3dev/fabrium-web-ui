@@ -17,7 +17,7 @@ afterEach(() => {
 const roster = () =>
   createRoster({
     conn: api.deps.conn,
-    client: api.deps.client,
+    client: api.client,
     asToken: api.deps.asToken,
     asUserId: api.deps.asUserId,
     serverName: api.deps.serverName,

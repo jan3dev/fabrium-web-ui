@@ -85,7 +85,8 @@ export function loadFabriumApiConfig(
     )
   }
 
-  // The model goes into the same secrets file as the Haven key: the VM script refuses the same values.
+  // Only the default of GET /models: no VM gets it now. It keeps the check of the values that the VM secrets
+  // file refuses, so a value that the start refused before is still refused.
   const havenModel = env.FABRIUM_HAVEN_MODEL?.trim() || undefined
   const modelProblem = havenModel && secretProblem(havenModel, 'FABRIUM_HAVEN_MODEL')
   if (modelProblem) throw new Error(modelProblem)

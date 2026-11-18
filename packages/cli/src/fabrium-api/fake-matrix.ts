@@ -65,6 +65,8 @@ export interface FakeMatrix {
   joinSpace(userId: string, level?: number): void
   /** The next request that matches answers `status`. */
   failOnce(method: string, path: RegExp, status: number): void
+  /** The next request that matches never answers: it ends only when its signal aborts. */
+  hangOnce(method: string, path: RegExp): void
 }
 
 interface StateEvent {
@@ -97,7 +99,7 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
   const joinRules = new Map<string, JoinRule>()
   const aliases = new Map<string, string>()
   const appservices = new Map<string, Appservice>()
-  const failures: { method: string; path: RegExp; status: number }[] = []
+  const failures: { method: string; path: RegExp; status: number | 'hang' }[] = []
   const calls: FakeCall[] = []
   const messages: FakeMessage[] = []
   const knobs = { adminCommandWorks: true, registerAfterWhoamiPolls: 0 }
@@ -323,6 +325,11 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
     const failure = failures.find((f) => f.method === method && f.path.test(url.pathname))
     if (failure) {
       failures.splice(failures.indexOf(failure), 1)
+      if (failure.status === 'hang') {
+        return new Promise<Response>((_, reject) =>
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason)),
+        )
+      }
       return json(failure.status, { errcode: 'M_UNKNOWN', error: 'injected failure' })
     }
     const body =
@@ -368,5 +375,6 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
       if (level !== undefined) this.setLevel(spaceId, userId, level)
     },
     failOnce: (method, path, status) => void failures.push({ method, path, status }),
+    hangOnce: (method, path) => void failures.push({ method, path, status: 'hang' }),
   }
 }
