@@ -244,7 +244,8 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
       edits: z
         .array(z.object({ old_str: z.string(), new_str: z.string() }))
         .optional()
-        .describe('find/replace pairs against the latest version'),
+        .describe('find/replace pairs against the latest version from any author'),
+      read: z.boolean().optional().describe('true: return the latest version; pass only identifier'),
     },
     async (input) => {
       const provider = await opts.resolve()

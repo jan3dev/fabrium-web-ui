@@ -45,6 +45,8 @@ function fakeClient() {
     sendCustomEvent: vi.fn(async () => ({ event_id: '$x' })),
     setTyping: vi.fn(async () => {}),
     setPresence: vi.fn(async () => {}),
+    // Empty thread: the per-turn artifact check finds nothing to report.
+    fetchThreadRelations: vi.fn(async (): Promise<{ chunk: Array<Record<string, unknown>> }> => ({ chunk: [] })),
     // A bot with a pending invite cannot read the member list.
     getJoinedMembers: vi.fn(async (roomId: string) => {
       throw Object.assign(new Error(`getJoinedMembers(${roomId}) failed: 403`), { status: 403 })
@@ -367,6 +369,50 @@ describe('matrix transport /transactions', () => {
     )
   })
 
+  it('tells the agent which artifacts a user edited since its last turn (design modes §5.2)', async () => {
+    const { transport, agents, client } = makeTransport()
+    Object.assign(client, {
+      fetchThreadRelations: vi.fn(async (o: { eventType?: string }) => ({
+        chunk:
+          o.eventType === 'dev.fabrium.artifact.version'
+            ? [
+                {
+                  event_id: '$v2',
+                  sender: '@alice:example.com',
+                  origin_server_ts: 300,
+                  content: { identifier: 'deck', type: 'slides', title: 'Deck', body: '<section></section>', summary: 'Moved slide 3\nand more' },
+                },
+              ]
+            : o.eventType === 'dev.zooid.turn.end'
+              ? [{ sender: '@architect:example.com', origin_server_ts: 200 }]
+              : [],
+      })),
+      fetchRoomState: vi.fn(async () => [
+        { type: 'm.room.member', state_key: '@alice:example.com', content: { membership: 'join' } },
+      ]),
+    })
+    agents.prompt.mockResolvedValue({ stopReason: 'end_turn' as const })
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$reply',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'tighten slide 2',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+            'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+    const content = (agents.prompt.mock.calls[0][1] as { content: Array<{ text: string }> }).content
+    expect(content.at(-1)!.text).toBe('tighten slide 2\nThe user edited artifact `deck`: Moved slide 3')
+  })
+
   it('attaches formatted_body when agent text contains markdown', async () => {
     const { transport, agents, client } = makeTransport()
     agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
@@ -624,6 +670,26 @@ describe('dev.zooid.turn.end', () => {
       asUserId: '@architect:example.com',
       content: expect.objectContaining({ produced_output: true }),
     })
+  })
+
+  it("carries started_ts: the trigger's origin_server_ts, else the daemon's clock", async () => {
+    const { transport, agents, client } = makeTransport()
+    agents.prompt.mockResolvedValue({ stopReason: 'end_turn' as const })
+    const turnEnds = () =>
+      client.sendCustomEvent.mock.calls
+        .map((c) => c[0] as { eventType: string; content: Record<string, unknown> })
+        .filter((c) => c.eventType === 'dev.zooid.turn.end')
+    const triggerTs = Date.now() + 60_000
+    await postTxn(transport.app, { events: [{ ...topLevelMention(), origin_server_ts: triggerTs }] })
+    await settleTurn()
+    expect(turnEnds()[0]!.content.started_ts).toBe(triggerTs)
+
+    const before = Date.now()
+    await postTxn(transport.app, { events: [{ ...topLevelMention(), event_id: '$root2' }] })
+    await settleTurn()
+    const started = turnEnds()[1]!.content.started_ts as number
+    expect(started).toBeGreaterThanOrEqual(before)
+    expect(started).toBeLessThanOrEqual(Date.now())
   })
 
   it('reports produced_output: false for a silent turn', async () => {

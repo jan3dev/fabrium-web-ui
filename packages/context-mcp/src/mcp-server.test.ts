@@ -78,7 +78,9 @@ describe('buildContextMcpServer', () => {
     })
     expect(bad.isError).toBe(true)
     expect((bad.content as Array<{ text: string }>)[0]!.text).toMatch(/edit_failed/)
-    expect(calls).toHaveLength(2)
+    await client.callTool({ name: 'zooid_artifact', arguments: { identifier: 'page', read: true } })
+    expect(calls).toHaveLength(3)
+    expect(calls[2]).toEqual({ identifier: 'page', read: true })
   })
 
   it('renames the two tools that did not name Matrix primitives', async () => {

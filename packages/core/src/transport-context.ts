@@ -56,7 +56,9 @@ export interface ArtifactEdit {
 /**
  * A new version of an artifact shown in the client's artifact panel. Exactly
  * one of `content` (the full new version) or `edits` (find/replace pairs
- * against the latest version with the same identifier) is set.
+ * against the latest version with the same identifier, from any allowed
+ * author) is set. `read: true` with only `identifier` sends nothing and
+ * returns the latest version instead.
  */
 export interface ArtifactInput {
   identifier: string
@@ -65,11 +67,18 @@ export interface ArtifactInput {
   language?: string
   content?: string
   edits?: ArtifactEdit[]
+  read?: boolean
 }
 
+/** A sent version; for `read`, the latest version and its content. */
 export interface ArtifactResult {
   event_id: string
   identifier: string
+  type?: ArtifactKind
+  title?: string
+  language?: string
+  sender?: string
+  content?: string
 }
 
 export interface SendAttachmentInput {
@@ -154,7 +163,7 @@ export interface TransportContextProvider {
    */
   resolveRoom?(selector: string): string | undefined
   sendMessage(input: SendMessageInput): Promise<SendMessageResult>
-  /** Post an artifact version into the bound thread. Absent = transport has no artifacts. */
+  /** Post an artifact version into the bound thread, or with `read` return the latest. Absent = transport has no artifacts. */
   sendArtifact?(channelId: string, threadId: string, input: ArtifactInput): Promise<ArtifactResult>
   /**
    * Post a file to the given thread as the agent. Optional: absent = the

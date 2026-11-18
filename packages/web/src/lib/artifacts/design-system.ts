@@ -78,9 +78,9 @@ export const LIMITS = {
   overview: 100_000,
 } as const;
 
-type Raw = Record<string, unknown>;
+export type Raw = Record<string, unknown>;
 
-const isObject = (v: unknown): v is Raw =>
+export const isObject = (v: unknown): v is Raw =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** A string within `max`, "" for absent; undefined means the item does not fit. */
@@ -93,7 +93,7 @@ function field(item: Raw, key: string, max: number, required: boolean): string |
 }
 
 /** Token names become CSS identifiers and ids: kebab-case `[a-z0-9-]`. */
-function tokenName(name: string): string {
+export function tokenName(name: string): string {
   return name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
