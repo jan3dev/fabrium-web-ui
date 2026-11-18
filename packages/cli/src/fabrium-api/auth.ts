@@ -3,8 +3,14 @@ import type { MiddlewareHandler } from 'hono'
 import { ApiError } from './errors.js'
 import { openIdSub, stateEvent, type MatrixConn } from './matrix.js'
 
-/** A vm-creator sees and manages only the VMs that they created. */
-export type Role = 'vm-creator' | 'admin' | 'owner'
+/**
+ * The role of a user in the workforce space (contracts section 2). An agents-manager manages its own agents and
+ * no VM. A vm-creator sees and manages only the VMs that they created.
+ */
+export type Role = 'agents-manager' | 'vm-creator' | 'admin' | 'owner'
+
+export const isAdmin = (role: Role): boolean => role === 'admin' || role === 'owner'
+export const managesVms = (role: Role): boolean => role !== 'agents-manager'
 
 export interface Caller {
   userId: string
@@ -26,10 +32,11 @@ export interface AuthDeps {
 
 // A valid OpenID check is reused for this long. The role is never cached.
 const IDENTITY_TTL_MS = 5 * 60_000
-// The role thresholds of packages/web/src/lib/roles.ts.
+// The power levels of the roles. Owner and admin are those of packages/web/src/lib/roles.ts.
 const OWNER_LEVEL = 100
 const ADMIN_LEVEL = 90
 const VM_CREATOR_LEVEL = 70
+const AGENTS_MANAGER_LEVEL = 40
 
 function isLocalUser(userId: string, serverName: string): boolean {
   const match = /^@([^:]+):(.+)$/.exec(userId)
@@ -99,14 +106,15 @@ function createRoles(deps: AuthDeps): (userId: string) => Promise<Role | null> {
       : (users?.[userId] ?? (power?.users_default as number | undefined) ?? 0)
     if (level >= OWNER_LEVEL) return 'owner'
     if (level >= ADMIN_LEVEL) return 'admin'
-    return level >= VM_CREATOR_LEVEL ? 'vm-creator' : null
+    if (level >= VM_CREATOR_LEVEL) return 'vm-creator'
+    return level >= AGENTS_MANAGER_LEVEL ? 'agents-manager' : null
   }
 }
 
 /**
  * Hono middleware: the bearer token must be a valid OpenID access token of a
- * user of this server, and that user must be an admin or an owner of the
- * workforce space. Sets `caller`.
+ * user of this server, and that user must have a role in the workforce space.
+ * Sets `caller`.
  */
 export function requireRole(deps: AuthDeps): MiddlewareHandler<{ Variables: { caller: Caller } }> {
   const verify = createVerifier(deps)

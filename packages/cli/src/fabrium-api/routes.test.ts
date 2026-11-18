@@ -41,6 +41,36 @@ describe('access', () => {
     expect(api.controlPlane.requests).toEqual([])
   })
 
+  it('an agents-manager gets its role from /access', async () => {
+    api.fake.joinSpace('@ana:example.org', 40)
+    const res = await api.request('GET', '/access', { token: api.fake.openIdToken('@ana:example.org') })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ user_id: '@ana:example.org', role: 'agents-manager' })
+  })
+
+  it('an agents-manager gets 403 on every VM route', async () => {
+    api.fake.joinSpace('@ana:example.org', 69)
+    const token = api.fake.openIdToken('@ana:example.org')
+    // Bodies that the routes would accept: the refusal comes before any check of the request.
+    const create = { name: 'mike', agent: { mode: 'new', name: 'foxtrot' }, haven_api_key: 'hk-1' }
+    for (const [method, path, json] of [
+      ['GET', '/vms'],
+      ['POST', '/vms', create],
+      ['GET', '/instance-types'],
+      ['DELETE', '/vms/i-0a'],
+      ['POST', '/vms/i-0a/start'],
+      ['POST', '/vms/i-0a/stop'],
+      ['POST', '/vms/i-0a/reboot'],
+      ['PUT', '/vms/i-0a/auto-stop', { auto_stop_hours: 3 }],
+      ['POST', '/vms/i-0a/recreate', { haven_api_key: 'hk-1' }],
+    ] as [string, string, unknown?][]) {
+      const res = await api.request(method, path, { token, json })
+      expect(res.status, `${method} ${path}`).toBe(403)
+      expect(await res.json()).toEqual({ error: 'forbidden' })
+    }
+    expect(api.controlPlane.requests).toEqual([])
+  })
+
   it('exists only under /_fabrium/v1', async () => {
     expect((await api.app.request('/vms')).status).toBe(404)
     expect((await api.app.request('/_fabrium/v1/vms')).status).toBe(401)

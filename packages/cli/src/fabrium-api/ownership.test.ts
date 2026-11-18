@@ -40,11 +40,14 @@ afterEach(() => {
 const writes = () => api.controlPlane.requests.filter((r) => r.method !== 'GET')
 
 describe('the vm-creator role', () => {
-  it('is level 70 to 89 of the workforce space', async () => {
+  it('is level 70 to 89 of the workforce space; 69 is an agents-manager', async () => {
     const res = await api.request('GET', '/access', { token: cara })
     expect(await res.json()).toEqual({ user_id: CARA, role: 'vm-creator' })
     const dan = api.fake.openIdToken(DAN)
-    expect((await api.request('GET', '/access', { token: dan })).status).toBe(403)
+    expect(await (await api.request('GET', '/access', { token: dan })).json()).toEqual({
+      user_id: DAN,
+      role: 'agents-manager',
+    })
   })
 
   it('lists only the VMs that the caller created', async () => {
@@ -84,6 +87,9 @@ describe('the vm-creator role', () => {
     expect(mine.map((a: { workstation: string }) => a.workstation)).toEqual(['lima'])
     const all = await (await api.request('GET', '/agents')).json()
     expect(all).toHaveLength(2)
+    // An agents-manager is not an admin: it sees only what it created, here nothing.
+    const dan = api.fake.openIdToken(DAN)
+    expect(await (await api.request('GET', '/agents', { token: dan })).json()).toEqual([])
   })
 })
 

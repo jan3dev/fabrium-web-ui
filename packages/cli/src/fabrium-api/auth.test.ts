@@ -101,16 +101,27 @@ describe('OpenID token', () => {
 })
 
 describe('role', () => {
+  // null: 403 {"error":"forbidden"}.
   it.each([
+    [0, null],
+    [39, null],
+    [40, 'agents-manager'],
+    [69, 'agents-manager'],
+    [70, 'vm-creator'],
+    [89, 'vm-creator'],
     [90, 'admin'],
-    [95, 'admin'],
     [100, 'owner'],
     [150, 'owner'],
-  ])('gives power level %i the role %s', async (level, role) => {
+  ])('level %i is %s', async (level, role) => {
     const { fake, as } = setup()
     fake.joinSpace(ann, level)
     const res = await as(fake.openIdToken(ann))
-    expect(await res.json()).toEqual({ userId: ann, role })
+    if (role === null) {
+      expect(res.status).toBe(403)
+      expect(await res.json()).toEqual({ error: 'forbidden' })
+    } else {
+      expect(await res.json()).toEqual({ userId: ann, role })
+    }
   })
 
   it('gives owner to a v12 creator without a power level, and to an additional creator', async () => {
@@ -141,19 +152,13 @@ describe('role', () => {
     expect(count(`/_matrix/client/v3/rooms/${encodeURIComponent(fake.spaceId)}/state?`)).toBe(1)
   })
 
-  it.each([50, 0])('refuses power level %i with 403', async (level) => {
+  it('takes users_default as the level of a user without an entry', async () => {
     const { fake, as } = setup()
-    fake.joinSpace(ann, level)
-    const res = await as(fake.openIdToken(ann))
-    expect(res.status).toBe(403)
-    expect(await res.json()).toEqual({ error: 'forbidden' })
-  })
-
-  it('refuses a user who is only in users_default, even at a high default', async () => {
-    const { fake, as } = setup()
-    fake.setPowerLevels(fake.spaceId, { users: {}, users_default: 50 })
+    fake.setPowerLevels(fake.spaceId, { users: {}, users_default: 39 })
     fake.joinSpace(ann)
     expect((await as(fake.openIdToken(ann))).status).toBe(403)
+    fake.setPowerLevels(fake.spaceId, { users: {}, users_default: 40 })
+    expect(await (await as(fake.openIdToken(ann))).json()).toEqual({ userId: ann, role: 'agents-manager' })
   })
 
   it.each(['leave', 'invite', 'ban'])('refuses a user whose membership is %s', async (membership) => {

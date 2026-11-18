@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import type { MatrixClient } from '@zooid/transport-matrix'
 import { Hono } from 'hono'
 import { createAdmission } from './admission.js'
-import { requireRole, type Caller } from './auth.js'
+import { isAdmin, managesVms, requireRole, type Caller } from './auth.js'
 import { listBundles } from './bundle.js'
 import type { FabriumApiConfig } from './config.js'
 import { createControlPlane, relay } from './control-plane.js'
@@ -94,6 +94,14 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
     }),
   )
 
+  // Before the VM routes, so a VM route added later is covered too.
+  for (const path of ['/vms', '/vms/*', '/instance-types']) {
+    app.use(path, async (c, next) => {
+      if (!managesVms(c.get('caller').role)) throw new ApiError(403, { error: 'forbidden' })
+      await next()
+    })
+  }
+
   app.get('/access', (c) => {
     const { userId, role } = c.get('caller')
     return c.json({ user_id: userId, role })
@@ -120,8 +128,7 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
     if ('failure' in result) return result.failure
     const caller = c.get('caller')
     const all = await listBundles(workstationsDir)
-    const bundles =
-      caller.role === 'vm-creator' ? all.filter((b) => b.creator === caller.userId) : all
+    const bundles = isAdmin(caller.role) ? all : all.filter((b) => b.creator === caller.userId)
     return c.json(agentsWithFree(bundles, result.vms, await liveWorkstations(live, bundles)))
   })
 
