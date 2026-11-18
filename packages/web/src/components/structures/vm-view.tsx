@@ -20,22 +20,23 @@ import type { Vm, VmState } from "../../model/types";
 import { initialAutoStopHours, parseAutoStopHours } from "../dialogs/auto-stop-field";
 import { StartVmDialog } from "../dialogs/start-vm-dialog";
 
-export type VmAction = "start" | "stop" | "reboot" | "delete";
+export type VmAction = "start" | "stop" | "reboot" | "credentials" | "delete";
 
 const LABEL: Record<VmAction, string> = {
   start: "Start",
   stop: "Stop",
   reboot: "Reboot",
+  credentials: "Update credentials",
   delete: "Delete",
 };
 
-// Delete is always offered. The other actions depend on the EC2 state.
+// Update credentials and Delete are always offered. The other actions depend on the EC2 state.
 const ACTIONS: Record<VmState, VmAction[]> = {
-  stopped: ["start", "delete"],
-  running: ["stop", "reboot", "delete"],
-  pending: ["delete"],
-  stopping: ["delete"],
-  "shutting-down": ["delete"],
+  stopped: ["start", "credentials", "delete"],
+  running: ["stop", "reboot", "credentials", "delete"],
+  pending: ["credentials", "delete"],
+  stopping: ["credentials", "delete"],
+  "shutting-down": ["credentials", "delete"],
 };
 
 export const STATE_TONE: Record<VmState, "success" | "neutral" | "warning"> = {
@@ -62,7 +63,7 @@ interface VmViewProps {
   noAccess: boolean;
   /** VMs with an action in flight. */
   busyIds: ReadonlySet<string>;
-  /** Start comes with the auto-stop hours chosen in its dialog. */
+  /** Start comes with the auto-stop hours chosen in its dialog. Update credentials opens its dialog. */
   onAction: (vm: Vm, action: VmAction, autoStopHours?: number) => void;
   /** Sets the hours of uptime after which the VM stops itself. */
   onSetAutoStop: (vm: Vm, hours: number) => void;
@@ -338,7 +339,7 @@ function VmRow({
         <div className="flex flex-wrap items-center justify-end gap-3">
           <AutoStopControl vm={vm} busy={busy} onSet={onSetAutoStop} />
           <div className="flex gap-1.5">
-            {(ACTIONS[vm.state] ?? ["delete"]).map((action) => (
+            {(ACTIONS[vm.state] ?? ["credentials", "delete"]).map((action) => (
               <Button
                 key={action}
                 type="button"

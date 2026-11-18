@@ -188,10 +188,10 @@ describe("<VmRoute>", () => {
   });
 
   it.each([
-    ["kilo", "stopped", ["Start", "Delete"]],
-    ["lima", "running", ["Stop", "Reboot", "Delete"]],
-    ["oscar", "pending", ["Delete"]],
-    ["papa", "stopping", ["Delete"]],
+    ["kilo", "stopped", ["Start", "Update credentials", "Delete"]],
+    ["lima", "running", ["Stop", "Reboot", "Update credentials", "Delete"]],
+    ["oscar", "pending", ["Update credentials", "Delete"]],
+    ["papa", "stopping", ["Update credentials", "Delete"]],
   ])("offers actions by state: %s is %s", async (name, _state, buttons) => {
     serve([kilo, lima, oscar, papa]);
     renderPage();
@@ -210,7 +210,37 @@ describe("<VmRoute>", () => {
       expect(within(rowOf("lima")).getByText("stopping")).toBeInTheDocument(),
     );
     expect(cp.calls).toEqual(["GET /vms", `POST ${lima.id}/stop`, "GET /vms"]);
-    expect(buttonsIn(rowOf("lima"))).toEqual(["Delete"]);
+    expect(buttonsIn(rowOf("lima"))).toEqual(["Update credentials", "Delete"]);
+  });
+
+  it("replaces a VM with new credentials", async () => {
+    const cp = serve([lima]);
+    let sent: unknown;
+    mswServer.use(
+      http.post(`${API}/vms/:id/recreate`, async ({ params, request }) => {
+        sent = await request.json();
+        cp.calls.push(`POST ${params.id}/recreate`);
+        const fresh = makeVm({ id: "i-0123456789abcdef8", state: "pending", setup: "pending" });
+        cp.vms = [{ ...lima, state: "shutting-down", agents: [] }, fresh];
+        return HttpResponse.json(fresh, { status: 201 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Update credentials lima" }));
+    const dialog = await screen.findByRole("dialog", { name: "Update the credentials of lima" });
+    expect(cp.calls).toEqual(["GET /vms"]);
+    await user.type(within(dialog).getByLabelText("Haven API key"), "hk-2");
+    await user.type(within(dialog).getByLabelText("GitHub token"), "gh-2");
+    await user.click(within(dialog).getByRole("button", { name: "Replace VM" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(sent).toStrictEqual({ haven_api_key: "hk-2", github_token: "gh-2" });
+    await waitFor(() =>
+      expect(cp.calls).toEqual(["GET /vms", `POST ${lima.id}/recreate`, "GET /vms"]),
+    );
+    expect(await screen.findByText("shutting-down")).toBeInTheDocument();
   });
 
   describe("Start dialog", () => {
