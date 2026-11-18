@@ -50,9 +50,7 @@ export function fabriumApi(deps: FabriumApiDeps): {
     fetch: deps.conn.fetch,
     timeoutMs: deps.controlPlaneTimeoutMs,
   })
-  // A Matrix request that never answers would block the one queue of the writes: each one ends after 15 s,
-  // as a control plane request does. The timeout covers the body too. No call here sets a signal of its own.
-  // The daemon keeps its own client and fetch, without this timeout.
+  // A hung Matrix request would block the write queue, so each one ends after 15 s, body included.
   const matrixFetch: typeof fetch = (input, init) =>
     deps.conn.fetch(input, { ...init, signal: AbortSignal.timeout(deps.matrixTimeoutMs ?? 15_000) })
   const conn: MatrixConn = { homeserver: deps.conn.homeserver, fetch: matrixFetch }
@@ -238,8 +236,7 @@ export function fabriumApi(deps: FabriumApiDeps): {
 
   return {
     app,
-    // Inside the queue, so no write runs between the read and the rebuild. A failed read throws: an empty
-    // list would empty every roster.
+    // In the queue, so no write lands mid-rebuild; a failed read throws rather than empty every roster.
     rebuildRosters: () => queue(async () => roster.rebuildAll(await fetchRecords(controlPlane))),
   }
 }

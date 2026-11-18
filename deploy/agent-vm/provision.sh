@@ -60,8 +60,7 @@ ENV_FILE="$ZOOID_HOME/.env"
 YAML_FILE="$ZOOID_HOME/workforce/zooid.yaml"
 # Agent secrets go in secrets.env, never in .env: a new bundle overwrites .env.
 SECRETS_FILE="$ZOOID_HOME/secrets.env"
-# A VM of the web UI has a VM token: fabrium-agent-sync writes zooid.yaml and the agent files.
-# A VM made by hand (deploy/add-workstation.sh) has none. sudo: /etc/fabrium can be root only.
+# Only a VM of the web UI has a VM token (sudo: /etc/fabrium can be root only).
 MANAGED=0
 if sudo test -f /etc/fabrium/vm-token; then MANAGED=1; fi
 if [ ! -f "$ENV_FILE" ] || { [ "$MANAGED" -eq 0 ] && [ ! -f "$YAML_FILE" ]; }; then
@@ -176,8 +175,7 @@ else
   printf '%s\n' "$COMMIT" >"$BUILT_FILE"
 fi
 
-# --- Agent sync (a VM of the web UI) ----------------------------------------
-# It writes zooid.yaml, which the service cannot start without, so it runs before the service.
+# --- Agent sync (a VM of the web UI): writes zooid.yaml, so before the service ---
 if [ "$MANAGED" -eq 1 ]; then
   sudo install -m 0755 "$REPO_DIR/deploy/agent-vm/fabrium-agent-sync" /usr/local/sbin/fabrium-agent-sync
   sudo install -m 0644 "$REPO_DIR/deploy/agent-vm/fabrium-agent-sync.service" \
@@ -189,8 +187,7 @@ if [ "$MANAGED" -eq 1 ]; then
 fi
 
 # --- Agent layout ---------------------------------------------------------
-# Under runtime: local zooid does not create the agent's working directory. On a VM of the web UI,
-# fabrium-agent-sync made the directory of each agent.
+# Local zooid does not create the agent's directory; on a VM of the web UI the sync made them.
 if [ "$MANAGED" -eq 0 ]; then
   mkdir -p "$ZOOID_HOME/workforce/agents/$AGENT_NAME"
 fi
