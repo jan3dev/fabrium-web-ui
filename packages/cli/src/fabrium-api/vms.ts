@@ -5,9 +5,13 @@ import { readBody, relay, type ControlPlane } from './control-plane.js'
 import { ApiError } from './errors.js'
 import { stateEvent, whoami, type MatrixConn } from './matrix.js'
 
-/** A VM of the control plane (contracts section 1). zooid reads only the name. */
+/** A VM of the control plane (VM contracts, section 1). */
 export interface Vm {
+  id: string
   name: string
+  state: string
+  creator?: string | null
+  launched_at: string
   [key: string]: unknown
 }
 
@@ -31,7 +35,9 @@ export async function fetchVms(
   } catch {
     body = undefined
   }
-  if (!Array.isArray(body) || !body.every((vm) => typeof vm?.name === 'string')) {
+  const isVm = (vm: Partial<Vm> | null) =>
+    typeof vm?.id === 'string' && typeof vm.name === 'string' && typeof vm.state === 'string'
+  if (!Array.isArray(body) || !body.every(isVm)) {
     throw new ApiError(502, { error: 'control plane sent an invalid response' })
   }
   return { vms: body as Vm[] }

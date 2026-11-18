@@ -102,11 +102,17 @@ describe('GET /vms', () => {
     expect(JSON.stringify(logs.map((l) => l.mock.calls))).not.toContain(CONTROL_PLANE_KEY)
   })
 
-  it('answers 502 when the control plane sends something that is not a list', async () => {
-    api.controlPlane.on('GET', '/v1/vms', new Response('<html>', { status: 200 }))
-    const res = await api.request('GET', '/vms')
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: 'control plane sent an invalid response' })
+  it('answers 502 when the control plane sends something that is not a list of VMs', async () => {
+    for (const reply of [
+      new Response('<html>', { status: 200 }),
+      jsonResponse(200, [{ id: VM_ID, name: 'lima' }]),
+      jsonResponse(200, [{ name: 'lima', state: 'running' }]),
+    ]) {
+      api.controlPlane.on('GET', '/v1/vms', reply)
+      const res = await api.request('GET', '/vms')
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: 'control plane sent an invalid response' })
+    }
   })
 })
 
