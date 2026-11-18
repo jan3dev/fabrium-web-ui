@@ -144,9 +144,12 @@ describe("<AgentsRoute>", () => {
     serve([PROFILE]);
     renderPage();
     await screen.findByRole("rowheader", { name: /^scout/ });
+    const reason = "Only a VM creator or an admin can create a VM.";
     const create = within(rowOf("scout")).getByRole("button", { name: "Create VM for scout" });
     expect(create).toBeDisabled();
-    expect(create).toHaveAttribute("title", "Only a VM creator or an admin can create a VM.");
+    // Visible text, not a tooltip: a disabled button gets no pointer, focus, or touch.
+    expect(within(rowOf("scout")).getByText(reason)).toBeVisible();
+    expect(create).toHaveAccessibleDescription(reason);
     expect(buttonsIn(rowOf("scout"))).toEqual(["Edit", "Create VM", "Delete"]);
   });
 
@@ -156,7 +159,8 @@ describe("<AgentsRoute>", () => {
     await screen.findByRole("rowheader", { name: /^review/ });
     const create = within(rowOf("review")).getByRole("button", { name: "Create VM for review" });
     expect(create).toBeEnabled();
-    expect(create).not.toHaveAttribute("title");
+    expect(create).not.toHaveAccessibleDescription();
+    expect(screen.queryByText("Only a VM creator or an admin can create a VM.")).toBeNull();
   });
 
   it("shows no Create VM for an agent with a live VM", async () => {

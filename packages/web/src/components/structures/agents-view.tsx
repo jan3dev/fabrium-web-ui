@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { PlusIcon } from "@/components/icons";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -97,6 +98,9 @@ function AgentRow({
   const instance = agent.source === "instance";
   // A profile, or an agent whose VM is gone: a VM can be created for it.
   const noLiveVm = !instance && !vm?.state;
+  // Shown as text: a disabled button gets no pointer, focus, or touch, so a tooltip never shows.
+  const reasonId = useId();
+  const showReason = noLiveVm && !can.create_vm;
   return (
     <tr className="border-t border-surface-border-primary align-top first:border-t-0">
       <th scope="row" className="px-4 py-3 text-left text-body2 font-medium text-text-primary">
@@ -147,7 +151,7 @@ function AgentRow({
               variant="secondary"
               aria-label={`Create VM for ${agent.name}`}
               disabled={!can.create_vm}
-              title={can.create_vm ? undefined : "Only a VM creator or an admin can create a VM."}
+              aria-describedby={showReason ? reasonId : undefined}
               onClick={() => onAction(agent, "create-vm")}
             >
               Create VM
@@ -166,6 +170,11 @@ function AgentRow({
             </Button>
           ) : null}
         </div>
+        {showReason ? (
+          <p id={reasonId} className="mt-1.5 text-right text-caption1 text-text-secondary">
+            Only a VM creator or an admin can create a VM.
+          </p>
+        ) : null}
       </td>
     </tr>
   );
