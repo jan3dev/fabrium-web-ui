@@ -85,8 +85,7 @@ export function loadFabriumApiConfig(
     )
   }
 
-  // Only the default of GET /models: no VM gets it now. It keeps the check of the values that the VM secrets
-  // file refuses, so a value that the start refused before is still refused.
+  // Only the default of GET /models now; the old start check stays, so a refused value stays refused.
   const havenModel = env.FABRIUM_HAVEN_MODEL?.trim() || undefined
   const modelProblem = havenModel && secretProblem(havenModel, 'FABRIUM_HAVEN_MODEL')
   if (modelProblem) throw new Error(modelProblem)

@@ -21,8 +21,7 @@ file_value() {
 
 CREATOR="${FABRIUM_CREATOR:-}"
 [[ "$CREATOR" =~ ^@[a-z0-9._=/+-]+:[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || die "FABRIUM_CREATOR is not a Matrix user ID"
-# A VM of the web UI: fabrium-agent-sync writes zooid.yaml as JSON. It greets as FABRIUM_AGENT, or else as
-# the first agent of zooid.yaml in sorted order. The rule of configure-agent.sh.
+# A VM of the web UI (zooid.yaml is JSON): greet as FABRIUM_AGENT, or else the first agent, sorted.
 if jq -e 'type == "object"' "$YAML_FILE" >/dev/null 2>&1; then
   AGENT_NAME="${FABRIUM_AGENT:-$(jq -r '.agents // {} | keys | first // empty' "$YAML_FILE")}"
   [[ "$AGENT_NAME" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || die "FABRIUM_AGENT or the first agent of $YAML_FILE is not an agent name"

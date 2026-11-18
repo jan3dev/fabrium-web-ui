@@ -14,7 +14,6 @@ import type { Vm } from './vms.js'
 export interface CreateRequest {
   /** The record `id` of the agent that the VM is created for. */
   agent: string
-  /** The VM name. */
   name: string
   instanceType?: string
   /** Hours of uptime after which the VM stops itself. */
@@ -114,8 +113,7 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
         throw new ApiError(409, { error: 'name in use' })
       }
     }
-    // Every step is safe to repeat, so it runs for an agent that has its VM name already too: in the rooms of
-    // its record, not in FABRIUM_VM_ROOMS of today, or it stays in a room that no record names.
+    // Safe to repeat. An agent with a VM name joins the rooms of its record, not today's FABRIUM_VM_ROOMS.
     const admitted = await deps.admission.admit({
       workstation: req.name,
       agent: agent.name,

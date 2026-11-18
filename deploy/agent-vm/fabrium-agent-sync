@@ -1,15 +1,7 @@
 #!/bin/bash
-# Apply the agents of this VM from the control plane: zooid.yaml, and AGENTS.md and opencode.json of each
-# agent, under /home/ubuntu/zooid/workforce. fabrium-agent-sync.timer runs it as root every minute. The
-# files are copies of the records: an edit on the VM is lost at the next change. See "Agents of a VM" in
-# deploy/README.md, and the agent management contracts, section 5.
-#   --dry-run                   print what it would write, remove, and restart; change nothing
-#   --require                   exit 1 when there is no agent list to apply
-#   FABRIUM_AGENT_SYNC_DIR=DIR  prefix of /etc/fabrium and /home/ubuntu (tests): no user switch, no restart
-# Output: one line per change (write: PATH, remove: PATH, skip: NAME: REASON), then
-# "restart: fabrium-agent" or "no change".
-#
-# The text of the list was typed by users: it reaches files only through jq, never a shell command.
+# Apply the agents of this VM from the control plane to /home/ubuntu/zooid/workforce.
+# Options, output, and the files it owns: "Agents of a VM" in deploy/README.md.
+# The list was typed by users: it reaches files only through jq, never a shell command.
 set -u
 
 ROOT=${FABRIUM_AGENT_SYNC_DIR:-}
@@ -66,8 +58,7 @@ put() {
   fi
 }
 
-# The second half: build the files from the list on stdin. It runs as ubuntu, so a path that an agent
-# changed (a symbolic link) reaches only what ubuntu can reach.
+# Builds the files from stdin as ubuntu, so a symbolic link reaches only what ubuntu can.
 apply_list() {
   local env_file=$ZOOID_DIR/.env ws server space count i name dir base
   [ -r "$env_file" ] || die "$env_file is missing"
@@ -82,8 +73,7 @@ apply_list() {
   trap 'rm -rf "$work"' EXIT
   cat >"$work/answer.json" || die "cannot read the list"
 
-  # One line for each agent that a rule refuses, then the list of the others. A refused name is
-  # printed as JSON, so it stays on one line.
+  # A skip line per refused agent (its name as JSON, so on one line), then the others.
   jq -r --arg name_re "$NAME_RE" --arg rule "$NAME_RULE" --arg room_re "$ROOM_RE" '
     .agents[]
     | if (.name | test($name_re) | not) then "skip: \(.name | tojson): the name breaks the rule \($rule)"
@@ -148,8 +138,7 @@ apply_list() {
     put "$dir/opencode.json"
   done
 
-  # The directory of an agent that is no longer in the answer. A skipped agent is in it, and keeps its
-  # directory. Not one outside the name rule: it is not ours.
+  # Agents no longer in the answer (a skipped one keeps its directory); names outside the rule are not ours.
   for dir in "$AGENTS_DIR"/*/; do
     [ -d "$dir" ] || continue
     dir=${dir%/}
