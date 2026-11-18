@@ -1,4 +1,13 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -7,13 +16,18 @@ import {
   MARKER,
   bundleAgent,
   ensureBundle,
+  ensureVmBundle,
+  listBundleNames,
   listBundles,
   readBundle,
+  readBundleEnv,
+  removeBundle,
   renderEnv,
   renderRegistration,
   renderYaml,
   withServer,
   type BundleSpec,
+  type VmBundleSpec,
 } from './bundle.js'
 
 const spec: BundleSpec = {
@@ -146,6 +160,69 @@ describe('ensureBundle', () => {
     mkdirSync(dirOf(), { recursive: true })
     writeFileSync(join(dirOf(), '.env'), 'MATRIX_AS_TOKEN=x\n')
     await expect(ensureBundle(dirOf(), spec)).rejects.toThrow(/MATRIX_HS_TOKEN/)
+  })
+})
+
+describe('the bundle of a VM name', () => {
+  const vmSpec: VmBundleSpec = {
+    workstation: 'lima',
+    serverName: 'example.org',
+    homeserverUrl: 'https://chat.example.org',
+    space: 'dev',
+  }
+  const dirOf = (name = 'lima') => join(root, 'workstations', name)
+
+  it('the .env has the six keys of the contracts and no AGENT_NAME', async () => {
+    const bundle = await ensureVmBundle(dirOf(), vmSpec)
+    const keys = bundle.env.split('\n').filter((l) => /^[A-Z_]+=/.test(l)).map((l) => l.split('=')[0])
+    expect(keys).toEqual([
+      'WORKSTATION',
+      'SERVER_NAME',
+      'HOMESERVER_URL',
+      'WORKFORCE_SPACE',
+      'MATRIX_AS_TOKEN',
+      'MATRIX_HS_TOKEN',
+    ])
+    expect(bundle.env).toContain(`MATRIX_AS_TOKEN=${bundle.asToken}\n`)
+    expect(readFileSync(join(dirOf(), '.env'), 'utf8')).toBe(bundle.env)
+    expect(statSync(join(dirOf(), '.env')).mode & 0o777).toBe(0o600)
+    expect(statSync(dirOf()).mode & 0o777).toBe(0o700)
+  })
+
+  it('the bundle has no workforce directory and no .creator file', async () => {
+    await ensureVmBundle(dirOf(), vmSpec)
+    expect(readdirSync(dirOf()).sort()).toEqual(['.env', MARKER])
+  })
+
+  it('a second ensureVmBundle keeps the tokens', async () => {
+    const first = await ensureVmBundle(dirOf(), vmSpec)
+    const second = await ensureVmBundle(dirOf(), vmSpec)
+    expect([second.asToken, second.hsToken, second.env]).toEqual([first.asToken, first.hsToken, first.env])
+  })
+
+  it('readBundleEnv is null without the marker', async () => {
+    const made = await ensureVmBundle(dirOf(), vmSpec)
+    expect(await readBundleEnv(dirOf())).toBe(made.env)
+    // A directory of deploy/add-workstation.sh has no marker.
+    rmSync(join(dirOf(), MARKER))
+    expect(await readBundleEnv(dirOf())).toBeNull()
+    expect(await readBundleEnv(dirOf('missing'))).toBeNull()
+  })
+
+  it('listBundleNames lists the names with the marker, sorted', async () => {
+    await ensureVmBundle(dirOf('lima'), vmSpec)
+    await ensureVmBundle(dirOf('cusco'), { ...vmSpec, workstation: 'cusco' })
+    mkdirSync(dirOf('legacy'))
+    writeFileSync(join(dirOf('legacy'), '.env'), 'WORKSTATION=legacy\n')
+    expect(await listBundleNames(join(root, 'workstations'))).toEqual(['cusco', 'lima'])
+    expect(await listBundleNames(join(root, 'missing'))).toEqual([])
+  })
+
+  it('removeBundle removes the directory, and a second call does nothing', async () => {
+    await ensureVmBundle(dirOf(), vmSpec)
+    await removeBundle(dirOf())
+    expect(existsSync(dirOf())).toBe(false)
+    await expect(removeBundle(dirOf())).resolves.toBeUndefined()
   })
 })
 

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { chmod, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { parse } from 'yaml'
 import { readTokens } from '../bootstrap/tokens.js'
@@ -16,14 +16,18 @@ export const MARKER = '.runtime-registration'
 export const VM_NAME_RE = /^[a-z0-9][a-z0-9-]{0,62}$/
 export const AGENT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/
 
-export interface BundleSpec {
+/** The bundle of a VM name: one Matrix credential for every agent of the VM (contracts section 3). */
+export interface VmBundleSpec {
   workstation: string
-  agent: string
   serverName: string
   /** Public URL of the homeserver: the VM reaches it with this. */
   homeserverUrl: string
   /** Localpart of the workforce space. */
   space: string
+}
+
+export interface BundleSpec extends VmBundleSpec {
+  agent: string
   /** Rooms of the agent: `#alias`, `#alias:server`, or `!id:server`. */
   rooms: string[]
   /** Recorded with the marker, so a retry of a failed admission still belongs to its creator. */
@@ -33,6 +37,10 @@ export interface BundleSpec {
 export interface Tokens {
   asToken: string
   hsToken: string
+}
+
+export interface VmBundle extends Tokens {
+  env: string
 }
 
 export interface BundleFiles {
@@ -59,12 +67,13 @@ export function withServer(room: string, serverName: string): string {
   return room.includes(':') ? room : `${room}:${serverName}`
 }
 
-export function renderEnv(spec: BundleSpec, tokens: Tokens): string {
+/** The `.env` of a bundle. `AGENT_NAME` only for a bundle of one agent. */
+export function renderEnv(spec: VmBundleSpec & { agent?: string }, tokens: Tokens): string {
   return [
     `# Agent VM environment for workstation ${spec.workstation}. Written by the zooid daemon (VM management API).`,
     '# Copy to the VM as ~/zooid/.env (mode 600). Format rules: deploy/README.md.',
     `WORKSTATION=${spec.workstation}`,
-    `AGENT_NAME=${spec.agent}`,
+    ...(spec.agent ? [`AGENT_NAME=${spec.agent}`] : []),
     `SERVER_NAME=${spec.serverName}`,
     `HOMESERVER_URL=${spec.homeserverUrl}`,
     `WORKFORCE_SPACE=${spec.space}`,
@@ -112,7 +121,7 @@ export function renderYaml(spec: BundleSpec): string {
 }
 
 /** `deploy/templates/registration-workstation.yaml`: the YAML that `!admin appservices register` takes. */
-export function renderRegistration(spec: BundleSpec, tokens: Tokens): string {
+export function renderRegistration(spec: VmBundleSpec, tokens: Tokens): string {
   // The namespace is a regex: escape the dots of the server name.
   const serverRe = spec.serverName.replaceAll('.', '\\.')
   return [
@@ -144,6 +153,10 @@ async function createIfMissing(path: string, content: string, mode: number): Pro
 
 const CREATOR_FILE = '.creator'
 
+const markerText = (workstation: string) =>
+  `Admitted by the zooid daemon (VM management API). The tuwunel registration of '${workstation}' is in the tuwunel database, not in registrations/.\n` +
+  `Remove it with: !admin appservices unregister ${workstation}\n`
+
 /** Keeps the first creator of a workstation: a resume or a later VM does not change it. */
 export async function recordCreator(dir: string, userId: string): Promise<void> {
   await createIfMissing(join(dir, CREATOR_FILE), `${userId}\n`, 0o600)
@@ -158,12 +171,7 @@ export async function ensureBundle(dir: string, spec: BundleSpec): Promise<Bundl
   await chmod(dirname(dir), 0o700)
   await chmod(dir, 0o700)
   // The marker comes first: a bundle that exists was made here, even after a crash.
-  await createIfMissing(
-    join(dir, MARKER),
-    `Admitted by the zooid daemon (VM management API). The tuwunel registration of '${spec.workstation}' is in the tuwunel database, not in registrations/.\n` +
-      `Remove it with: !admin appservices unregister ${spec.workstation}\n`,
-    0o600,
-  )
+  await createIfMissing(join(dir, MARKER), markerText(spec.workstation), 0o600)
   if (spec.creator) await recordCreator(dir, spec.creator)
   const envPath = join(dir, '.env')
   let tokens = readTokens(envPath)
@@ -182,6 +190,54 @@ export async function ensureBundle(dir: string, spec: BundleSpec): Promise<Bundl
     env: await readFile(envPath, 'utf8'),
     yaml: await readFile(yamlPath, 'utf8'),
   }
+}
+
+/**
+ * Create the bundle of a VM name, or complete one that an earlier try left unfinished: the marker and the
+ * `.env`. Files that exist stay as they are, so the tokens never change under a running VM.
+ */
+export async function ensureVmBundle(dir: string, spec: VmBundleSpec): Promise<VmBundle> {
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await chmod(dirname(dir), 0o700)
+  await chmod(dir, 0o700)
+  // The marker comes first: a bundle that exists was made here, even after a crash.
+  await createIfMissing(join(dir, MARKER), markerText(spec.workstation), 0o600)
+  const envPath = join(dir, '.env')
+  let tokens = readTokens(envPath)
+  if (!tokens) {
+    tokens = {
+      asToken: randomBytes(32).toString('hex'),
+      hsToken: randomBytes(32).toString('hex'),
+    }
+    await writeFile(envPath, renderEnv(spec, tokens), { flag: 'wx', mode: 0o600 })
+  }
+  return { ...tokens, env: await readFile(envPath, 'utf8') }
+}
+
+const hasMarker = (dir: string) => access(join(dir, MARKER)).then(() => true, () => false)
+
+/** The `.env` of a bundle that the VM API made, or null. */
+export async function readBundleEnv(dir: string): Promise<string | null> {
+  if (!(await hasMarker(dir))) return null
+  return readFile(join(dir, '.env'), 'utf8').catch(() => null)
+}
+
+/** The VM names that have a bundle with the marker, sorted. */
+export async function listBundleNames(root: string): Promise<string[]> {
+  let entries
+  try {
+    entries = await readdir(root, { withFileTypes: true })
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw err
+  }
+  const names = entries.filter((e) => e.isDirectory() && VM_NAME_RE.test(e.name)).map((e) => e.name)
+  const marked = await Promise.all(names.map((name) => hasMarker(join(root, name))))
+  return names.filter((_, i) => marked[i]).sort()
+}
+
+export async function removeBundle(dir: string): Promise<void> {
+  await rm(dir, { recursive: true, force: true })
 }
 
 /** The last `KEY=value` line wins, as in the scripts (`tail -n 1`). */

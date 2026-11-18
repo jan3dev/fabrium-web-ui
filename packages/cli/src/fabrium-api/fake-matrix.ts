@@ -1,6 +1,7 @@
 /**
  * Test helper: an in-memory homeserver behind a `fetch`, answering like tuwunel 1.9.3 for the
- * cases the tests need (including `!admin appservices register`). Production code never imports it.
+ * cases the tests need (including `!admin appservices register` and `unregister`). Production code never
+ * imports it.
  */
 import { parse } from 'yaml'
 
@@ -141,10 +142,19 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
   addRoom('#general', generalRoomId, 'public')
   addRoom('#admins', adminRoomId, 'invite')
 
-  /** What tuwunel does with a message in the admin room: `!admin appservices register` and a code block. */
+  /**
+   * What tuwunel does with a message in the admin room: `!admin appservices register` and a code block, or
+   * `!admin appservices unregister <id>`, after which the token of that registration fails. Its users stay.
+   */
   function runAdminCommand(text: string): void {
+    if (!knobs.adminCommandWorks) return
+    const unregister = /^!admin appservices unregister (\S+)$/.exec(text)
+    if (unregister) {
+      for (const [token, a] of appservices) if (a.id === unregister[1]) appservices.delete(token)
+      return
+    }
     const match = /^!admin appservices register\n```\n([\s\S]*)\n```$/.exec(text)
-    if (!knobs.adminCommandWorks || !match) return
+    if (!match) return
     const registration = parse(match[1]!) as {
       id: string
       as_token: string
@@ -228,6 +238,14 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
       if (!mayAct || current === 'ban' || !allowed) return forbidden()
       setState(roomId, 'm.room.member', actor, { membership: 'join' }, actor)
       return json(200, { room_id: roomId })
+    }
+    const leave = /^\/_matrix\/client\/v3\/rooms\/([^/]+)\/leave$/.exec(path)
+    if (method === 'POST' && leave) {
+      const roomId = decodeURIComponent(leave[1]!)
+      const current = membershipOf(roomId, actor)
+      if (!mayAct || (current !== 'join' && current !== 'invite')) return forbidden()
+      setState(roomId, 'm.room.member', actor, { membership: 'leave' }, actor)
+      return json(200, {})
     }
     const invite = /^\/_matrix\/client\/v3\/rooms\/([^/]+)\/invite$/.exec(path)
     if (method === 'POST' && invite) {

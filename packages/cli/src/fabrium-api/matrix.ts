@@ -47,6 +47,14 @@ export async function whoami(c: MatrixConn, token: string): Promise<string | nul
   return typeof id === 'string' ? id : null
 }
 
+/** True while the homeserver accepts the token, false once it answers 401. Any other failure throws. */
+export async function tokenAccepted(c: MatrixConn, token: string): Promise<boolean> {
+  const r = await get(c, '/_matrix/client/v3/account/whoami', token)
+  if (r.status === 401) return false
+  if (!r.ok) throw new ApiError(502, { error: `homeserver answered ${r.status}` })
+  return true
+}
+
 /** The content of one state event, or null when the room has none. */
 export async function stateEvent(
   c: MatrixConn,
