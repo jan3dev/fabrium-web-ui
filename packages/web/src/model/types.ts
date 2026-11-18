@@ -202,7 +202,6 @@ export interface VmCredentials {
 export interface CreateVmRequest extends VmCredentials {
   /** The id of the agent record the VM is for. */
   agent: string;
-  /** The VM name. */
   name: string;
   instance_type?: string;
   /** Integer from 1 to 168. */
