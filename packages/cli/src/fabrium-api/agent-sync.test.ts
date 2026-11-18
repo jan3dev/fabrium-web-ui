@@ -271,6 +271,19 @@ describe('fabrium-agent-sync', () => {
     expect(Object.keys(JSON.parse(read('zooid.yaml')).agents)).toEqual(['reviewer'])
   })
 
+  it('a skipped agent keeps its directory', async () => {
+    await sync()
+    reply = list(reviewer, { ...tester, rooms: [`#it's:example.org`] })
+    const { out } = await sync()
+    expect(lines(out)).toEqual([
+      'skip: tester: a room breaks the rule of the contracts',
+      `write: ${workforce('zooid.yaml')}`,
+      'restart: fabrium-agent',
+    ])
+    expect(read('agents/tester/AGENTS.md')).toBe('')
+    expect(Object.keys(JSON.parse(read('zooid.yaml')).agents)).toEqual(['reviewer'])
+  })
+
   it('a list whose every agent is skipped keeps every file', async () => {
     await sync()
     const before = snapshot()

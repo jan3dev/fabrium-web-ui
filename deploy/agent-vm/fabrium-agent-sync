@@ -148,13 +148,14 @@ apply_list() {
     put "$dir/opencode.json"
   done
 
-  # The directory of an agent that is no longer in the list. Not one outside the name rule: it is not ours.
+  # The directory of an agent that is no longer in the answer. A skipped agent is in it, and keeps its
+  # directory. Not one outside the name rule: it is not ours.
   for dir in "$AGENTS_DIR"/*/; do
     [ -d "$dir" ] || continue
     dir=${dir%/}
     name=${dir##*/}
     [[ $name =~ $NAME_RULE ]] || continue
-    jq -e --arg name "$name" 'any(.[]; .name == $name)' "$work/list.json" >/dev/null && continue
+    jq -e --arg name "$name" 'any(.agents[]; .name == $name)' "$work/answer.json" >/dev/null && continue
     changed=1
     echo "remove: $dir"
     [ "$dry_run" -eq 1 ] || rm -rf -- "$dir" || die "cannot remove $dir"
