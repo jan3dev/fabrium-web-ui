@@ -3,11 +3,13 @@
  * a scripted control plane, and a temporary ZOOID_HOME. Production code never
  * imports it.
  */
+import { randomBytes } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MatrixClient } from '@zooid/transport-matrix'
 import { Hono } from 'hono'
+import type { AgentRecord } from './agent-records.js'
 import { MARKER, ensureBundle, type BundleSpec } from './bundle.js'
 import { createFakeMatrix } from './fake-matrix.js'
 import { mountFabriumApi, type FabriumApiDeps } from './index.js'
@@ -45,6 +47,68 @@ export const stalledResponse =
       }),
       { status, headers: { 'content-type': 'application/json' } },
     )
+
+/**
+ * Serves the agent routes of contracts section 1 from memory on the fake control plane, with its two 409 rules.
+ * A later `controlPlane.on` for the same route wins, so a test can still make one route fail.
+ */
+export function fakeAgentStore(controlPlane: ReturnType<typeof createTestApi>['controlPlane']): {
+  records: AgentRecord[]
+} {
+  const records: AgentRecord[] = []
+  const BY_ID = /^\/v1\/agents\/([^/]+)$/
+  const find = (req: ControlPlaneRequest) => {
+    const id = decodeURIComponent(BY_ID.exec(req.path.split('?')[0]!)?.[1] ?? '')
+    return records.find((r) => r.id === id)
+  }
+  // SQLite treats each NULL vm as distinct: two profiles can share a name.
+  const nameInUse = (name: string, vm: string | null, id?: string) =>
+    vm !== null && records.some((r) => r.vm === vm && r.name === name && r.id !== id)
+  type Body = Partial<AgentRecord>
+
+  controlPlane.on('GET', '/v1/agents', () => jsonResponse(200, records))
+  controlPlane.on('POST', '/v1/agents', (req) => {
+    const b = req.body as Body
+    const record: AgentRecord = {
+      id: randomBytes(16).toString('hex'),
+      name: b.name!,
+      owner: b.owner!,
+      description: b.description ?? '',
+      model: b.model!,
+      tag: b.tag || null,
+      project: b.project || null,
+      vm: b.vm ?? null,
+      rooms: b.rooms ?? [],
+    }
+    if (nameInUse(record.name, record.vm)) return jsonResponse(409, { error: 'name in use' })
+    records.push(record)
+    return jsonResponse(201, record)
+  })
+  controlPlane.on('PUT', BY_ID, (req) => {
+    const record = find(req)
+    if (!record) return jsonResponse(404, { error: 'not found' })
+    const b = req.body as Body
+    if (b.vm !== undefined) {
+      if (record.vm !== null) return jsonResponse(409, { error: 'vm already set' })
+      if (nameInUse(record.name, b.vm, record.id)) return jsonResponse(409, { error: 'name in use' })
+    }
+    Object.assign(
+      record,
+      Object.fromEntries(Object.entries(b).filter(([, value]) => value !== undefined)),
+      // "" clears tag and project.
+      b.tag === undefined ? {} : { tag: b.tag || null },
+      b.project === undefined ? {} : { project: b.project || null },
+    )
+    return jsonResponse(200, record)
+  })
+  controlPlane.on('DELETE', BY_ID, (req) => {
+    const record = find(req)
+    if (!record) return jsonResponse(404, { error: 'not found' })
+    records.splice(records.indexOf(record), 1)
+    return new Response(null, { status: 204 })
+  })
+  return { records }
+}
 
 export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
   const fake = createFakeMatrix()
