@@ -383,6 +383,20 @@ describe('a VM for an agent', () => {
     expect(upstreamCreate().bootstrap.files[1]?.content).toContain("FABRIUM_AGENT='watcher'")
   })
 
+  it('brings back the VM of an agent in the rooms of its record, not in FABRIUM_VM_ROOMS of today', async () => {
+    setup({ vmRooms: ['#general', '#dev-talk'] })
+    api.fake.addRoom('#dev-talk', '!dev-talk:example.org', 'public')
+    api.fake.addRoom('#ops', '!ops:example.org', 'public')
+    record('a4', 'watcher', 'quito', ANA)
+    recordOf('a4')!.rooms = ['#general:example.org', '#ops:example.org']
+    const res = await create(body({ agent: 'a4', name: 'quito' }), as(LUIS))
+    expect(res.status).toBe(201)
+    const watcher = '@quito.watcher:example.org'
+    expect(api.fake.membership(api.fake.generalRoomId, watcher)).toBe('join')
+    expect(api.fake.membership('!ops:example.org', watcher)).toBe('join')
+    expect(api.fake.membership('!dev-talk:example.org', watcher)).toBeUndefined()
+  })
+
   it('refuses another name for an agent that has a vm', async () => {
     setup()
     record('a4', 'watcher', 'quito', ANA)

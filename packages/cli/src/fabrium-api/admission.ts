@@ -45,7 +45,7 @@ export interface AdmissionDeps {
   /** Localpart of the workforce space. */
   workforceSpace: string
   getSpaceRoomId(): string | undefined
-  /** Rooms of the new agent. */
+  /** Rooms of a new agent: FABRIUM_VM_ROOMS. */
   rooms: string[]
   workstationsDir: string
   registrationsDir: string
@@ -61,7 +61,7 @@ export interface Placement {
 
 export interface Admitted {
   agentId: string
-  /** FABRIUM_VM_ROOMS with the server name: the `rooms` of the record. */
+  /** The rooms that the agent joined, with the server name: the `rooms` of the record. */
   rooms: string[]
   /** The bundle `.env`, for the payload of a VM. */
   env: string
@@ -71,8 +71,11 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 /** The routes run `admit` and `remove` inside the one queue of every write. */
 export function createAdmission(deps: AdmissionDeps): {
-  /** Grant `@<vm>.<agent>` on the bundle of the VM name. Each step is safe to repeat. No roster. */
-  admit(p: Placement): Promise<Admitted>
+  /**
+   * Grant `@<vm>.<agent>` on the bundle of the VM name, in `rooms` (default: FABRIUM_VM_ROOMS). Each step is
+   * safe to repeat. No roster.
+   */
+  admit(p: Placement & { rooms?: string[] }): Promise<Admitted>
   /** Leave, and for the last agent of the name: unregister and remove the bundle. Safe to repeat. */
   remove(p: Placement & { rooms: string[]; last: boolean }): Promise<void>
 } {
@@ -188,7 +191,13 @@ export function createAdmission(deps: AdmissionDeps): {
   }
 
   /** The steps from register_appservice to join, each safe to repeat. Returns the room IDs of the agent. */
-  async function grant(spec: VmBundleSpec, tokens: Tokens, agent: string, step: RunStep): Promise<string[]> {
+  async function grant(
+    spec: VmBundleSpec,
+    tokens: Tokens,
+    agent: string,
+    rooms: string[],
+    step: RunStep,
+  ): Promise<string[]> {
     const ws = spec.workstation
     const sender = `@${ws}:${deps.serverName}`
     const agentId = `@${ws}.${agent}:${deps.serverName}`
@@ -219,7 +228,7 @@ export function createAdmission(deps: AdmissionDeps): {
     const roomIds: string[] = []
     await step('join', async () => {
       const spaceId = requireSpace()
-      for (const room of deps.rooms) {
+      for (const room of rooms) {
         const alias = withServer(room, deps.serverName)
         const roomId = alias.startsWith('!') ? alias : await deps.client.resolveAlias(alias)
         if (!roomId) throw new Error(`room ${alias} does not exist; create it first`)
@@ -257,10 +266,11 @@ export function createAdmission(deps: AdmissionDeps): {
         await checkWorkstation(dir, ws, p.agent)
         return ensureVmBundle(dir, spec)
       })
-      await grant(spec, bundle, p.agent, step)
+      const rooms = p.rooms ?? deps.rooms
+      await grant(spec, bundle, p.agent, rooms, step)
       return {
         agentId,
-        rooms: deps.rooms.map((room) => withServer(room, deps.serverName)),
+        rooms: rooms.map((room) => withServer(room, deps.serverName)),
         env: bundle.env,
       }
     },

@@ -114,8 +114,13 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
         throw new ApiError(409, { error: 'name in use' })
       }
     }
-    // Every step is safe to repeat, so it runs for an agent that has its VM name already too.
-    const admitted = await deps.admission.admit({ workstation: req.name, agent: agent.name })
+    // Every step is safe to repeat, so it runs for an agent that has its VM name already too: in the rooms of
+    // its record, not in FABRIUM_VM_ROOMS of today, or it stays in a room that no record names.
+    const admitted = await deps.admission.admit({
+      workstation: req.name,
+      agent: agent.name,
+      rooms: agent.vm === null ? undefined : agent.rooms,
+    })
     let records = world.records
     if (agent.vm === null) {
       const record = await step('record', () =>
