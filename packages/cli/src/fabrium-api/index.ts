@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import type { MatrixClient } from '@zooid/transport-matrix'
 import { Hono } from 'hono'
 import { createAdmission } from './admission.js'
+import { fetchRecords } from './agent-records.js'
 import { isAdmin, managesVms, requireRole, type Caller } from './auth.js'
 import { listBundles } from './bundle.js'
 import type { FabriumApiConfig } from './config.js'
@@ -10,6 +11,8 @@ import { createVm, parseAutoStopHours, parseCreateRequest } from './create.js'
 import { ApiError, apiErrorHandler } from './errors.js'
 import type { MatrixConn } from './matrix.js'
 import { FULL_COMMIT_RE } from './payload.js'
+import { createQueue } from './queue.js'
+import { createRoster } from './roster.js'
 import { agentsWithFree, fetchVms, liveWorkstations, type LiveDeps } from './vms.js'
 
 export interface FabriumApiDeps extends FabriumApiConfig {
@@ -25,6 +28,8 @@ export interface FabriumApiDeps extends FabriumApiConfig {
   workforceSpace: string
   /** The agents of the daemon config: a new VM agent may not take one of their names. */
   agentNames?: readonly string[]
+  /** The agents of the daemon config: every caller sees them, read-only. */
+  instanceAgents?: readonly { name: string; userId: string }[]
   getSpaceRoomId(): string | undefined
   // Test seams.
   now?: () => number
@@ -33,7 +38,11 @@ export interface FabriumApiDeps extends FabriumApiConfig {
   pollIntervalMs?: number
 }
 
-export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Caller } }> {
+export function fabriumApi(deps: FabriumApiDeps): {
+  app: Hono<{ Variables: { caller: Caller } }>
+  /** Rebuilds the roster of every VM name from the records. Throws when the records cannot be read. */
+  rebuildRosters(): Promise<void>
+} {
   const app = new Hono<{ Variables: { caller: Caller } }>()
   const controlPlane = createControlPlane({
     baseUrl: deps.controlPlaneUrl,
@@ -62,6 +71,17 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
     registrationsDir: join(deps.zooidHome, 'data', 'matrix', 'config', 'registrations'),
     whoamiTimeoutMs: deps.whoamiTimeoutMs,
     pollIntervalMs: deps.pollIntervalMs,
+  })
+  // ponytail: one queue for every agent write, and the roster rebuild at start.
+  const queue = createQueue()
+  const roster = createRoster({
+    conn: deps.conn,
+    client: deps.client,
+    asToken: deps.asToken,
+    asUserId: deps.asUserId,
+    serverName: deps.serverName,
+    getSpaceRoomId: deps.getSpaceRoomId,
+    workstationsDir,
   })
 
   /**
@@ -192,7 +212,12 @@ export function fabriumApi(deps: FabriumApiDeps): Hono<{ Variables: { caller: Ca
     return relay(await controlPlane.request('PUT', vmPath(id, '/auto-stop'), { auto_stop_hours: hours }))
   })
 
-  return app
+  return {
+    app,
+    // Inside the queue, so no write runs between the read and the rebuild. A failed read throws: an empty
+    // list would empty every roster.
+    rebuildRosters: () => queue(async () => roster.rebuildAll(await fetchRecords(controlPlane))),
+  }
 }
 
 /** A JSON object body, or undefined for an empty body. */
@@ -212,6 +237,8 @@ async function bodyObject(text: Promise<string>): Promise<Record<string, unknown
 }
 
 /** Mount the browser API of the VM management under `/_fabrium/v1`. Call it before `serve()`. */
-export function mountFabriumApi(app: Hono, deps: FabriumApiDeps): void {
-  app.route('/_fabrium/v1', fabriumApi(deps))
+export function mountFabriumApi(app: Hono, deps: FabriumApiDeps): { rebuildRosters(): Promise<void> } {
+  const api = fabriumApi(deps)
+  app.route('/_fabrium/v1', api.app)
+  return { rebuildRosters: api.rebuildRosters }
 }

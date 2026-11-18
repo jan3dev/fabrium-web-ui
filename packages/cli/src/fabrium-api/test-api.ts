@@ -171,7 +171,7 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
     ...overrides,
   }
   const app = new Hono()
-  mountFabriumApi(app, deps)
+  const { rebuildRosters } = mountFabriumApi(app, deps)
 
   fake.joinSpace(ADMIN, 90)
   fake.joinSpace(MEMBER, 0)
@@ -188,6 +188,7 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
     registrationsDir,
     adminToken,
     memberToken,
+    rebuildRosters,
     /** A request under /_fabrium/v1, as the admin unless `token` says otherwise (`null`: no header). */
     request(method: string, path: string, o: { token?: string | null; json?: unknown } = {}) {
       const token = o.token === undefined ? adminToken : o.token
