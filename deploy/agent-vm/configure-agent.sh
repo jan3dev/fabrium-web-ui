@@ -36,8 +36,8 @@ Never prints secret values.
 
 On a VM of the web UI, fabrium-agent-sync writes zooid.yaml (as JSON) and the
 opencode.json of each agent: there the script needs no HAVEN_MODEL and writes no
-opencode.json. It runs the test turn as FABRIUM_AGENT, or else as the first agent
-of zooid.yaml in sorted order.
+opencode.json. It runs the test turn as FABRIUM_AGENT, or as the first agent of
+zooid.yaml in sorted order when FABRIUM_AGENT is unset or no longer on the VM.
 
   -h, --help       show this help
 USAGE
@@ -82,9 +82,14 @@ SECRETS_FILE="$ZOOID_HOME/secrets.env"
 MANAGED=0
 if jq -e 'type == "object"' "$YAML_FILE" >/dev/null 2>&1; then MANAGED=1; fi
 if [ "$MANAGED" -eq 1 ]; then
-  AGENT_NAME="${FABRIUM_AGENT:-$(jq -r '.agents // {} | keys | first // empty' "$YAML_FILE")}"
+  AGENT_NAME="${FABRIUM_AGENT:-}"
   # The name goes into a path: the rule of the agent names.
-  [[ "$AGENT_NAME" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || die "FABRIUM_AGENT or the first agent of $YAML_FILE is not an agent name"
+  [[ -z "$AGENT_NAME" || "$AGENT_NAME" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || die "FABRIUM_AGENT is not an agent name"
+  # The agent that the VM was created for can leave it before this runs: then the first one, as without it.
+  if [ -z "$AGENT_NAME" ] || [ ! -d "$ZOOID_HOME/workforce/agents/$AGENT_NAME" ]; then
+    AGENT_NAME="$(jq -r '.agents // {} | keys | first // empty' "$YAML_FILE")"
+  fi
+  [[ "$AGENT_NAME" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || die "the first agent of $YAML_FILE is not an agent name"
 else
   AGENT_NAME="$(file_value "$ENV_FILE" AGENT_NAME)"
 fi

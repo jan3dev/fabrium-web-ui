@@ -313,7 +313,8 @@ that file, and the agent gets the environment of the service.
 
 On a VM of the web UI, the setup script runs it with the secrets of the payload, and
 [the agent sync](#the-agent-sync) writes `opencode.json`. There it needs no `HAVEN_MODEL`, and it runs the
-test turn as `FABRIUM_AGENT`, the agent that the VM was created for.
+test turn as `FABRIUM_AGENT`, the agent that the VM was created for. When that agent is no longer on the VM, it
+uses the first agent of `zooid.yaml` in sorted order.
 
 | Variable | Required | Use |
 |---|---|---|

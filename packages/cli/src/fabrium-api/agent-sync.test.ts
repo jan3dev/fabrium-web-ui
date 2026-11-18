@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -309,5 +309,25 @@ describe('fabrium-agent-sync', () => {
     for (const dir of [root, zooid(), workforce(), workforce('agents/reviewer'), process.cwd()]) {
       expect(existsSync(join(dir, 'pwned')), dir).toBe(false)
     }
+  })
+
+  // The agent of the test turn of configure-agent.sh on these files: this runs the script's own block.
+  it('configure-agent.sh tests the first agent when the agent of FABRIUM_AGENT left the VM', async () => {
+    reply = list(tester, reviewer)
+    await sync()
+    const script = readFileSync(resolve(__dirname, '../../../../deploy/agent-vm/configure-agent.sh'), 'utf8')
+    const block = /\nif \[ "\$MANAGED" -eq 1 \]; then\n {2}AGENT_NAME=[\s\S]*?\nfi\n/.exec(script)?.[0]
+    expect(block).toBeDefined()
+    const agentOf = (env: Record<string, string>) =>
+      execFileSync(
+        'bash',
+        ['-c', `set -euo pipefail\ndie() { printf 'DIE %s' "$*"; exit 0; }\nMANAGED=1\n${block}printf %s "$AGENT_NAME"`],
+        { encoding: 'utf8', env: { PATH: process.env.PATH, ZOOID_HOME: zooid(), YAML_FILE: workforce('zooid.yaml'), ...env } },
+      )
+    expect(agentOf({ FABRIUM_AGENT: 'tester' })).toBe('tester')
+    // Deleted before the setup reached the script: the sync wrote only the others.
+    expect(agentOf({ FABRIUM_AGENT: 'watcher' })).toBe('reviewer')
+    expect(agentOf({})).toBe('reviewer')
+    expect(agentOf({ FABRIUM_AGENT: 'x/../tester' })).toMatch(/^DIE /)
   })
 })
