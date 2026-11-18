@@ -91,7 +91,23 @@ describe("<AgentDialog>", () => {
     ]);
   });
 
-  it("refuses a bad name without a request", async () => {
+  it("keeps a chosen VM that leaves the list, so it sends what it shows", async () => {
+    const { user, onSubmit, rerender } = setup();
+    await user.type(screen.getByLabelText("Name"), "scout");
+    await user.selectOptions(screen.getByLabelText("VM"), "lima");
+
+    // A poll in which lima is no longer a VM the caller can use.
+    rerender({ vms: [] });
+    const select = screen.getByLabelText("VM");
+    expect(select).toHaveValue("lima");
+    expect(optionTexts(select)).toEqual(["No VM", "lima"]);
+    await user.click(button("Create agent"));
+    expect(onSubmit.mock.calls).toStrictEqual([
+      [{ name: "scout", model: "glm-5-3", vm: (select as HTMLSelectElement).value }],
+    ]);
+  });
+
+    it("refuses a bad name without a request", async () => {
     const { user, onSubmit } = setup();
     await user.type(screen.getByLabelText("Name"), "Reviewer");
 

@@ -108,6 +108,8 @@ function AgentForm({
   const showVm = !initial || (initial.vm === null && initial.can.assign);
   // A model the list no longer offers stays selectable, so an edit does not change it silently.
   const modelIds = [...new Set([...(models?.models.map((m) => m.id) ?? []), ...(model ? [model] : [])])];
+  // A chosen VM that leaves the list stays an option, so the select shows what the request sends.
+  const vmNames = [...new Set([...vms.map((vm) => vm.name), ...(form.vm ? [form.vm] : [])])];
   const owners = members.some((m) => m.userId === form.owner)
     ? members
     : [{ userId: form.owner, name: form.owner }, ...members];
@@ -289,9 +291,9 @@ function AgentForm({
               disabled={submitting}
             >
               <option value="">No VM</option>
-              {vms.map((vm) => (
-                <option key={vm.name} value={vm.name}>
-                  {vm.name}
+              {vmNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
                 </option>
               ))}
             </NativeSelect>
