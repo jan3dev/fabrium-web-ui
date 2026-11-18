@@ -1,0 +1,11 @@
+# Installed by deploy/agent-vm/provision.sh into /etc/systemd/system on a VM of the web UI.
+[Unit]
+Description=Read the agents of this VM from the control plane every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

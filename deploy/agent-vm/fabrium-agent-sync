@@ -1,0 +1,203 @@
+#!/bin/bash
+# Apply the agents of this VM from the control plane: zooid.yaml, and AGENTS.md and opencode.json of each
+# agent, under /home/ubuntu/zooid/workforce. fabrium-agent-sync.timer runs it as root every minute. The
+# files are copies of the records: an edit on the VM is lost at the next change. See "Agents of a VM" in
+# deploy/README.md, and the agent management contracts, section 5.
+#   --dry-run                   print what it would write, remove, and restart; change nothing
+#   --require                   exit 1 when there is no agent list to apply
+#   FABRIUM_AGENT_SYNC_DIR=DIR  prefix of /etc/fabrium and /home/ubuntu (tests): no user switch, no restart
+# Output: one line per change (write: PATH, remove: PATH, skip: NAME: REASON), then
+# "restart: fabrium-agent" or "no change".
+#
+# The text of the list was typed by users: it reaches files only through jq, never a shell command.
+set -u
+
+ROOT=${FABRIUM_AGENT_SYNC_DIR:-}
+TOKEN_FILE=$ROOT/etc/fabrium/vm-token
+URL_FILE=$ROOT/etc/fabrium/control-plane-url
+ZOOID_DIR=$ROOT/home/ubuntu/zooid
+WORKFORCE=$ZOOID_DIR/workforce
+AGENTS_DIR=$WORKFORCE/agents
+UNIT_FILE=$ROOT/home/ubuntu/.config/systemd/user/fabrium-agent.service
+HAVEN_PROVIDER_NPM="github:jan3dev/haven-proxy#semver:0.x" # as in configure-agent.sh
+# The rules of the contracts, section 1. \A and \z: in jq, ^ and $ also match at a line break.
+NAME_RULE='^[a-z][a-z0-9-]{0,31}$'
+NAME_RE='\A[a-z][a-z0-9-]{0,31}\z'
+ROOM_RE='\A[#!][^\s'"'"'",\\]+\z'
+VM_RE='^[a-z0-9][a-z0-9-]{0,62}$'
+
+dry_run=0
+require=0
+apply=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) dry_run=1 ;;
+    --require) require=1 ;;
+    --apply) apply=1 ;; # internal: the second half, as ubuntu, with the list on stdin
+    *)
+      echo "usage: fabrium-agent-sync [--dry-run] [--require]" >&2
+      exit 2
+      ;;
+  esac
+done
+
+die() {
+  echo "fabrium-agent-sync: $*" >&2
+  exit 1
+}
+
+# Keeps every file. Exits 0, or 1 with --require.
+no_list() {
+  echo "fabrium-agent-sync: no agent list ($*); the files stay" >&2
+  exit "$require"
+}
+
+# put FILE: install $work/new as FILE through a temporary file and a rename, when the content differs.
+put() {
+  local file=$1 tmp
+  if [ -f "$file" ] && cmp -s "$work/new" "$file"; then return 0; fi
+  changed=1
+  echo "write: $file"
+  [ "$dry_run" -eq 1 ] && return 0
+  tmp=$(mktemp "${file%/*}/.sync.XXXXXX") || die "cannot write in ${file%/*}"
+  if ! { cat "$work/new" >"$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$file"; }; then
+    rm -f "$tmp"
+    die "cannot write $file"
+  fi
+}
+
+# The second half: build the files from the list on stdin. It runs as ubuntu, so a path that an agent
+# changed (a symbolic link) reaches only what ubuntu can reach.
+apply_list() {
+  local env_file=$ZOOID_DIR/.env ws server space count i name dir base
+  [ -r "$env_file" ] || die "$env_file is missing"
+  env_value() { sed -n "s/^$1=//p" "$env_file" | tail -n 1; }
+  ws=$(env_value WORKSTATION)
+  server=$(env_value SERVER_NAME)
+  space=$(env_value WORKFORCE_SPACE)
+  [[ $ws =~ $VM_RE ]] || die "$env_file has no valid WORKSTATION"
+  [ -n "$server" ] && [ -n "$space" ] || die "$env_file has no SERVER_NAME or no WORKFORCE_SPACE"
+
+  work=$(mktemp -d) || die "cannot make a temporary directory"
+  trap 'rm -rf "$work"' EXIT
+  cat >"$work/answer.json" || die "cannot read the list"
+
+  # One line for each agent that a rule refuses, then the list of the others. A refused name is
+  # printed as JSON, so it stays on one line.
+  jq -r --arg name_re "$NAME_RE" --arg rule "$NAME_RULE" --arg room_re "$ROOM_RE" '
+    .agents[]
+    | if (.name | test($name_re) | not) then "skip: \(.name | tojson): the name breaks the rule \($rule)"
+      elif (.rooms | length > 20 or any(.[]; (test($room_re) | not) or utf8bytelength > 255))
+      then "skip: \(.name): a room breaks the rule of the contracts"
+      else empty end' "$work/answer.json" || die "cannot read the list"
+  jq --arg name_re "$NAME_RE" --arg room_re "$ROOM_RE" '
+    [.agents[]
+     | select((.name | test($name_re))
+              and (.rooms | length <= 20 and all(.[]; test($room_re) and utf8bytelength <= 255)))]' \
+    "$work/answer.json" >"$work/list.json" || die "cannot read the list"
+  count=$(jq length "$work/list.json") || die "cannot read the list"
+  # zooid refuses a zooid.yaml without agents: an empty list keeps the files, as no list does.
+  [ "$count" -gt 0 ] || no_list "every agent was skipped"
+
+  changed=0
+  [ "$dry_run" -eq 1 ] || mkdir -p "$AGENTS_DIR" || die "cannot make $AGENTS_DIR"
+
+  # ${HOMESERVER_URL} stays as text: zooid reads it from the environment.
+  jq --arg ws "$ws" --arg server "$server" --arg space "$space" '{
+      workstation: $ws,
+      runtime: "local",
+      transports: {matrix: {
+        homeserver: "${HOMESERVER_URL}",
+        mode: "client",
+        sender_localpart: $ws,
+        user_namespace: ("@" + $ws + "\\..*:" + $server),
+        space: $space
+      }},
+      agents: (map({key: .name, value: {
+        acp: {preset: "opencode"},
+        matrix: {display_name: .name, rooms: .rooms, trigger: "mention"}
+      }}) | from_entries)
+    }' "$work/list.json" >"$work/new" || die "cannot build zooid.yaml"
+  put "$WORKFORCE/zooid.yaml"
+
+  echo '{}' >"$work/empty.json"
+  for ((i = 0; i < count; i++)); do
+    name=$(jq -r --argjson i "$i" '.[$i].name' "$work/list.json") || die "cannot read the list"
+    dir=$AGENTS_DIR/$name
+    [ "$dry_run" -eq 1 ] || mkdir -p "$dir" || die "cannot make $dir"
+
+    # The description byte for byte, with a final line break when it has none.
+    jq -j --argjson i "$i" '.[$i].description | if . == "" or endswith("\n") then . else . + "\n" end' \
+      "$work/list.json" >"$work/new" || die "cannot build AGENTS.md of $name"
+    put "$dir/AGENTS.md"
+
+    # The keys that configure-agent.sh owns: model and provider.haven. Other keys stay.
+    base=$dir/opencode.json
+    jq -e 'type == "object"' "$base" >/dev/null 2>&1 || base=$work/empty.json
+    jq --slurpfile list "$work/list.json" --argjson i "$i" --arg npm "$HAVEN_PROVIDER_NPM" '
+      $list[0][$i].model as $model
+      | .["$schema"] = "https://opencode.ai/config.json"
+      | .model = "haven/" + $model
+      | .provider.haven = {
+          npm: $npm,
+          name: "Haven",
+          options: {apiKey: "{env:HAVEN_API_KEY}"},
+          models: {($model): {name: ($model + " (Haven)"), tool_call: true, limit: {context: 64000, output: 16384}}}
+        }
+      | .permission.webfetch //= "allow"' "$base" >"$work/new" || die "cannot build opencode.json of $name"
+    put "$dir/opencode.json"
+  done
+
+  # The directory of an agent that is no longer in the list. Not one outside the name rule: it is not ours.
+  for dir in "$AGENTS_DIR"/*/; do
+    [ -d "$dir" ] || continue
+    dir=${dir%/}
+    name=${dir##*/}
+    [[ $name =~ $NAME_RULE ]] || continue
+    jq -e --arg name "$name" 'any(.[]; .name == $name)' "$work/list.json" >/dev/null && continue
+    changed=1
+    echo "remove: $dir"
+    [ "$dry_run" -eq 1 ] || rm -rf -- "$dir" || die "cannot remove $dir"
+  done
+
+  if [ "$changed" -eq 0 ]; then
+    echo "no change"
+  elif [ -n "$ROOT" ] || [ "$dry_run" -eq 1 ]; then
+    echo "restart: fabrium-agent"
+  elif [ -f "$UNIT_FILE" ]; then
+    # try-restart: a service that is stopped (provision.sh stops it for an update) stays stopped.
+    XDG_RUNTIME_DIR="/run/user/$(id -u)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus" \
+      systemctl --user try-restart fabrium-agent.service || die "cannot restart fabrium-agent"
+    echo "restart: fabrium-agent"
+  fi
+  exit 0
+}
+
+if [ "$apply" -eq 1 ]; then
+  apply_list
+fi
+
+# The first half, as root: the VM token is a root file.
+[ -n "$ROOT" ] || [ "$(id -u)" -eq 0 ] || die "run it as root"
+[ -r "$TOKEN_FILE" ] && [ -r "$URL_FILE" ] || no_list "no VM token or no control plane URL"
+url=$(cat "$URL_FILE")
+# The token goes to curl on stdin, not on the command line.
+out=$(printf 'header = "Authorization: Bearer %s"\n' "$(cat "$TOKEN_FILE")" |
+  curl -sS -m 20 -K - -w '\n%{http_code}' --url "$url/v1/vm/agents") || no_list "the request failed"
+status=${out##*$'\n'}
+body=${out%$'\n'*}
+[ "$status" = 200 ] || no_list "the control plane answered $status"
+printf '%s' "$body" | jq -e '
+  type == "object" and (.agents | type == "array") and all(.agents[];
+    type == "object" and (.name | type == "string") and (.description | type == "string")
+    and (.model | type == "string") and (.rooms | type == "array" and all(.[]; type == "string")))' \
+  >/dev/null 2>&1 || no_list "the answer is not a list of agents"
+printf '%s' "$body" | jq -e '.agents | length > 0' >/dev/null || no_list "the list is empty"
+
+flags=()
+[ "$dry_run" -eq 1 ] && flags+=(--dry-run)
+[ "$require" -eq 1 ] && flags+=(--require)
+if [ -n "$ROOT" ]; then
+  apply_list <<<"$body"
+fi
+exec runuser -u ubuntu -- "$0" --apply "${flags[@]}" <<<"$body"

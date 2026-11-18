@@ -1576,3 +1576,52 @@ agents:
     expect(cfg.agents['zooid-assistant']!.matrix?.user_id).toBe('@zooid-assistant:localhost')
   })
 })
+
+// deploy/agent-vm/fabrium-agent-sync writes zooid.yaml as JSON (agent management contracts, section 5).
+describe('a zooid.yaml that is JSON', () => {
+  it('loads a zooid.yaml that is JSON', () => {
+    const json = {
+      workstation: 'lima',
+      runtime: 'local',
+      transports: {
+        matrix: {
+          homeserver: '${HOMESERVER_URL}',
+          mode: 'client',
+          sender_localpart: 'lima',
+          user_namespace: '@lima\\..*:example.org',
+          space: 'dev',
+        },
+      },
+      agents: {
+        reviewer: {
+          acp: { preset: 'opencode' },
+          matrix: { display_name: 'reviewer', rooms: ['#general:example.org'], trigger: 'mention' },
+        },
+      },
+    }
+    const yaml = `
+workstation: 'lima'
+runtime: local
+transports:
+  matrix:
+    homeserver: "\${HOMESERVER_URL}"
+    mode: client
+    sender_localpart: 'lima'
+    user_namespace: '@lima\\..*:example.org'
+    space: 'dev'
+agents:
+  'reviewer':
+    acp: { preset: 'opencode' }
+    matrix: { display_name: 'reviewer', rooms: ['#general:example.org'], trigger: mention }
+`
+    const env = { HOMESERVER_URL: 'https://chat.example.org', MATRIX_AS_TOKEN: 'as', MATRIX_HS_TOKEN: 'hs' }
+    const fromJson = withEnv(env, () => loadZooidConfig(JSON.stringify(json, null, 2)))
+    expect(fromJson).toEqual(withEnv(env, () => loadZooidConfig(yaml)))
+    expect(findMatrixTransport(fromJson)!.transport).toMatchObject({
+      homeserver: 'https://chat.example.org',
+      mode: 'client',
+      user_namespace: '@lima\\..*:example.org',
+    })
+    expect(fromJson.agents.reviewer!.matrix?.user_id).toBe('@lima.reviewer:example.org')
+  })
+})
