@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CONTROL_PLANE_KEY, createTestApi, jsonResponse, stalledResponse } from './test-api.js'
+import { CONTROL_PLANE_KEY, createTestApi, fakeAgentStore, jsonResponse, stalledResponse } from './test-api.js'
 
 const VM_ID = 'i-0123456789abcdef0'
 const vm = (name: string, extra: Record<string, unknown> = {}) => ({
@@ -76,14 +76,27 @@ describe('access', () => {
 })
 
 describe('GET /vms', () => {
-  it('adds agent_id from the bundle, and null without one', async () => {
-    await api.bundle('lima', 'echo')
-    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, [vm('lima'), vm('nobundle')]))
+  it('GET /vms lists the agents of each VM', async () => {
+    const store = fakeAgentStore(api.controlPlane)
+    const record = (id: string, name: string, onVm: string | null) =>
+      store.records.push({ id, name, owner: '@ann:example.org', description: '', model: 'glm-5-3', tag: null, project: null, vm: onVm, rooms: [] })
+    record('a2', 'tester', 'lima')
+    record('a1', 'reviewer', 'lima')
+    record('p1', 'draft', null)
+    // A replace: the old VM is shutting down, the new one is live. Only the live one lists the agents.
+    const old = vm('lima', { id: 'i-0000000000000old0', state: 'shutting-down' })
+    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, [vm('lima'), old, vm('kilo')]))
     const res = await api.request('GET', '/vms')
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual([
-      vm('lima', { agent_id: '@lima.echo:example.org' }),
-      vm('nobundle', { agent_id: null }),
+      vm('lima', {
+        agents: [
+          { id: 'a1', name: 'reviewer', agent_id: '@lima.reviewer:example.org' },
+          { id: 'a2', name: 'tester', agent_id: '@lima.tester:example.org' },
+        ],
+      }),
+      { ...old, agents: [] },
+      vm('kilo', { agents: [] }),
     ])
   })
 
@@ -93,6 +106,7 @@ describe('GET /vms', () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {}),
       vi.spyOn(console, 'error').mockImplementation(() => {}),
     ]
+    fakeAgentStore(api.controlPlane)
     api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, [vm('lima')]))
     const res = await api.request('GET', '/vms')
     expect(api.controlPlane.requests[0]?.authorization).toBe(`Bearer ${CONTROL_PLANE_KEY}`)

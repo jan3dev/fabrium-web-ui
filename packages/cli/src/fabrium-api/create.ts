@@ -1,43 +1,32 @@
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { NewAgent } from './admission.js'
-import {
-  AGENT_NAME_RE,
-  VM_NAME_RE,
-  listBundles,
-  readBundle,
-  type Bundle,
-  type BundleFiles,
-  type BundleSummary,
-} from './bundle.js'
-import { describeFailure, relay, type ControlPlane } from './control-plane.js'
+import { changeRecord } from './agent-records.js'
+import { loadWorld, rebuildRoster, step, type AgentContext } from './agents.js'
+import type { Caller } from './auth.js'
+import { MARKER, VM_NAME_RE, readBundleEnv } from './bundle.js'
+import { describeFailure, relay } from './control-plane.js'
 import { ApiError } from './errors.js'
 import { buildPayload, isStrictUserId, secretProblem } from './payload.js'
-import { agentsWithFree, fetchVms, liveWorkstations, type LiveDeps, type Vm } from './vms.js'
+import { sees } from './policy.js'
+import type { Vm } from './vms.js'
 
+/** The body of `POST /vms` (contracts section 2). */
 export interface CreateRequest {
-  /** The VM name, and the workstation name of the agent. */
+  /** The record `id` of the agent that the VM is created for. */
+  agent: string
+  /** The VM name. */
   name: string
   instanceType?: string
   /** Hours of uptime after which the VM stops itself. */
   autoStopHours?: number
-  agent: { mode: 'new'; name: string; persona?: string; project?: string } | { mode: 'existing' }
   havenApiKey: string
   githubToken?: string
 }
 
-const MAX_TEXT = 200
 // A control character would split a line of the secrets file (secretProblem words the line break).
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/
 
 const bad = (error: string) => new ApiError(400, { error })
-
-function optionalText(value: unknown, field: string): string | undefined {
-  if (value == null || value === '') return undefined
-  if (typeof value !== 'string' || value.length > MAX_TEXT) {
-    throw bad(`${field} must be a string of at most ${MAX_TEXT} characters`)
-  }
-  return value
-}
 
 /** An optional auto-stop setting: an integer from 1 to 168. */
 export function parseAutoStopHours(value: unknown): number | undefined {
@@ -63,12 +52,26 @@ function secret(value: unknown, field: string, required: boolean): string | unde
   return trimmed
 }
 
-/** The create body of contracts section 2. Every failure is a 400 with a message that holds no secret. */
-export function parseCreateRequest(raw: unknown): CreateRequest {
+function jsonObject(raw: unknown): Record<string, unknown> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw bad('the body must be a JSON object')
   }
-  const body = raw as Record<string, unknown>
+  return raw as Record<string, unknown>
+}
+
+/** The two credentials of a VM. Every failure is a 400 with a message that holds no secret. */
+export function parseCredentials(raw: unknown): { havenApiKey: string; githubToken?: string } {
+  const body = jsonObject(raw)
+  return {
+    havenApiKey: secret(body.haven_api_key, 'haven_api_key', true)!,
+    githubToken: secret(body.github_token, 'github_token', false),
+  }
+}
+
+/** The create body of contracts section 2. Every failure is a 400 with a message that holds no secret. */
+export function parseCreateRequest(raw: unknown): CreateRequest {
+  const body = jsonObject(raw)
+  if (typeof body.agent !== 'string' || body.agent === '') throw bad('agent is required')
   if (typeof body.name !== 'string' || !VM_NAME_RE.test(body.name)) {
     throw bad('name must match ^[a-z0-9][a-z0-9-]{0,62}$')
   }
@@ -76,162 +79,108 @@ export function parseCreateRequest(raw: unknown): CreateRequest {
   if (body.instance_type != null && typeof body.instance_type !== 'string') {
     throw bad('instance_type must be a string')
   }
-  const rawAgent = body.agent
-  if (typeof rawAgent !== 'object' || rawAgent === null) throw bad('agent is required')
-  const a = rawAgent as Record<string, unknown>
-  let agent: CreateRequest['agent']
-  if (a.mode === 'existing') {
-    // The workstation is `name`; an agent.name that the client sends as well is not used.
-    agent = { mode: 'existing' }
-  } else if (a.mode === 'new') {
-    if (typeof a.name !== 'string' || !AGENT_NAME_RE.test(a.name)) {
-      throw bad('agent.name must match ^[a-z][a-z0-9-]{0,31}$')
-    }
-    agent = {
-      mode: 'new',
-      name: a.name,
-      persona: optionalText(a.persona, 'agent.persona'),
-      project: optionalText(a.project, 'agent.project'),
-    }
-  } else {
-    throw bad("agent.mode must be 'new' or 'existing'")
-  }
   return {
+    agent: body.agent,
     name: body.name,
     instanceType: body.instance_type ?? undefined,
     autoStopHours: parseAutoStopHours(body.auto_stop_hours),
-    agent,
-    havenApiKey: secret(body.haven_api_key, 'haven_api_key', true)!,
-    githubToken: secret(body.github_token, 'github_token', false),
+    ...parseCredentials(body),
   }
 }
 
-/** `LiveDeps` is for the read-only check of an existing agent. */
-export interface CreateDeps extends LiveDeps {
-  havenModel: string
+export interface CreateDeps extends AgentContext {
   /** Full commit of the running image. */
   commit: string
-  /** The caller: the new agent greets them in a direct message once it works. */
-  creator: string
-  /** Set for a vm-creator: an existing agent must be one whose first VM this user created. */
-  onlyCreator?: string
-  /** The agents of the daemon config: a new agent may not take one of their names. */
-  agentNames: readonly string[]
-  controlPlane: ControlPlane
-  admission: { admitNew(agent: NewAgent): Promise<Bundle> }
+  workstationsDir: string
 }
 
 /**
- * A new agent name must be unique: in the daemon config and on every other workstation. The same
- * workstation with the same agent is a retry of an admission, which resumes.
+ * `POST /vms` for an agent without a live VM: admit it on the VM name, write the record of a profile, rebuild
+ * the roster, and ask the control plane for the VM. A control plane failure leaves the agent with its VM name
+ * and no live VM: Create VM is still there for it, with the name fixed.
  */
-function checkAgentName(
-  deps: CreateDeps,
-  bundles: BundleSummary[],
-  workstation: string,
-  agent: string,
-  vms: Vm[],
-): void {
-  if (deps.agentNames.includes(agent)) {
-    throw new ApiError(409, { error: `agent name ${agent} is in use` })
-  }
-  const other = bundles.find((b) => b.agent === agent && b.workstation !== workstation)
-  if (!other) return
-  const free = agentsWithFree(bundles, vms).some((e) => e.workstation === other.workstation && e.free)
-  const hint = free ? '; pick it as an existing agent' : ''
-  throw new ApiError(409, { error: `agent name ${agent} is in use${hint}` })
-}
-
-/**
- * Grant or load the identity, build the payload, and ask the control plane for
- * the VM. A control plane failure leaves the identity free for the next try.
- */
-export async function createVm(deps: CreateDeps, req: CreateRequest): Promise<Response> {
-  let files: BundleFiles
-  let agentId: string
-  if (req.agent.mode === 'new') {
-    // Else the admission takes the running VM's agent for a resume and rewrites its roster entry.
-    const listed = await fetchVms(deps.controlPlane)
-    if ('failure' in listed) return listed.failure
-    if (listed.vms.some((vm) => vm.name === req.name)) throw new ApiError(409, { error: 'name in use' })
-    const bundles = await listBundles(deps.workstationsDir)
-    // A resume hands over the bundle's tokens: a vm-creator resumes only a bundle of their own.
-    const held = bundles.find((b) => b.workstation === req.name)
-    if (deps.onlyCreator !== undefined && held && held.creator !== deps.onlyCreator) {
-      throw new ApiError(409, { error: 'name in use' })
+export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): Promise<Response> {
+  return deps.queue(async () => {
+    const world = await loadWorld(deps, caller)
+    const agent = world.records.find((r) => r.id === req.agent)
+    if (!agent || !sees(world, agent)) throw new ApiError(404, { error: 'agent not found' })
+    if (agent.vm !== null && world.live.has(agent.vm)) throw new ApiError(409, { error: 'the agent has a vm' })
+    if (agent.vm !== null && agent.vm !== req.name) throw bad('name must be the vm of the agent')
+    if (agent.vm === null) {
+      // A bundle with the marker and no record is an admission that did not finish: any agent completes it.
+      const dir = join(deps.workstationsDir, req.name)
+      const foreign = existsSync(dir) && !existsSync(join(dir, MARKER))
+      if (foreign || world.live.has(req.name) || world.records.some((r) => r.vm === req.name)) {
+        throw new ApiError(409, { error: 'name in use' })
+      }
     }
-    checkAgentName(deps, bundles, req.name, req.agent.name, listed.vms)
-    const bundle = await deps.admission.admitNew({
-      workstation: req.name,
-      agent: req.agent.name,
-      persona: req.agent.persona,
-      project: req.agent.project,
-      creator: deps.creator,
+    // Every step is safe to repeat, so it runs for an agent that has its VM name already too.
+    const admitted = await deps.admission.admit({ workstation: req.name, agent: agent.name })
+    let records = world.records
+    if (agent.vm === null) {
+      const record = await step('record', () =>
+        changeRecord(deps.controlPlane, agent.id, { vm: req.name, rooms: admitted.rooms }),
+      )
+      records = records.map((r) => (r.id === record.id ? record : r))
+    }
+    await rebuildRoster(deps, req.name, records)
+
+    // The greeting is a courtesy: a caller ID outside the strict grammar skips it instead of failing.
+    const creator = isStrictUserId(caller.userId) ? caller.userId : undefined
+    if (creator === undefined) {
+      console.warn(`[fabrium] ${req.name}: no greeting, the caller's user ID is outside the strict grammar`)
+    }
+    const payload = buildPayload({
+      env: admitted.env,
+      havenApiKey: req.havenApiKey,
+      githubToken: req.githubToken,
+      commit: deps.commit,
+      creator,
+      agent: agent.name,
     })
-    files = bundle
-    agentId = bundle.agentId
-  } else {
-    const listed = await fetchVms(deps.controlPlane)
-    if ('failure' in listed) return listed.failure
-    const bundles = await listBundles(deps.workstationsDir)
-    const entry = agentsWithFree(bundles, listed.vms).find((e) => e.workstation === req.name)
-    if (!entry?.free) throw bad(`${req.name} is not a free agent`)
-    const owner = bundles.find((b) => b.workstation === req.name)?.creator
-    if (deps.onlyCreator !== undefined && owner !== deps.onlyCreator) {
-      throw bad(`${req.name} is not a free agent`)
+    const upstream = await deps.controlPlane.request('POST', '/v1/vms', {
+      name: req.name,
+      ...(req.instanceType ? { instance_type: req.instanceType } : {}),
+      ...(req.autoStopHours === undefined ? {} : { auto_stop_hours: req.autoStopHours }),
+      // Unconditional: a caller ID outside the strict grammar still owns the VM. The control plane checks it.
+      creator: caller.userId,
+      bootstrap: payload,
+    })
+    if (!upstream.ok) return relay(upstream)
+    // The create went through: with its answer lost, the VM exists or may, so report no failure.
+    let vm: unknown
+    try {
+      vm = JSON.parse(await upstream.text())
+    } catch (err) {
+      console.warn(`[fabrium] create answered ${upstream.status}, but the body is unreadable: ${describeFailure(err)}`)
     }
-    // A read-only check. Running the admission again would write the roster without the persona and the project.
-    const asked = bundles.filter((b) => b.workstation === req.name)
-    const live = await liveWorkstations(deps, asked)
-    if (!live.has(req.name)) {
-      throw new ApiError(409, {
-        error: `${req.name} is only partly admitted: send the new-agent request again`,
+    if (typeof vm !== 'object' || vm === null || Array.isArray(vm)) {
+      throw new ApiError(502, {
+        error:
+          'the control plane answered, but the answer could not be read. The VM may exist: check the VM list',
       })
     }
-    const bundle = await readBundle(join(deps.workstationsDir, req.name))
-    if (!bundle) throw bad(`${req.name} is not a free agent`)
-    files = bundle
-    agentId = entry.agent_id
-  }
-
-  // The greeting is a courtesy: a caller ID outside the strict grammar skips it instead of failing.
-  const creator = isStrictUserId(deps.creator) ? deps.creator : undefined
-  if (creator === undefined) {
-    console.warn(`[fabrium] ${req.name}: no greeting, the caller's user ID is outside the strict grammar`)
-  }
-  const payload = buildPayload({
-    env: files.env,
-    yaml: files.yaml,
-    havenApiKey: req.havenApiKey,
-    havenModel: deps.havenModel,
-    githubToken: req.githubToken,
-    commit: deps.commit,
-    creator,
-  })
-  const upstream = await deps.controlPlane.request('POST', '/v1/vms', {
-    name: req.name,
-    ...(req.instanceType ? { instance_type: req.instanceType } : {}),
-    ...(req.autoStopHours === undefined ? {} : { auto_stop_hours: req.autoStopHours }),
-    // Unconditional: a caller ID outside the strict grammar still owns the VM. The control plane checks it.
-    creator: deps.creator,
-    bootstrap: payload,
-  })
-  if (!upstream.ok) return relay(upstream)
-  // The create went through: with its answer lost, the VM exists or may, so report no failure.
-  let vm: unknown
-  try {
-    vm = JSON.parse(await upstream.text())
-  } catch (err) {
-    console.warn(`[fabrium] create answered ${upstream.status}, but the body is unreadable: ${describeFailure(err)}`)
-  }
-  if (typeof vm !== 'object' || vm === null || Array.isArray(vm)) {
-    throw new ApiError(502, {
-      error:
-        'the control plane answered, but the answer could not be read. The VM may exist: check the VM list',
+    return new Response(JSON.stringify({ ...vm, agent_id: admitted.agentId }), {
+      status: upstream.status,
+      headers: { 'content-type': 'application/json' },
     })
-  }
-  return new Response(JSON.stringify({ ...vm, agent_id: agentId }), {
-    status: upstream.status,
-    headers: { 'content-type': 'application/json' },
   })
+}
+
+/**
+ * `POST /vms/:id/recreate`: the same bundle `.env` with new credentials. No creator and no agent, so the new
+ * VM does not greet again. The answer of the control plane passes on as it is.
+ */
+export async function recreateVm(
+  deps: CreateDeps,
+  vm: Vm,
+  creds: { havenApiKey: string; githubToken?: string },
+): Promise<Response> {
+  // The name comes from the control plane list: check it before it reaches a path.
+  const env = VM_NAME_RE.test(vm.name) ? await readBundleEnv(join(deps.workstationsDir, vm.name)) : null
+  if (env === null) throw new ApiError(409, { error: 'the vm has no bundle' })
+  const payload = buildPayload({ env, ...creds, commit: deps.commit })
+  return relay(
+    await deps.controlPlane.request('POST', `/v1/vms/${encodeURIComponent(vm.id)}/recreate`, { bootstrap: payload }),
+  )
 }

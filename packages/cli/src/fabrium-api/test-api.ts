@@ -9,8 +9,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MatrixClient } from '@zooid/transport-matrix'
 import { Hono } from 'hono'
+import { createAdmission } from './admission.js'
 import type { AgentRecord } from './agent-records.js'
-import { MARKER, ensureBundle, type BundleSpec } from './bundle.js'
 import { createFakeMatrix } from './fake-matrix.js'
 import { mountFabriumApi, type FabriumApiDeps } from './index.js'
 import { HAVEN_PRICING_URL } from './models.js'
@@ -207,44 +207,21 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
         body: o.json === undefined ? undefined : JSON.stringify(o.json),
       })
     },
-    /**
-     * A bundle for `workstation` as a finished admission leaves it. `registered: false` stops it before the
-     * registration loads, `admitted: false` before the join and the roster; `legacy: true` is add-workstation.sh's.
-     */
-    async bundle(
-      workstation: string,
-      agent: string,
-      spec: Partial<BundleSpec> = {},
-      opts: { registered?: boolean; admitted?: boolean; legacy?: boolean } = {},
-    ) {
-      const dir = join(workstationsDir, workstation)
-      const bundle = await ensureBundle(dir, {
-        workstation,
-        agent,
-        serverName: 'example.org',
-        homeserverUrl: 'https://chat.example.org',
-        space: 'dev',
-        rooms: ['#general'],
-        ...spec,
-      })
-      if (opts.legacy) rmSync(join(dir, MARKER))
-      if (opts.registered !== false) {
-        fake.registerAppservice({
-          id: workstation,
-          asToken: bundle.asToken,
-          senderLocalpart: workstation,
-          users: `@${workstation}\\..*:example\\.org`,
-        })
-        if (opts.admitted !== false) {
-          fake.joinSpace(`@${workstation}:example.org`)
-          fake.joinSpace(bundle.agentId)
-          fake.setState(fake.spaceId, 'dev.zooid.workforce', workstation, {
-            version: 1,
-            agents: [{ user_id: bundle.agentId, name: agent, rooms: [fake.generalRoomId] }],
-          })
-        }
-      }
-      return bundle
+    /** Admit `agent` on the VM name `vm`, as an assign does before it writes the record. */
+    admit(vm: string, agent: string) {
+      return createAdmission({
+        conn: deps.conn,
+        client: deps.client,
+        asToken: deps.asToken,
+        asUserId: deps.asUserId,
+        serverName: deps.serverName,
+        homeserverUrl: deps.homeserverUrl,
+        workforceSpace: deps.workforceSpace,
+        getSpaceRoomId: deps.getSpaceRoomId,
+        rooms: deps.vmRooms,
+        workstationsDir,
+        registrationsDir,
+      }).admit({ workstation: vm, agent })
     },
     cleanup() {
       rmSync(zooidHome, { recursive: true, force: true })

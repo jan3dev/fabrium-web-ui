@@ -1,8 +1,5 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { recordCreator } from './bundle.js'
-import { ADMIN, createTestApi, jsonResponse } from './test-api.js'
+import { ADMIN, createTestApi, fakeAgentStore, jsonResponse } from './test-api.js'
 
 const CARA = '@cara:example.org'
 const DAN = '@dan:example.org'
@@ -26,7 +23,8 @@ let cara: string
 beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
-  api = createTestApi({ agentNames: ['s-meow'] })
+  api = createTestApi()
+  fakeAgentStore(api.controlPlane)
   api.fake.joinSpace(CARA, 70)
   api.fake.joinSpace(DAN, 69)
   cara = api.fake.openIdToken(CARA)
@@ -105,99 +103,5 @@ describe('PUT /vms/:id/auto-stop', () => {
     })
     expect(res.status).toBe(404)
     expect(writes()).toEqual([])
-  })
-})
-
-describe('create', () => {
-  const body = (over: Record<string, unknown> = {}) => ({
-    name: 'mike',
-    agent: { mode: 'new', name: 'foxtrot' },
-    haven_api_key: 'hk-secret-1',
-    ...over,
-  })
-  const created = vm('i-00000000000000009', 'mike', CARA)
-
-  beforeEach(() => {
-    api.controlPlane.on('POST', '/v1/vms', jsonResponse(201, created))
-  })
-
-  it('sends the creator and records it in the bundle', async () => {
-    const res = await api.request('POST', '/vms', { token: cara, json: body() })
-    expect(res.status).toBe(201)
-    expect(writes()[0].body).toMatchObject({ name: 'mike', creator: CARA })
-    expect(readFileSync(join(api.workstationsDir, 'mike', '.creator'), 'utf8')).toBe(`${CARA}\n`)
-  })
-
-  it('refuses an agent name that another workstation has', async () => {
-    // A free agent: november has no VM.
-    await api.bundle('november', 'foxtrot')
-    const res = await api.request('POST', '/vms', { json: body() })
-    expect(res.status).toBe(409)
-    expect(await res.json()).toEqual({
-      error: 'agent name foxtrot is in use; pick it as an existing agent',
-    })
-    expect(writes()).toEqual([])
-    // An agent with a live VM is not offered as an existing agent.
-    await api.bundle('kilo', 'golf')
-    const busy = await api.request('POST', '/vms', { json: body({ agent: { mode: 'new', name: 'golf' } }) })
-    expect(await busy.json()).toEqual({ error: 'agent name golf is in use' })
-  })
-
-  it('refuses an agent name of the daemon config', async () => {
-    const res = await api.request('POST', '/vms', {
-      json: body({ agent: { mode: 'new', name: 's-meow' } }),
-    })
-    expect(res.status).toBe(409)
-    expect(await res.json()).toEqual({ error: 'agent name s-meow is in use' })
-  })
-
-  it('still resumes the same VM name with the same agent', async () => {
-    await api.bundle('mike', 'foxtrot', {}, { admitted: false })
-    const res = await api.request('POST', '/vms', { json: body() })
-    expect(res.status).toBe(201)
-  })
-
-  it('refuses a vm-creator a new agent on a workstation of someone else, even as a resume', async () => {
-    await api.bundle('kilo-old', 'delta')
-    await api.bundle('papa-old', 'echo')
-    await recordCreator(join(api.workstationsDir, 'papa-old'), ADMIN)
-    for (const [name, agent] of [
-      ['kilo-old', 'delta'],
-      ['papa-old', 'echo'],
-    ]) {
-      const res = await api.request('POST', '/vms', {
-        token: cara,
-        json: body({ name, agent: { mode: 'new', name: agent } }),
-      })
-      expect(res.status, name).toBe(409)
-      expect(await res.json()).toEqual({ error: 'name in use' })
-    }
-    expect(writes()).toEqual([])
-  })
-
-  it('records the creator with the bundle, so a vm-creator can retry a failed admission', async () => {
-    api.fake.failOnce('POST', /\/join\//, 500)
-    const failed = await api.request('POST', '/vms', { token: cara, json: body() })
-    expect(failed.status).toBe(502)
-    expect(readFileSync(join(api.workstationsDir, 'mike', '.creator'), 'utf8')).toBe(`${CARA}\n`)
-    const retry = await api.request('POST', '/vms', { token: cara, json: body() })
-    expect(retry.status).toBe(201)
-  })
-
-  it('lets a vm-creator move only its own free agent', async () => {
-    await api.bundle('kilo-old', 'delta')
-    await api.bundle('lima-old', 'echo')
-    await recordCreator(join(api.workstationsDir, 'lima-old'), CARA)
-    const other = await api.request('POST', '/vms', {
-      token: cara,
-      json: body({ name: 'kilo-old', agent: { mode: 'existing' } }),
-    })
-    expect(other.status).toBe(400)
-    expect(await other.json()).toEqual({ error: 'kilo-old is not a free agent' })
-    const own = await api.request('POST', '/vms', {
-      token: cara,
-      json: body({ name: 'lima-old', agent: { mode: 'existing' } }),
-    })
-    expect(own.status).toBe(201)
   })
 })

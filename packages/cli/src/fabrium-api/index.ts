@@ -3,19 +3,19 @@ import type { MatrixClient } from '@zooid/transport-matrix'
 import { Hono } from 'hono'
 import { createAdmission } from './admission.js'
 import { fetchRecords } from './agent-records.js'
-import { agentRoutes } from './agents.js'
-import { managesVms, requireRole, type Caller } from './auth.js'
-import { listBundles } from './bundle.js'
+import { agentRoutes, type AgentContext } from './agents.js'
+import { isAdmin, managesVms, requireRole, type Caller } from './auth.js'
 import type { FabriumApiConfig } from './config.js'
 import { createControlPlane, relay } from './control-plane.js'
-import { createVm, parseAutoStopHours, parseCreateRequest } from './create.js'
+import { createVm, parseAutoStopHours, parseCreateRequest, parseCredentials, recreateVm } from './create.js'
 import { ApiError, apiErrorHandler } from './errors.js'
 import type { MatrixConn } from './matrix.js'
 import { createModels } from './models.js'
 import { FULL_COMMIT_RE } from './payload.js'
+import { liveVms } from './policy.js'
 import { createQueue } from './queue.js'
 import { createRoster } from './roster.js'
-import { fetchVms, type LiveDeps } from './vms.js'
+import { fetchVms } from './vms.js'
 
 export interface FabriumApiDeps extends FabriumApiConfig {
   // From the daemon.
@@ -28,8 +28,6 @@ export interface FabriumApiDeps extends FabriumApiConfig {
   serverName: string
   /** Localpart of the workforce space. */
   workforceSpace: string
-  /** The agents of the daemon config: a new VM agent may not take one of their names. */
-  agentNames?: readonly string[]
   /** The agents of the daemon config: every caller sees them, read-only. */
   instanceAgents?: readonly { name: string; userId: string }[]
   getSpaceRoomId(): string | undefined
@@ -53,12 +51,6 @@ export function fabriumApi(deps: FabriumApiDeps): {
     timeoutMs: deps.controlPlaneTimeoutMs,
   })
   const workstationsDir = join(deps.zooidHome, 'workstations')
-  const live: LiveDeps = {
-    conn: deps.conn,
-    asToken: deps.asToken,
-    getSpaceRoomId: deps.getSpaceRoomId,
-    workstationsDir,
-  }
   const admission = createAdmission({
     conn: deps.conn,
     client: deps.client,
@@ -124,7 +116,7 @@ export function fabriumApi(deps: FabriumApiDeps): {
     })
   }
 
-  agentRoutes(app, {
+  const agents: AgentContext = {
     controlPlane,
     admission,
     roster,
@@ -136,7 +128,23 @@ export function fabriumApi(deps: FabriumApiDeps): {
     serverName: deps.serverName,
     instanceAgents: deps.instanceAgents ?? [],
     havenModel: deps.havenModel,
-  })
+  }
+  agentRoutes(app, agents)
+
+  /** The commit that a new VM checks out. Without a full one, no VM can be made. */
+  function zooidCommit(): string {
+    if (!deps.zooidCommit) throw new ApiError(503, { error: 'ZOOID_COMMIT is not set' })
+    if (!FULL_COMMIT_RE.test(deps.zooidCommit)) {
+      throw new ApiError(503, { error: 'ZOOID_COMMIT is not a full commit hash' })
+    }
+    return deps.zooidCommit
+  }
+
+  async function jsonBody(c: { req: { json(): Promise<unknown> } }): Promise<unknown> {
+    return c.req.json().catch(() => {
+      throw new ApiError(400, { error: 'the body must be JSON' })
+    })
+  }
 
   app.get('/access', (c) => {
     const { userId, role } = c.get('caller')
@@ -147,41 +155,42 @@ export function fabriumApi(deps: FabriumApiDeps): {
     const caller = c.get('caller')
     const result = await fetchVms(controlPlane)
     if ('failure' in result) return result.failure
-    const agentIds = new Map(
-      (await listBundles(workstationsDir)).map((b) => [b.workstation, b.agentId]),
-    )
+    const records = await fetchRecords(controlPlane)
+    const live = liveVms(result.vms)
     const vms =
       caller.role === 'vm-creator'
         ? result.vms.filter((vm) => vm.creator === caller.userId)
         : result.vms
-    return c.json(vms.map((vm) => ({ ...vm, agent_id: agentIds.get(vm.name) ?? null })))
+    // During a replace two VMs have the name: the agents run on the live one.
+    const agentsOf = (name: string) =>
+      records
+        .filter((r) => r.vm === name)
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+        .map((r) => ({ id: r.id, name: r.name, agent_id: `@${name}.${r.name}:${deps.serverName}` }))
+    return c.json(vms.map((vm) => ({ ...vm, agents: live.get(vm.name) === vm ? agentsOf(vm.name) : [] })))
   })
 
   app.get('/instance-types', async () => relay(await controlPlane.request('GET', '/v1/instance-types')))
 
   app.post('/vms', async (c) => {
-    if (!deps.havenModel) throw new ApiError(503, { error: 'FABRIUM_HAVEN_MODEL is not set' })
-    if (!deps.zooidCommit) throw new ApiError(503, { error: 'ZOOID_COMMIT is not set' })
-    if (!FULL_COMMIT_RE.test(deps.zooidCommit)) {
-      throw new ApiError(503, { error: 'ZOOID_COMMIT is not a full commit hash' })
-    }
-    const raw: unknown = await c.req.json().catch(() => {
-      throw new ApiError(400, { error: 'the body must be JSON' })
-    })
+    const commit = zooidCommit()
+    const req = parseCreateRequest(await jsonBody(c))
+    return createVm({ ...agents, commit, workstationsDir }, c.get('caller'), req)
+  })
+
+  app.post('/vms/:id/recreate', async (c) => {
+    const commit = zooidCommit()
+    const creds = parseCredentials(await jsonBody(c))
     const caller = c.get('caller')
-    return createVm(
-      {
-        havenModel: deps.havenModel,
-        commit: deps.zooidCommit,
-        creator: caller.userId,
-        onlyCreator: caller.role === 'vm-creator' ? caller.userId : undefined,
-        agentNames: deps.agentNames ?? [],
-        controlPlane,
-        admission,
-        ...live,
-      },
-      parseCreateRequest(raw),
-    )
+    const id = c.req.param('id')
+    return queue(async () => {
+      const result = await fetchVms(controlPlane)
+      if ('failure' in result) return result.failure
+      // Only the VM owner or an admin. Any other VM is a 404, as for the other VM actions.
+      const vm = result.vms.find((v) => v.id === id && (isAdmin(caller.role) || v.creator === caller.userId))
+      if (!vm) throw new ApiError(404, { error: 'not found' })
+      return recreateVm({ ...agents, commit, workstationsDir }, vm, creds)
+    })
   })
 
   app.post('/vms/:id/start', async (c) => {

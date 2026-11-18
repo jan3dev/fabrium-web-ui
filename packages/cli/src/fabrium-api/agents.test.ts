@@ -1,7 +1,6 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAdmission } from './admission.js'
 import type { AgentRecord } from './agent-records.js'
 import { ADMIN, MEMBER, createTestApi, fakeAgentStore, jsonResponse } from './test-api.js'
 
@@ -20,26 +19,9 @@ let store: { records: AgentRecord[] }
 let vms: Record<string, unknown>[]
 const tokens: Record<string, string> = {}
 
-function admission() {
-  const d = api.deps
-  return createAdmission({
-    conn: d.conn,
-    client: d.client,
-    asToken: d.asToken,
-    asUserId: d.asUserId,
-    serverName: d.serverName,
-    homeserverUrl: d.homeserverUrl,
-    workforceSpace: d.workforceSpace,
-    getSpaceRoomId: d.getSpaceRoomId,
-    rooms: d.vmRooms,
-    workstationsDir: api.workstationsDir,
-    registrationsDir: api.registrationsDir,
-  })
-}
-
 /** A record, admitted on its VM as an earlier assign leaves it. */
 async function place(id: string, name: string, vm: string | null, owner: string, over: Partial<AgentRecord> = {}) {
-  if (vm !== null) await admission().admit({ workstation: vm, agent: name })
+  if (vm !== null) await api.admit(vm, name)
   store.records.push({
     id,
     name,

@@ -5,28 +5,22 @@
  */
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { isDeepStrictEqual } from 'node:util'
 import { MatrixClient } from '@zooid/transport-matrix'
 import {
   AGENT_NAME_RE,
   MARKER,
   VM_NAME_RE,
-  bundleAgent,
-  ensureBundle,
   ensureVmBundle,
   envVar,
   readBundleEnv,
   removeBundle,
   renderRegistration,
   withServer,
-  type Bundle,
-  type BundleSpec,
   type Tokens,
   type VmBundleSpec,
 } from './bundle.js'
 import { ApiError } from './errors.js'
 import { stateEvent, tokenAccepted, usernameAvailable, whoami, type MatrixConn } from './matrix.js'
-import { createQueue } from './queue.js'
 
 export const REGISTER_COMMAND = '!admin appservices register'
 export const UNREGISTER_COMMAND = '!admin appservices unregister'
@@ -36,15 +30,7 @@ export function registerMessage(registrationYaml: string): string {
   return `${REGISTER_COMMAND}\n\`\`\`\n${registrationYaml.trimEnd()}\n\`\`\``
 }
 
-type Step =
-  | 'bundle'
-  | 'register_appservice'
-  | 'whoami'
-  | 'register_user'
-  | 'join'
-  | 'roster'
-  | 'leave'
-  | 'unregister'
+type Step = 'bundle' | 'register_appservice' | 'whoami' | 'register_user' | 'join' | 'leave' | 'unregister'
 type RunStep = <T>(name: Step, fn: () => Promise<T>) => Promise<T>
 
 export interface AdmissionDeps {
@@ -67,15 +53,6 @@ export interface AdmissionDeps {
   pollIntervalMs?: number
 }
 
-export interface NewAgent {
-  workstation: string
-  agent: string
-  persona?: string
-  project?: string
-  /** The Matrix user who asks: a new bundle records them as its creator. */
-  creator?: string
-}
-
 /** One agent on a VM name. */
 export interface Placement {
   workstation: string
@@ -92,8 +69,8 @@ export interface Admitted {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
+/** The routes run `admit` and `remove` inside the one queue of every write. */
 export function createAdmission(deps: AdmissionDeps): {
-  admitNew(agent: NewAgent): Promise<Bundle>
   /** Grant `@<vm>.<agent>` on the bundle of the VM name. Each step is safe to repeat. No roster. */
   admit(p: Placement): Promise<Admitted>
   /** Leave, and for the last agent of the name: unregister and remove the bundle. Safe to repeat. */
@@ -127,10 +104,10 @@ export function createAdmission(deps: AdmissionDeps): {
     }
 
   /**
-   * Refuse a workstation that something else owns. Returns true when an earlier
-   * try made the bundle, so this one resumes.
+   * Refuse a VM name that something else owns. A bundle with the marker is an earlier try of ours: this one
+   * resumes it, for any agent, because an agent does not own a VM name.
    */
-  async function checkWorkstation(dir: string, ws: string, agent: string): Promise<boolean> {
+  async function checkWorkstation(dir: string, ws: string, agent: string): Promise<void> {
     for (const ext of ['yaml', 'yml']) {
       if (existsSync(join(deps.registrationsDir, `${ws}.${ext}`))) {
         throw conflict(`workstation ${ws} has a registration file from deploy/add-workstation.sh`)
@@ -140,7 +117,7 @@ export function createAdmission(deps: AdmissionDeps): {
       if (!existsSync(join(dir, MARKER))) {
         throw conflict(`workstation ${ws} already has a bundle that the VM API did not make`)
       }
-      return true
+      return
     }
     // The appservice's sender is `@<ws>`: an existing user of that name would be taken over.
     if (!(await usernameAvailable(deps.conn, deps.asToken, ws))) {
@@ -160,7 +137,6 @@ export function createAdmission(deps: AdmissionDeps): {
         `${captured} is in the workforce space: a VM named ${ws} would act as that user. Choose another name`,
       )
     }
-    return false
   }
 
   async function waitFor(done: () => Promise<boolean>, failure: string): Promise<void> {
@@ -256,59 +232,6 @@ export function createAdmission(deps: AdmissionDeps): {
     return roomIds
   }
 
-  async function admitNewAgent(a: NewAgent): Promise<Bundle> {
-    const { workstation: ws, agent } = a
-    const agentId = `@${ws}.${agent}:${deps.serverName}`
-    const spec: BundleSpec = {
-      workstation: ws,
-      agent,
-      serverName: deps.serverName,
-      homeserverUrl: deps.homeserverUrl,
-      space: deps.workforceSpace,
-      rooms: deps.rooms,
-      creator: a.creator,
-    }
-    const step = stepsOf('admission', ws)
-
-    const dir = join(deps.workstationsDir, ws)
-    const bundle = await step('bundle', async () => {
-      if (await checkWorkstation(dir, ws, agent)) {
-        const other = await bundleAgent(dir)
-        if (other && other !== agent) throw conflict(`workstation ${ws} belongs to agent ${other}`)
-      }
-      return ensureBundle(dir, spec)
-    })
-    const roomIds = await grant(spec, bundle, agent, step)
-
-    await step('roster', async () => {
-      const spaceId = requireSpace()
-      // The shape of buildWorkforceRoster (packages/transport-matrix/src/workforce-publisher.ts).
-      const roster = {
-        version: 1,
-        agents: [
-          {
-            user_id: agentId,
-            name: agent,
-            rooms: roomIds,
-            ...(a.persona ? { persona: a.persona } : {}),
-            ...(a.project ? { project: a.project } : {}),
-          },
-        ],
-      }
-      const current = await stateEvent(deps.conn, deps.asToken, spaceId, 'dev.zooid.workforce', ws)
-      if (isDeepStrictEqual(current, roster)) return
-      await deps.client.sendStateEvent({
-        roomId: spaceId,
-        asUserId: deps.asUserId,
-        eventType: 'dev.zooid.workforce',
-        stateKey: ws,
-        content: roster,
-      })
-    })
-
-    return bundle
-  }
-
   // The routes check the names first. This is the last check before a path, a Matrix ID, and an `rm`.
   function placement({ workstation: ws, agent }: Placement) {
     if (!VM_NAME_RE.test(ws) || !AGENT_NAME_RE.test(agent)) throw new Error('invalid VM or agent name')
@@ -320,10 +243,7 @@ export function createAdmission(deps: AdmissionDeps): {
     }
   }
 
-  const queue = createQueue()
   return {
-    admitNew: (agent) => queue(() => admitNewAgent(agent)),
-
     async admit(p) {
       const { ws, dir, agentId } = placement(p)
       const spec: VmBundleSpec = {
@@ -333,7 +253,6 @@ export function createAdmission(deps: AdmissionDeps): {
         space: deps.workforceSpace,
       }
       const step = stepsOf('admission', ws)
-      // A bundle with the marker is a resume, for any agent: an agent does not own a VM name.
       const bundle = await step('bundle', async () => {
         await checkWorkstation(dir, ws, p.agent)
         return ensureVmBundle(dir, spec)
