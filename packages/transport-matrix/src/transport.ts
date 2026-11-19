@@ -1168,9 +1168,12 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         console.warn(`[matrix] ignoring approval response from agent ${evt.sender}`)
         return
       }
-      // `sessions` is never pruned, and a request card is sent only once its
-      // session is here, so a known approval always has its agent here.
-      const approver = sessions.get(content.session_id)?.agent
+      // The pending approval names its agent, so the filter runs also for a
+      // session unknown here. Without a pending approval resolve() changes nothing.
+      const pending = approvals
+        .listPending(content.session_id)
+        .find((a) => a.approvalId === content.approval_id)
+      const approver = pending ? bindingFor(pending.agentName) : sessions.get(content.session_id)?.agent
       if (approver && !senderAllowed(approver, evt)) {
         console.warn(`[matrix] approval response from ${evt.sender} ignored: ${approver.name} does not answer them`)
         return
@@ -1369,9 +1372,10 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         const senderIsAgentId =
           !!evt.sender && (isLocal(evt.sender) || workforceIds.has(evt.sender))
         if (!senderIsAgentId) {
+          // Only a sender that reaches the agent makes a later bare reply follow it.
           const msgMentions = new Set(extractMentions(evt as never))
           for (const a of bindings)
-            if (msgMentions.has(a.userId) && !st.rootMentions.includes(a.name))
+            if (msgMentions.has(a.userId) && !st.rootMentions.includes(a.name) && senderAllowed(a, evt))
               st.rootMentions.push(a.name)
         }
         if (
@@ -2066,7 +2070,8 @@ export async function rebuildThreadState(
     if (!senderIsAgentId) {
       const mentions = new Set(extractMentions(ev as never))
       for (const a of bindings)
-        if (mentions.has(a.userId) && !state.rootMentions.includes(a.name)) state.rootMentions.push(a.name)
+        if (mentions.has(a.userId) && !state.rootMentions.includes(a.name) && senderAllowed(a, { sender: evSender }))
+          state.rootMentions.push(a.name)
     }
     // [[ZOD092]] Call edges only from structured handoffs whose caller is the sender.
     const h = readHandoff(content)

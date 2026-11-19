@@ -3125,10 +3125,11 @@ describe('senders', () => {
     bind('helper', '@helper:example.com'),
   ]
 
-  function make(o: { media?: ReturnType<typeof fakeMedia> } = {}) {
-    const { reg } = fakeRegistry()
-    // Turns end at once; a held return then waits for its turn.end or a long fallback.
-    reg.prompt.mockImplementation(async () => ({ stopReason: 'end_turn' as const }))
+  function make(o: { media?: ReturnType<typeof fakeMedia>; hold?: boolean } = {}) {
+    const { reg, finishPrompt } = fakeRegistry()
+    // Turns end at once, unless `hold` keeps them running until finishPrompt(); a held
+    // return then waits for its turn.end or a long fallback.
+    if (!o.hold) reg.prompt.mockImplementation(async () => ({ stopReason: 'end_turn' as const }))
     const approvals = fakeApprovals()
     const client = fakeClient()
     const transport = createMatrixTransport({
@@ -3142,7 +3143,7 @@ describe('senders', () => {
       returnGraceMs: 60_000,
       media: o.media as never,
     })
-    return { transport, agents: reg, approvals, client }
+    return { transport, agents: reg, approvals, client, finishPrompt }
   }
   type T = ReturnType<typeof make>
 
@@ -3300,6 +3301,72 @@ describe('senders', () => {
     await send(t, message(OWNER, { root: '$root', mentions: [PERSONAL] }))
     // The owner's session in the thread, not a fresh arc that the call opened.
     expect(t.agents.ensureSession).toHaveBeenCalledWith('personal', '$root', ROOM, '$root')
+  })
+
+  // The root of a member names the personal agent; a bare reply of the owner, while no agent
+  // has posted yet, follows the mentions of the root.
+  it('a root mention from a member does not make the personal agent follow the thread', async () => {
+    const t = make({ hold: true })
+    await send(t, message(MEMBER, { id: '$root', mentions: [PERSONAL, PROJECT] }))
+    await send(t, message(OWNER, { root: '$root' }))
+    t.finishPrompt()
+    for (let i = 0; i < 3; i++) await settleTurn()
+    const sessionsOf = (name: string) => t.agents.ensureSession.mock.calls.filter((c) => c[0] === name)
+    expect(sessionsOf('personal')).toHaveLength(0)
+    // An agent without senders follows the root mention as before.
+    expect(sessionsOf('project')).toHaveLength(2)
+  })
+
+  it('rebuildThreadState adds a root mention only for an agent that the sender reaches', async () => {
+    const rebuild = (sender: string) =>
+      rebuildThreadState(
+        {
+          fetchEvent: vi.fn(async () => ({
+            type: 'm.room.message',
+            sender,
+            content: { 'm.mentions': { user_ids: [PERSONAL, PROJECT] } },
+          })),
+          fetchThreadRelations: vi.fn(async () => ({ chunk: [] })),
+        } as never,
+        ROOM,
+        '$root',
+        bindings,
+      )
+    expect((await rebuild(MEMBER)).rootMentions).toEqual(['project'])
+    expect((await rebuild(OWNER)).rootMentions).toEqual(['personal', 'project'])
+  })
+
+  // The approval names its agent, so the filter does not depend on the session being known here.
+  it('a non-owner approval of a personal agent is ignored also when its session is unknown here', async () => {
+    const t = make()
+    t.approvals.listPending.mockReturnValue([{ approvalId: 'a1', agentName: 'personal', sessionId: 'sess-x' }] as never)
+    const approve = (sender: string) =>
+      send(t, {
+        type: 'dev.zooid.approval_response',
+        sender,
+        content: { approval_id: 'a1', session_id: 'sess-x', decision: 'allow' },
+      })
+    await approve(MEMBER)
+    expect(t.approvals.resolve).not.toHaveBeenCalled()
+    await approve(OWNER)
+    expect(t.approvals.resolve).toHaveBeenCalledWith('sess-x', 'a1', { decision: 'allow' })
+  })
+
+  it('an approval of an agent without senders is resolved by any member, session known or not', async () => {
+    const t = make()
+    t.approvals.listPending.mockReturnValue([{ approvalId: 'a1', agentName: 'project', sessionId: 'sess-x' }] as never)
+    await send(t, {
+      type: 'dev.zooid.approval_response',
+      sender: MEMBER,
+      content: { approval_id: 'a1', session_id: 'sess-x', decision: 'allow' },
+    })
+    t.approvals.listPending.mockReturnValue([])
+    await send(t, {
+      type: 'dev.zooid.approval_response',
+      sender: MEMBER,
+      content: { approval_id: 'a2', session_id: 'sess-y', decision: 'allow' },
+    })
+    expect(t.approvals.resolve).toHaveBeenCalledTimes(2)
   })
 
   it('rebuildThreadState writes no call edge for a refused call', async () => {
