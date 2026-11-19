@@ -15,7 +15,7 @@ import { ApiError } from './errors.js'
 import type { MatrixConn } from './matrix.js'
 import type { Models } from './models.js'
 import { checkPerson, listPeople } from './people.js'
-import { can, canUse, liveVms, sees, type World } from './policy.js'
+import { breaksProjectVmRule, can, canUse, isProject, liveVms, sees, type World } from './policy.js'
 import { fetchProjects, type Project } from './project-records.js'
 import type { createRoster } from './roster.js'
 import { fetchVms, type Vm } from './vms.js'
@@ -54,6 +54,19 @@ const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/
 const bad = (error: string) => new ApiError(400, { error })
 const forbidden = () => new ApiError(403, { error: 'forbidden' })
 const notMember = () => new ApiError(400, { error: 'owner must be a member of the workspace' })
+export const needsProjectVm = () => new ApiError(409, { error: 'a project agent needs a project vm' })
+
+/** `project_id` of a body: a string, or undefined when it is absent or null. */
+export function parseProjectId(raw: unknown): string | undefined {
+  if (raw == null) return undefined
+  if (typeof raw !== 'string') throw bad('project_id must be a string')
+  return raw
+}
+
+/** A project ID that the project list has: checked before any Matrix step. */
+export function checkProject(world: { projects: readonly Project[] }, id: string): void {
+  if (!world.projects.some((p) => p.id === id)) throw bad('unknown project')
+}
 
 /**
  * The VM list, every record, and every project of the tenant. A failure of the VM list passes on as it is, as on
@@ -201,12 +214,14 @@ async function jsonObject(c: Context<Env>): Promise<Record<string, unknown>> {
   return raw as Record<string, unknown>
 }
 
-/** The fields that both writes take. A value that is absent or null is left out. `""` clears a label. */
+/**
+ * The fields that both writes take. A value that is absent or null is left out. `""` clears a label. The text
+ * `project` of phase 1 is dropped: it never reaches the control plane.
+ */
 interface Fields {
   description?: string
   model?: string
   tag?: string
-  project?: string
   vm?: string
 }
 
@@ -234,8 +249,6 @@ function parseFields(b: Record<string, unknown>): Fields {
   }
   const tag = label(b.tag, 'tag')
   if (tag !== undefined) fields.tag = tag
-  const project = label(b.project, 'project')
-  if (project !== undefined) fields.project = project
   if (b.vm != null) {
     // A VM name goes into a path and a Matrix ID.
     if (typeof b.vm !== 'string' || !VM_NAME_RE.test(b.vm)) throw bad('vm must match ^[a-z0-9][a-z0-9-]{0,62}$')
@@ -264,18 +277,28 @@ export function agentRoutes(app: Hono<Env>, ctx: AgentContext): void {
     const b = await jsonObject(c)
     if (typeof b.name !== 'string' || !AGENT_NAME_RE.test(b.name)) throw bad('name must match ^[a-z][a-z0-9-]{0,31}$')
     const name = b.name
-    const { vm, tag, project, ...fields } = parseFields(b)
+    const { vm, tag, ...fields } = parseFields(b)
+    // null and "" make a personal agent. The control plane reads "" in a POST as an unknown project.
+    const projectId = parseProjectId(b.project_id) || undefined
     if (fields.model === undefined) throw bad('model is required')
     const model = fields.model
     return ctx.queue(async () => {
       const world = await loadWorld(ctx, caller)
+      if (projectId !== undefined) checkProject(world, projectId)
       if (vm !== undefined) {
-        usableVm(world, vm)
+        const live = usableVm(world, vm)
         checkNameFree(world, vm, name)
+        if (breaksProjectVmRule(projectId !== undefined, live)) throw needsProjectVm()
       }
       await checkModel(ctx, model)
       // The control plane refuses a label of "": a new agent leaves it out.
-      const body = { ...fields, name, owner: caller.userId, ...(tag ? { tag } : {}), ...(project ? { project } : {}) }
+      const body = {
+        ...fields,
+        name,
+        owner: caller.userId,
+        ...(tag ? { tag } : {}),
+        ...(projectId === undefined ? {} : { project_id: projectId }),
+      }
       let record: AgentRecord
       if (vm === undefined) {
         record = await createRecord(ctx.controlPlane, body)
@@ -289,27 +312,45 @@ export function agentRoutes(app: Hono<Env>, ctx: AgentContext): void {
     })
   })
 
+  // The order of the checks is that of contracts section 2: 404, 403, 400, the vm checks, the rule of the
+  // project VM, then the model and the person. The shape of the body is checked first, before the queue.
   app.put('/agents/:id', async (c) => {
     const caller = c.get('caller')
     const b = await jsonObject(c)
     const { vm, ...fields } = parseFields(b)
+    const sentProjectId = parseProjectId(b.project_id)
     if (b.owner != null && typeof b.owner !== 'string') throw notMember()
-    const owner = (b.owner ?? undefined) as string | undefined
+    const sentOwner = (b.owner ?? undefined) as string | undefined
     return ctx.queue(async () => {
       const world = await loadWorld(ctx, caller)
       const agent = findAgent(world, c.req.param('id'))
+      // The stored value is not a change, and "" for a personal agent is the stored value (D1, D2).
+      const projectId = sentProjectId === (agent.project_id ?? '') ? undefined : sentProjectId
+      const owner = sentOwner === agent.owner ? undefined : sentOwner
+      const leaves = projectId === ''
+      const projectAfter = projectId === undefined ? isProject(agent) : !leaves
       const allowed = can(world, agent)
-      if (Object.keys(fields).length > 0 && !allowed.edit) throw forbidden()
-      if (owner !== undefined && !allowed.set_owner) throw forbidden()
+      if ((Object.keys(fields).length > 0 || vm !== undefined) && !allowed.edit) throw forbidden()
+      if (projectId !== undefined && !allowed.set_project) throw forbidden()
+      // On a leave, set_project covers the owner.
+      if (owner !== undefined && !isProject(agent) && !allowed.set_owner) throw forbidden()
+      if (owner !== undefined && projectAfter) throw bad('a project agent has no owner')
+      if (projectId) checkProject(world, projectId)
+      let vmAfter = agent.vm === null ? undefined : world.live.get(agent.vm)
       if (vm !== undefined) {
-        if (!allowed.edit) throw forbidden()
         if (agent.vm !== null) throw new ApiError(409, { error: 'vm already set' })
-        usableVm(world, vm)
+        vmAfter = usableVm(world, vm)
         checkNameFree(world, vm, agent.name)
       }
+      if (breaksProjectVmRule(projectAfter, vmAfter)) throw needsProjectVm()
       if (fields.model !== undefined && fields.model !== agent.model) await checkModel(ctx, fields.model)
-      if (owner !== undefined) await checkPerson(ctx, owner)
-      const change = { ...fields, ...(owner === undefined ? {} : { owner }) }
+      // An agent that leaves without an owner gets its stored owner back, who must still be a person.
+      if (owner !== undefined || leaves) await checkPerson(ctx, owner ?? agent.owner)
+      const change = {
+        ...fields,
+        ...(projectId === undefined ? {} : { project_id: projectId }),
+        ...(owner === undefined ? {} : { owner }),
+      }
       let record = agent
       if (vm !== undefined) {
         const { rooms } = await ctx.admission.admit({ workstation: vm, agent: agent.name })
