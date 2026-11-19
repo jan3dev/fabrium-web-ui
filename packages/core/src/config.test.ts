@@ -426,6 +426,54 @@ agents:
     expect(config.agents.architect!.matrix?.trigger).toBe('mention')
   })
 
+  // `senders` is a YAML value, written inline in the matrix block.
+  const withSenders = (senders?: string) =>
+    loadZooidConfig(`
+runtime: local
+${MATRIX_TRANSPORT.trimStart()}
+agents:
+  architect:
+    workdir: ./architect
+    acp:
+      preset: claude
+    matrix:
+      transport: matrix-local
+      user_id: '@architect:localhost'
+      rooms:
+        - '!r1:localhost'
+${senders === undefined ? '' : `      senders: ${senders}`}
+`)
+
+  it('leaves senders undefined when the key is absent', () => {
+    expect(withSenders().agents.architect!.matrix?.senders).toBeUndefined()
+  })
+
+  it('loads senders as the list that the file has, in order', () => {
+    const config = withSenders(`['@ana:example.org', '@bo:example.org']`)
+    expect(config.agents.architect!.matrix?.senders).toEqual(['@ana:example.org', '@bo:example.org'])
+  })
+
+  it('accepts 20 entries', () => {
+    const list = Array.from({ length: 20 }, (_, i) => `@u${i}:example.org`)
+    expect(withSenders(JSON.stringify(list)).agents.architect!.matrix?.senders).toEqual(list)
+  })
+
+  it.each([
+    ['an empty list', '[]'],
+    ['a string', '"@ana:example.org"'],
+    ['null', 'null'],
+    ['an object', '{ owner: "@ana:example.org" }'],
+    ['21 entries', JSON.stringify(Array.from({ length: 21 }, (_, i) => `@u${i}:example.org`))],
+    ['a non-string entry', '[7]'],
+    ['an entry without @', '["ana:example.org"]'],
+    ['an entry without a server', '["@ana"]'],
+    ['an entry with white space', '["@a na:example.org"]'],
+    ['an entry with a line break', JSON.stringify(['@ana:example.org\n@bo:example.org'])],
+    ['an entry over 255 bytes', JSON.stringify([`@${'a'.repeat(250)}:example.org`])],
+  ])('refuses senders with %s', (_label, senders) => {
+    expect(() => withSenders(senders)).toThrow(/agents\.architect\.matrix\.senders/)
+  })
+
   it('rejects matrix block referencing http transport', () => {
     expect(() =>
       loadZooidConfig(`
