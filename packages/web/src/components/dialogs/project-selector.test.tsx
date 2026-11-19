@@ -229,12 +229,27 @@ describe("<ProjectSelector>", () => {
     expect(trigger()).toBeDisabled();
   });
 
-  it("renders the list inside the dialog, where the scroll lock of the dialog lets the wheel through", async () => {
+  it("keeps the wheel and touch moves of the list from the scroll lock of the dialog", async () => {
+    // The lock of a modal dialog cancels them on the document; the list is portaled outside it.
     const { user } = setup();
     await user.click(trigger());
-    const dialog = screen.getByRole("dialog", { name: "Edit agent" });
-    expect(dialog).toContainElement(screen.getByRole("listbox"));
-    expect(dialog).toContainElement(search());
+    const reached: string[] = [];
+    const listen = (e: Event) => reached.push(e.type);
+    document.addEventListener("wheel", listen);
+    document.addEventListener("touchmove", listen);
+    try {
+      fireEvent.wheel(screen.getByRole("option", { name: "Payments" }), { deltaY: 40 });
+      const touch = [{ clientX: 0, clientY: 40 }];
+      fireEvent.touchMove(screen.getByRole("listbox"), { touches: touch, changedTouches: touch });
+      fireEvent.wheel(search(), { deltaY: 40 });
+      expect(reached).toEqual([]);
+      // Elsewhere in the dialog the lock still applies.
+      fireEvent.wheel(screen.getByRole("heading", { name: "Edit agent" }), { deltaY: 40 });
+      expect(reached).toEqual(["wheel"]);
+    } finally {
+      document.removeEventListener("wheel", listen);
+      document.removeEventListener("touchmove", listen);
+    }
   });
 
   it("works outside a dialog", async () => {
