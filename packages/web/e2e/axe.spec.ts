@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import type { AxeResults } from "axe-core";
 import {
   INSTANCE_AGENT,
@@ -175,15 +175,17 @@ for (const theme of ["light", "dark"] as const) {
       for (const line of await seriousViolations(page))
         found.push(`${path}\n  ${line}`);
     }
-    // Open a dialog on the current page, sweep it, then close it. Escape closes the innermost
-    // layer first: the project list, a rename, and then the dialog.
-    async function sweepDialog(label: string, open: () => Promise<void>) {
+    // Open a dialog on the current page, sweep it, then close it. Escape closes only the layer on
+    // top: `layers` (an open project list, a rename) innermost first, then the dialog. Each press
+    // waits until its layer is gone, so a second press never reaches a layer that is closing.
+    async function sweepDialog(label: string, open: () => Promise<void>, layers: Locator[] = []) {
       await open();
       await page.getByRole("dialog").first().waitFor();
       for (const line of await seriousViolations(page)) found.push(`${label}\n  ${line}`);
-      for (let i = 0; i < 3 && (await page.getByRole("dialog").count()) > 0; i++)
+      for (const layer of [...layers, page.getByRole("dialog")]) {
         await page.keyboard.press("Escape");
-      await expect(page.getByRole("dialog")).toHaveCount(0);
+        await expect(layer).toHaveCount(0);
+      }
     }
     const dialog = (name: string) => page.getByRole("dialog", { name });
     /** Opens the project list of a dialog, once the projects have loaded. */
@@ -228,27 +230,37 @@ for (const theme of ["light", "dark"] as const) {
       await dialog("Move kilo to a project").waitFor();
     });
     await sweep("/agents", text(AGENTS.agents[0].name));
-    await sweepDialog("/agents: New agent, with the project list", async () => {
-      await page.getByRole("button", { name: "New agent" }).click();
-      await openProjects("New agent");
-      await page.getByRole("combobox", { name: "Search or create a project" }).fill("Bil");
-      await page.getByRole("option", { name: 'Create project "Bil"' }).waitFor();
-    });
+    await sweepDialog(
+      "/agents: New agent, with the project list",
+      async () => {
+        await page.getByRole("button", { name: "New agent" }).click();
+        await openProjects("New agent");
+        await page.getByRole("combobox", { name: "Search or create a project" }).fill("Bil");
+        await page.getByRole("option", { name: 'Create project "Bil"' }).waitFor();
+      },
+      [page.getByRole("listbox")],
+    );
     await sweepDialog("/agents: Edit, taking an agent out of its project", async () => {
       await page.getByRole("button", { name: `Edit ${PROJECT_AGENT.name}` }).click();
       await openProjects("Edit agent");
       await page.getByRole("option", { name: "No project" }).click();
+      // The pick closes the list: the Escape of the sweep must reach the dialog, not the list.
+      await expect(page.getByRole("listbox")).toHaveCount(0);
       await dialog("Edit agent").getByLabel("Owner").waitFor();
     });
     await sweepDialog("/agents: Create VM", async () => {
       await page.getByRole("button", { name: `Create VM for ${VM_GONE.name}` }).click();
       await dialog(`Create a VM for ${VM_GONE.name}`).getByLabel("Instance type").waitFor();
     });
-    await sweepDialog("/agents: Manage projects, renaming", async () => {
-      await page.getByRole("button", { name: "Manage projects" }).click();
-      await dialog("Manage projects").getByRole("button", { name: "Rename Payments" }).click();
-      await page.getByRole("textbox", { name: "Name of Payments" }).waitFor();
-    });
+    await sweepDialog(
+      "/agents: Manage projects, renaming",
+      async () => {
+        await page.getByRole("button", { name: "Manage projects" }).click();
+        await dialog("Manage projects").getByRole("button", { name: "Rename Payments" }).click();
+        await page.getByRole("textbox", { name: "Name of Payments" }).waitFor();
+      },
+      [page.getByRole("textbox", { name: "Name of Payments" })],
+    );
 
     expect(found, found.join("\n\n")).toEqual([]);
   });
