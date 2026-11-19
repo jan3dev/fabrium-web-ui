@@ -3,6 +3,7 @@
  * Every `can` flag and every `403` comes from `policy.ts`. Each write runs in the one queue and reads the world
  * again inside it.
  */
+import type { MatrixClient } from '@zooid/transport-matrix'
 import type { Context, Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import type { createAdmission } from './admission.js'
@@ -28,6 +29,12 @@ export interface AgentContext {
   queue: <T>(work: () => Promise<T>) => Promise<T>
   conn: MatrixConn
   asToken: string
+  /** The central appservice user, `@zooid:<server>`. */
+  asUserId: string
+  /** The central appservice client. */
+  client: Pick<MatrixClient, 'fetchRoomState'>
+  /** `<zooid home>/workstations`: one directory for each VM bundle. */
+  workstationsDir: string
   getSpaceRoomId(): string | undefined
   serverName: string
   /** The agents of the daemon config: every caller sees them, read-only. */
