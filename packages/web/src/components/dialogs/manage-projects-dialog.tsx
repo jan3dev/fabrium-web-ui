@@ -69,19 +69,18 @@ export function ManageProjectsDialog({
     setRenaming(null);
     setFailure(null);
   };
+  // Escape, the overlay, and Close: each opening starts clean.
+  const change = (next: boolean) => {
+    if (!next && busy) return;
+    if (!next) {
+      setRenaming(null);
+      setFailure(null);
+    }
+    onOpenChange(next);
+  };
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && busy) return;
-        if (!next) {
-          setRenaming(null);
-          setFailure(null);
-        }
-        onOpenChange(next);
-      }}
-    >
+    <Dialog open={open} onOpenChange={change}>
       <DialogContent
         className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
         showCloseButton={false}
@@ -146,7 +145,7 @@ export function ManageProjectsDialog({
           <Button
             type="button"
             variant="secondary"
-            onClick={() => onOpenChange(false)}
+            onClick={() => change(false)}
             disabled={busy}
           >
             Close

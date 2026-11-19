@@ -21,8 +21,10 @@ function setup(over: Partial<Props> = {}) {
     onDelete: vi.fn(async () => {}),
     ...over,
   };
-  render(<ManageProjectsDialog {...props} />);
+  const view = render(<ManageProjectsDialog {...props} />);
   return {
+    rerender: (next: Partial<Props>) =>
+      view.rerender(<ManageProjectsDialog {...props} {...next} />),
     onOpenChange: vi.mocked(props.onOpenChange),
     onRename: vi.mocked(props.onRename),
     onDelete: vi.mocked(props.onDelete),
@@ -165,6 +167,25 @@ describe("<ManageProjectsDialog>", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Could not load the projects. control plane unreachable",
     );
+  });
+
+  it("starts clean after Close and open", async () => {
+    const onDelete = vi.fn(async () => {
+      throw new FabriumApiError(409, "project in use");
+    });
+    const { user, rerender } = setup({ onDelete });
+    await user.click(button("Delete Marketing"));
+    expect(await screen.findByRole("alert")).toHaveTextContent(IN_USE);
+    await user.click(button("Close"));
+    rerender({ open: false });
+    rerender({ open: true });
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await startRename(user, "Payments");
+    await user.click(button("Close"));
+    rerender({ open: false });
+    rerender({ open: true });
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 
   it("Close closes the dialog", async () => {
