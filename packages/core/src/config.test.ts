@@ -458,6 +458,10 @@ ${senders === undefined ? '' : `      senders: ${senders}`}
     expect(withSenders(JSON.stringify(list)).agents.architect!.matrix?.senders).toEqual(list)
   })
 
+  it('accepts an entry with a port', () => {
+    expect(withSenders(`['@ana:example.org:8448']`).agents.architect!.matrix?.senders).toEqual(['@ana:example.org:8448'])
+  })
+
   it.each([
     ['an empty list', '[]'],
     ['a string', '"@ana:example.org"'],
@@ -470,6 +474,10 @@ ${senders === undefined ? '' : `      senders: ${senders}`}
     ['an entry with white space', '["@a na:example.org"]'],
     ['an entry with a line break', JSON.stringify(['@ana:example.org\n@bo:example.org'])],
     ['an entry over 255 bytes', JSON.stringify([`@${'a'.repeat(250)}:example.org`])],
+    // Printable ASCII only (contracts, section 5): the sync script applies the same pattern.
+    ['an entry with U+FEFF', '["@a\\uFEFFb:example.org"]'],
+    ['an entry with U+0085', '["@a\\u0085b:example.org"]'],
+    ['an entry with a non-ASCII letter', '["@ané:example.org"]'],
   ])('refuses senders with %s', (_label, senders) => {
     expect(() => withSenders(senders)).toThrow(/agents\.architect\.matrix\.senders/)
   })

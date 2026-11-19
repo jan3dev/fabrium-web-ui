@@ -48,8 +48,9 @@ export interface LoadZooidConfigOptions {
 
 const AGENT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/
 const MATRIX_USER_ID_RE = /^@[A-Za-z0-9._\-=/+]+:[A-Za-z0-9.\-]+$/
-// One entry of `matrix.senders`: the rule of the sync script, which allows a `:port`.
-const SENDER_ID_RE = /^@[^\s:]+:\S+$/
+// One entry of `matrix.senders`, printable ASCII only: the pattern of the contracts that the
+// sync script applies too, which allows a `:port`.
+const SENDER_ID_RE = /^@[\x21-\x39\x3b-\x7e]+:[\x21-\x7e]+$/
 const MATRIX_USER_LOCALPART_RE = /^@[a-z0-9._=/+\-]+$/
 const MATRIX_ROOM_IDENT_RE = /^[#!]/
 
