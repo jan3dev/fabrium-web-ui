@@ -18,6 +18,8 @@ Checks out the repo at --ref, builds the zooid CLI when the image holds another
 commit, and runs it as the systemd user service fabrium-agent. Needs the bundle
 from deploy/add-workstation.sh in ZOOID_HOME (.env, workforce/zooid.yaml) and a VM
 made from the agent VM image (or prepared with prepare-image.sh). Installs nothing.
+A VM of the web UI (it has /etc/fabrium/vm-token) needs only .env: it installs
+fabrium-agent-sync, which writes zooid.yaml and the agent files from the control plane.
 Ubuntu only. Needs sudo. The agent runs as this user, with this user's access.
 To update, run it again with a new --ref. The agent is stopped during the build.
 
@@ -58,7 +60,10 @@ ENV_FILE="$ZOOID_HOME/.env"
 YAML_FILE="$ZOOID_HOME/workforce/zooid.yaml"
 # Agent secrets go in secrets.env, never in .env: a new bundle overwrites .env.
 SECRETS_FILE="$ZOOID_HOME/secrets.env"
-if [ ! -f "$ENV_FILE" ] || [ ! -f "$YAML_FILE" ]; then
+# Only a VM of the web UI has a VM token (sudo: /etc/fabrium can be root only).
+MANAGED=0
+if sudo test -f /etc/fabrium/vm-token; then MANAGED=1; fi
+if [ ! -f "$ENV_FILE" ] || { [ "$MANAGED" -eq 0 ] && [ ! -f "$YAML_FILE" ]; }; then
   die "copy the bundle from the central instance first ($ENV_FILE and $YAML_FILE; see deploy/add-workstation.sh)"
 fi
 chmod 600 "$ENV_FILE"
@@ -72,7 +77,9 @@ WORKSTATION="$(env_value WORKSTATION)"
 SERVER_NAME="$(env_value SERVER_NAME)"
 HOMESERVER_URL="$(env_value HOMESERVER_URL)"
 MATRIX_AS_TOKEN="$(env_value MATRIX_AS_TOKEN)"
-for key in AGENT_NAME WORKSTATION SERVER_NAME HOMESERVER_URL MATRIX_AS_TOKEN; do
+REQUIRED="WORKSTATION SERVER_NAME HOMESERVER_URL MATRIX_AS_TOKEN"
+[ "$MANAGED" -eq 1 ] || REQUIRED="AGENT_NAME $REQUIRED"
+for key in $REQUIRED; do
   [ -n "${!key}" ] || die "$ENV_FILE has no $key"
 done
 RUN_DIR="$ZOOID_HOME/workforce/data/run"
@@ -168,9 +175,23 @@ else
   printf '%s\n' "$COMMIT" >"$BUILT_FILE"
 fi
 
+# --- Agent sync (a VM of the web UI): writes zooid.yaml, so before the service ---
+if [ "$MANAGED" -eq 1 ]; then
+  sudo install -m 0755 "$REPO_DIR/deploy/agent-vm/fabrium-agent-sync" /usr/local/sbin/fabrium-agent-sync
+  sudo install -m 0644 "$REPO_DIR/deploy/agent-vm/fabrium-agent-sync.service" \
+    "$REPO_DIR/deploy/agent-vm/fabrium-agent-sync.timer" /etc/systemd/system/
+  sudo systemctl daemon-reload
+  log "Reading the agents of this VM from the control plane"
+  sudo /usr/local/sbin/fabrium-agent-sync --require ||
+    die "fabrium-agent-sync has no agent list to apply: the VM has no agent in the control plane, or cannot reach it (see the line above)"
+fi
+
 # --- Agent layout ---------------------------------------------------------
-# Under runtime: local zooid does not create the agent's working directory.
-mkdir -p "$ZOOID_HOME/workforce/agents/$AGENT_NAME" "$ZOOID_HOME/workforce/data"
+# Local zooid does not create the agent's directory; on a VM of the web UI the sync made them.
+if [ "$MANAGED" -eq 0 ]; then
+  mkdir -p "$ZOOID_HOME/workforce/agents/$AGENT_NAME"
+fi
+mkdir -p "$ZOOID_HOME/workforce/data"
 
 # --- systemd user service -------------------------------------------------
 log "Installing the fabrium-agent user service"
@@ -184,6 +205,10 @@ STARTED_AT="$(date '+%Y-%m-%d %H:%M:%S')"
 systemctl --user restart fabrium-agent.service
 # systemd runs the new commit now, or restarts it in a loop: the agent is not stopped.
 trap - EXIT
+# From now on, a change of the agents reaches this VM within about a minute.
+if [ "$MANAGED" -eq 1 ]; then
+  sudo systemctl enable --now fabrium-agent-sync.timer
+fi
 
 # The token check above proves the bundle; this wait only shows the sync loop started.
 log "Waiting for fabrium-agent to start its sync loop (up to 120 s)"
@@ -202,6 +227,8 @@ if [ "$ok" -ne 1 ]; then
   die "fabrium-agent did not start its sync loop; see journalctl --user -u fabrium-agent${PREV_SHA:+. To go back, run this script again with --ref $PREV_SHA}"
 fi
 log "fabrium-agent started its sync loop at $SHA"
+# A VM of the web UI: the setup script runs configure-agent.sh next.
+[ "$MANAGED" -eq 0 ] || exit 0
 
 cat <<EOF_NEXT
 

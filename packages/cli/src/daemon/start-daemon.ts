@@ -40,6 +40,8 @@ import {
 import { installPiExtensions } from '../pi-extension-install.js'
 import { resolvePiExtensionBundle } from '@zooid/pi-extension'
 import { loadFabriumApiConfig } from '../fabrium-api/config.js'
+import { describeFailure } from '../fabrium-api/control-plane.js'
+import { ApiError } from '../fabrium-api/errors.js'
 import { mountFabriumApi } from '../fabrium-api/index.js'
 import { prepullImages } from '../prepull-images.js'
 import { mountPushGateway } from '../push-gateway/index.js'
@@ -304,6 +306,8 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       await client.joinRoom(roomId, mxid)
     }
 
+    // The web UI's VM API, when it is configured: it rebuilds the roster of each VM once the space exists.
+    let fabriumApi: { rebuildRosters(): Promise<void> } | undefined
     if (shouldBindHttpListener(mode)) {
       const requestedPort = matrix.transport.port ?? 9000
       // The gateway rides the appservice listener, not webStatic: webStatic
@@ -348,16 +352,15 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       // The web UI's VM API, off unless configured; mounted before serve() like the routes above.
       const vmApi = loadFabriumApiConfig()
       if (vmApi) {
-        mountFabriumApi(transport.app, {
+        fabriumApi = mountFabriumApi(transport.app, {
           ...vmApi,
           conn: { homeserver: matrix.transport.homeserver, fetch: opts.fetch ?? fetch },
-          client,
           asToken: matrix.transport.as_token,
           asUserId,
           serverName,
           workforceSpace: matrix.transport.space ?? 'dev',
           getSpaceRoomId: () => spaceRoomId,
-          agentNames,
+          instanceAgents: bindings.map((b) => ({ name: b.name, userId: b.userId })),
         })
         console.log('[fabrium] VM management API at /_fabrium/v1')
       }
@@ -471,18 +474,26 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
           ...bindings.flatMap((b) => b.rooms.map((r) => r.alias)).filter((a) => a.startsWith('!')),
         ],
       })
-      try {
-        const publisher: PublisherHandle = await startWorkforcePublisher({
-          client,
-          spaceRoomId,
-          asUserId,
-          getAgents: () => bindings,
-          stateKey: matrix.transport.workstation ?? '',
-        })
-        console.log(`[matrix] published dev.zooid.workforce (${bindings.length} agents)`)
-        void publisher
-      } catch (err) {
-        console.warn('[matrix] workforce roster publication failed:', err)
+      fabriumApi?.rebuildRosters().catch((err: unknown) => {
+        // The status only: the message of a control plane answer is not ours.
+        const reason = err instanceof ApiError ? `status ${err.status}` : describeFailure(err)
+        console.warn(`[fabrium] roster rebuild failed: ${reason}`)
+      })
+      // The central daemon writes the roster of a VM: a VM (client mode) does not publish its own.
+      if (mode !== 'client') {
+        try {
+          const publisher: PublisherHandle = await startWorkforcePublisher({
+            client,
+            spaceRoomId,
+            asUserId,
+            getAgents: () => bindings,
+            stateKey: matrix.transport.workstation ?? '',
+          })
+          console.log(`[matrix] published dev.zooid.workforce (${bindings.length} agents)`)
+          void publisher
+        } catch (err) {
+          console.warn('[matrix] workforce roster publication failed:', err)
+        }
       }
     }
   } else {

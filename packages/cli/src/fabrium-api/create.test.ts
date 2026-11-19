@@ -1,11 +1,16 @@
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AgentRecord } from './agent-records.js'
+import { ensureVmBundle } from './bundle.js'
 import { parseCreateRequest } from './create.js'
 import type { ApiError } from './errors.js'
-import { ADMIN, COMMIT, createTestApi, jsonResponse, stalledResponse } from './test-api.js'
+import { ADMIN, COMMIT, createTestApi, fakeAgentStore, jsonResponse, stalledResponse } from './test-api.js'
 
+const LUIS = '@luis:example.org' // vm-creator
+const VERA = '@vera:example.org' // vm-creator
+const ANA = '@ana:example.org' // agents-manager
 const VM = {
   id: 'i-0123456789abcdef0',
   name: 'lima',
@@ -20,15 +25,17 @@ const HAVEN = 'hk-secret-1'
 const GITHUB = 'gh-secret-1'
 
 const body = (over: Record<string, unknown> = {}) => ({
+  agent: 'p1',
   name: 'lima',
   instance_type: 't3a.medium',
-  agent: { mode: 'new', name: 'echo', persona: 'Reviewer', project: 'Fabrium' },
   haven_api_key: HAVEN,
   github_token: GITHUB,
   ...over,
 })
 
 let api: ReturnType<typeof createTestApi>
+let store: { records: AgentRecord[] }
+let vms: Record<string, unknown>[]
 let logSpies: { mock: { calls: unknown[][] } }[]
 beforeEach(() => {
   logSpies = [
@@ -37,16 +44,41 @@ beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {}),
   ]
 })
+const record = (id: string, name: string, vm: string | null, owner: string) =>
+  store.records.push({
+    id,
+    name,
+    owner,
+    description: '',
+    model: 'glm-5-3',
+    tag: null,
+    project: null,
+    vm,
+    rooms: vm === null ? [] : ['#general:example.org'],
+  })
 function setup(overrides: Parameters<typeof createTestApi>[0] = {}) {
-  api = createTestApi(overrides)
+  api = createTestApi({ whoamiTimeoutMs: 100, pollIntervalMs: 5, ...overrides })
+  store = fakeAgentStore(api.controlPlane)
+  vms = []
+  api.controlPlane.on('GET', '/v1/vms', () => jsonResponse(200, vms))
   api.controlPlane.on('POST', '/v1/vms', jsonResponse(201, VM))
-  api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
+  for (const [user, level] of [[LUIS, 70], [VERA, 70], [ANA, 40]] as const) api.fake.joinSpace(user, level)
+  record('p1', 'draft', null, ANA)
+  record('p2', 'helper', null, VERA)
   return api
 }
+const as = (user: string) => api.fake.openIdToken(user)
 const create = (json: unknown, token?: string | null) => api.request('POST', '/vms', { json, token })
+const posts = () => api.controlPlane.requests.filter((r) => r.method !== 'GET')
 const upstreamCreate = () =>
   api.controlPlane.requests.find((r) => r.method === 'POST' && r.path === '/v1/vms')
     ?.body as { name: string; instance_type?: string; auto_stop_hours?: number; creator?: string; bootstrap: { files: { path: string; content: string; mode: string; owner: string }[]; script: string } }
+const recordOf = (id: string) => store.records.find((r) => r.id === id)
+const rosterNames = (vm: string) =>
+  ((api.fake.state(api.fake.spaceId, 'dev.zooid.workforce', vm) as { agents: { name: string }[] } | undefined)
+    ?.agents ?? []).map((a) => a.name)
+const registrations = () =>
+  api.fake.messages.filter((m) => m.roomId === api.fake.adminRoomId && m.body.includes('register\n'))
 
 afterEach(() => {
   api?.cleanup()
@@ -55,7 +87,6 @@ afterEach(() => {
 
 describe('configuration', () => {
   it.each([
-    ['FABRIUM_HAVEN_MODEL is not set', { havenModel: undefined }],
     ['ZOOID_COMMIT is not set', { zooidCommit: undefined }],
     ['ZOOID_COMMIT is not a full commit hash', { zooidCommit: 'abc123' }],
   ])('answers 503 {"error":"%s"} and does nothing', async (error, overrides) => {
@@ -67,16 +98,22 @@ describe('configuration', () => {
     expect(api.fake.messages).toEqual([])
   })
 
-  it('needs the admin role', async () => {
+  it('works without FABRIUM_HAVEN_MODEL', async () => {
+    setup({ havenModel: undefined })
+    expect((await create(body())).status).toBe(201)
+  })
+
+  it('needs a role that manages VMs: an agents-manager cannot create a VM', async () => {
     setup()
     expect((await create(body(), null)).status).toBe(401)
     expect((await create(body(), api.memberToken)).status).toBe(403)
+    const manager = await create(body(), as(ANA))
+    expect([manager.status, await manager.json()]).toEqual([403, { error: 'forbidden' }])
     expect(api.controlPlane.requests).toEqual([])
   })
 })
 
 describe('validation', () => {
-  const longText = 'x'.repeat(201)
   it.each([
     ['an uppercase name', { name: 'Lima' }],
     ['a name that starts with a hyphen', { name: '-x' }],
@@ -84,13 +121,7 @@ describe('validation', () => {
     ['the name zooid', { name: 'zooid' }],
     ['no name', { name: undefined }],
     ['no agent', { agent: undefined }],
-    ['an unknown agent mode', { agent: { mode: 'other' } }],
-    ['an agent name that starts with a digit', { agent: { mode: 'new', name: '1abc' } }],
-    ['an agent name of 33 characters', { agent: { mode: 'new', name: 'a'.repeat(33) } }],
-    ['a new agent without a name', { agent: { mode: 'new' } }],
-    ['a persona that is not a string', { agent: { mode: 'new', name: 'echo', persona: 5 } }],
-    ['a persona of 201 characters', { agent: { mode: 'new', name: 'echo', persona: longText } }],
-    ['a project that is not a string', { agent: { mode: 'new', name: 'echo', project: {} } }],
+    ['an agent that is not a string', { agent: 5 }],
     ['no Haven key', { haven_api_key: undefined }],
     ['an empty Haven key', { haven_api_key: '' }],
     ['a blank Haven key', { haven_api_key: '   ' }],
@@ -148,8 +179,8 @@ describe('secrets that the VM script refuses', () => {
   const apiVerdict = (field: string, value: string): string => {
     try {
       parseCreateRequest({
+        agent: 'p1',
         name: 'lima',
-        agent: { mode: 'new', name: 'echo' },
         haven_api_key: 'hvn1_abc',
         github_token: undefined,
         [field]: value,
@@ -196,34 +227,32 @@ describe('secrets that the VM script refuses', () => {
   )
 })
 
-describe('a new agent', () => {
-  it('creates the VM and returns it with the agent id', async () => {
+describe('a VM for an agent', () => {
+  it('creates a VM for a profile', async () => {
     setup()
-    const res = await create(body())
+    const res = await create(body(), as(LUIS))
     expect(res.status).toBe(201)
-    expect(await res.json()).toEqual({ ...VM, agent_id: '@lima.echo:example.org' })
+    expect(await res.json()).toEqual({ ...VM, agent_id: '@lima.draft:example.org' })
+    expect(recordOf('p1')).toMatchObject({ vm: 'lima', rooms: ['#general:example.org'] })
+    expect(rosterNames('lima')).toEqual(['draft'])
 
     const sent = upstreamCreate()
     expect(Object.keys(sent).sort()).toEqual(['bootstrap', 'creator', 'instance_type', 'name'])
-    expect(sent.creator).toBe(ADMIN)
-    expect(sent.name).toBe('lima')
-    expect(sent.instance_type).toBe('t3a.medium')
+    expect(sent).toMatchObject({ name: 'lima', creator: LUIS, instance_type: 't3a.medium' })
     expect(sent.bootstrap.files.map((f) => [f.path, f.owner, f.mode])).toEqual([
       ['/home/ubuntu/zooid/.env', 'ubuntu', '600'],
-      ['/home/ubuntu/zooid/workforce/zooid.yaml', 'ubuntu', '600'],
       ['/run/fabrium-agent-secrets.env', 'ubuntu', '600'],
     ])
-    const [env, yaml, secrets] = sent.bootstrap.files
+    const [env, secrets] = sent.bootstrap.files
     expect(env?.content).toBe(readFileSync(join(api.workstationsDir, 'lima', '.env'), 'utf8'))
-    expect(yaml?.content).toBe(
-      readFileSync(join(api.workstationsDir, 'lima', 'workforce', 'zooid.yaml'), 'utf8'),
-    )
     expect(secrets?.content).toBe(
-      `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='${GITHUB}'\nFABRIUM_CREATOR='${ADMIN}'\n`,
+      `HAVEN_API_KEY='${HAVEN}'\nGH_TOKEN='${GITHUB}'\nFABRIUM_CREATOR='${LUIS}'\nFABRIUM_AGENT='draft'\n`,
     )
     expect(sent.bootstrap.script).toContain(`provision.sh --ref ${COMMIT}'`)
-    // The caller is the creator: the new agent greets them in a direct message once it works.
+    // The caller is the creator: the agent greets them in a direct message once it works.
     expect(sent.bootstrap.script).toContain('greet-creator.sh')
+    // The record is written before the VM is asked for.
+    expect(posts().map((r) => `${r.method} ${r.path}`)).toEqual(['PUT /v1/agents/p1', 'POST /v1/vms'])
   })
 
   it('creates the VM without the greeting for a caller ID outside the strict grammar', async () => {
@@ -234,8 +263,8 @@ describe('a new agent', () => {
     const res = await create(body(), api.fake.openIdToken(caller))
     expect(res.status).toBe(201)
     const sent = upstreamCreate()
-    expect(sent.bootstrap.files[2]?.content).toBe(
-      `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='${GITHUB}'\n`,
+    expect(sent.bootstrap.files[1]?.content).toBe(
+      `HAVEN_API_KEY='${HAVEN}'\nGH_TOKEN='${GITHUB}'\nFABRIUM_AGENT='draft'\n`,
     )
     expect(sent.bootstrap.script).not.toContain('greet-creator.sh')
     // The VM still gets its creator: the control plane checks the ID itself.
@@ -247,18 +276,15 @@ describe('a new agent', () => {
     await create(body({ instance_type: undefined, github_token: '' }))
     const sent = upstreamCreate()
     expect(Object.keys(sent).sort()).toEqual(['bootstrap', 'creator', 'name'])
-    expect(sent.bootstrap.files[2]?.content).toBe(
-      `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nFABRIUM_CREATOR='${ADMIN}'\n`,
+    expect(sent.bootstrap.files[1]?.content).toBe(
+      `HAVEN_API_KEY='${HAVEN}'\nFABRIUM_CREATOR='${ADMIN}'\nFABRIUM_AGENT='draft'\n`,
     )
   })
 
-  it('forwards auto_stop_hours to the control plane', async () => {
+  it('forwards auto_stop_hours to the control plane, and none when it is absent', async () => {
     setup()
     await create(body({ auto_stop_hours: 8 }))
     expect(upstreamCreate()).toMatchObject({ auto_stop_hours: 8 })
-  })
-
-  it('forwards no auto_stop_hours when it is absent', async () => {
     setup()
     await create(body())
     expect(upstreamCreate()).not.toHaveProperty('auto_stop_hours')
@@ -267,62 +293,137 @@ describe('a new agent', () => {
   it('trims whitespace around the secrets', async () => {
     setup()
     await create(body({ haven_api_key: `  ${HAVEN}\n`, github_token: ` ${GITHUB} ` }))
-    expect(upstreamCreate().bootstrap.files[2]?.content).toBe(
-      `HAVEN_API_KEY='${HAVEN}'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='${GITHUB}'\nFABRIUM_CREATOR='${ADMIN}'\n`,
-    )
+    expect(upstreamCreate().bootstrap.files[1]?.content).toContain(`HAVEN_API_KEY='${HAVEN}'\nGH_TOKEN='${GITHUB}'\n`)
+  })
+
+  it('answers 404 for an agent that the caller does not see', async () => {
+    setup()
+    vms = [{ ...VM, name: 'cusco', state: 'running', creator: VERA }]
+    record('a3', 'builder', 'cusco', VERA)
+    for (const agent of ['nope', 'a3']) {
+      const res = await create(body({ agent }), as(LUIS))
+      expect([res.status, await res.json()], agent).toEqual([404, { error: 'agent not found' }])
+    }
+    expect(posts()).toEqual([])
+  })
+
+  it('refuses an agent that has a live VM', async () => {
+    setup()
+    vms = [{ ...VM, name: 'cusco', state: 'running', creator: VERA }]
+    record('a3', 'builder', 'cusco', VERA)
+    const res = await create(body({ agent: 'a3', name: 'cusco' }), as(VERA))
+    expect([res.status, await res.json()]).toEqual([409, { error: 'the agent has a vm' }])
+    expect(posts()).toEqual([])
+  })
+
+  it.each([
+    ['a live VM', () => (vms = [{ ...VM, state: 'running' }])],
+    ['an agent record', () => record('a9', 'other', 'lima', VERA)],
+    ['a bundle without the marker', () => mkdirSync(join(api.workstationsDir, 'lima'), { recursive: true })],
+  ])('refuses a profile a name that has %s', async (_case, arrange) => {
+    setup()
+    arrange()
+    const res = await create(body(), as(LUIS))
+    expect([res.status, await res.json()]).toEqual([409, { error: 'name in use' }])
+    expect(posts()).toEqual([])
+    expect(api.fake.messages).toEqual([])
+  })
+
+  it('a name of a VM that is shutting down is free', async () => {
+    setup()
+    vms = [{ ...VM, state: 'shutting-down' }]
+    expect((await create(body(), as(LUIS))).status).toBe(201)
   })
 
   it('refuses a name that is a Matrix user with 409 before any write', async () => {
     setup()
     const res = await create(body({ name: 'ann' }))
     expect(res.status).toBe(409)
-    expect(api.controlPlane.requests.filter((r) => r.method !== 'GET')).toEqual([])
+    expect(posts()).toEqual([])
     expect(api.fake.messages).toEqual([])
   })
 
-  it('refuses a new agent for the name of a VM that exists with 409 before the admission', async () => {
-    setup()
-    // The admission would take the VM's live agent for a resume and rewrite its roster entry.
-    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, [VM]))
-    const res = await create(body())
-    expect(res.status).toBe(409)
-    expect(await res.json()).toEqual({ error: 'name in use' })
-    expect(api.controlPlane.requests.filter((r) => r.method === 'POST')).toEqual([])
-    expect(api.fake.messages).toEqual([])
-  })
-
-  it('answers 502 with the step when admission fails, and creates no VM', async () => {
+  it('a second request after a failed join completes the VM', async () => {
     setup()
     api.fake.failOnce('POST', /\/join\//, 500)
-    const res = await create(body())
-    expect(res.status).toBe(502)
-    expect(await res.json()).toMatchObject({ step: 'join', error: expect.any(String) })
-    expect(api.controlPlane.requests.filter((r) => r.method === 'POST')).toEqual([])
-  })
-
-  it('continues from the failed step when the same body is sent again', async () => {
-    setup()
-    api.fake.failOnce('POST', /\/join\//, 500)
-    await create(body())
+    const failed = await create(body(), as(LUIS))
+    expect(failed.status).toBe(502)
+    expect(await failed.json()).toMatchObject({ step: 'join', error: expect.any(String) })
+    expect(existsSync(join(api.workstationsDir, 'lima', '.env'))).toBe(true)
+    expect(recordOf('p1')?.vm).toBeNull()
+    expect(posts()).toEqual([])
     const env = readFileSync(join(api.workstationsDir, 'lima', '.env'), 'utf8')
-    expect((await create(body())).status).toBe(201)
+
+    expect((await create(body(), as(LUIS))).status).toBe(201)
     expect(readFileSync(join(api.workstationsDir, 'lima', '.env'), 'utf8')).toBe(env)
-    expect(api.fake.messages.filter((m) => m.roomId === api.fake.adminRoomId)).toHaveLength(1)
+    expect(registrations()).toHaveLength(1)
   })
 
-  it.each([
-    [409, { error: 'name in use' }],
-    [502, { error: 'ec2 failed' }],
-  ])('passes a control plane %i through and keeps the agent free', async (status, expected) => {
+  it('another agent can take a name whose admission did not finish', async () => {
     setup()
-    api.controlPlane.on('POST', '/v1/vms', jsonResponse(status, expected))
+    api.fake.failOnce('POST', /\/join\//, 500)
+    expect((await create(body(), as(LUIS))).status).toBe(502)
+    const res = await create(body({ agent: 'p2' }), as(VERA))
+    expect(res.status).toBe(201)
+    expect(rosterNames('lima')).toEqual(['helper'])
+    expect(recordOf('p1')?.vm).toBeNull()
+    expect(recordOf('p2')?.vm).toBe('lima')
+  })
+
+  it('brings back the VM of an agent whose VM is gone', async () => {
+    setup()
+    await api.admit('quito', 'watcher')
+    record('a4', 'watcher', 'quito', ANA)
+    const before = registrations().length
+    const res = await create(body({ agent: 'a4', name: 'quito' }), as(LUIS))
+    expect(res.status).toBe(201)
+    expect(await res.json()).toMatchObject({ agent_id: '@quito.watcher:example.org' })
+    expect(registrations()).toHaveLength(before)
+    expect(posts().map((r) => `${r.method} ${r.path}`)).toEqual(['POST /v1/vms'])
+    expect(upstreamCreate().bootstrap.files[1]?.content).toContain("FABRIUM_AGENT='watcher'")
+  })
+
+  it('brings back the VM of an agent in the rooms of its record, not in FABRIUM_VM_ROOMS of today', async () => {
+    setup({ vmRooms: ['#general', '#dev-talk'] })
+    api.fake.addRoom('#dev-talk', '!dev-talk:example.org', 'public')
+    api.fake.addRoom('#ops', '!ops:example.org', 'public')
+    record('a4', 'watcher', 'quito', ANA)
+    recordOf('a4')!.rooms = ['#general:example.org', '#ops:example.org']
+    const res = await create(body({ agent: 'a4', name: 'quito' }), as(LUIS))
+    expect(res.status).toBe(201)
+    const watcher = '@quito.watcher:example.org'
+    expect(api.fake.membership(api.fake.generalRoomId, watcher)).toBe('join')
+    expect(api.fake.membership('!ops:example.org', watcher)).toBe('join')
+    expect(api.fake.membership('!dev-talk:example.org', watcher)).toBeUndefined()
+  })
+
+  it('refuses another name for an agent that has a vm', async () => {
+    setup()
+    record('a4', 'watcher', 'quito', ANA)
+    const res = await create(body({ agent: 'a4', name: 'lima' }), as(LUIS))
+    expect([res.status, await res.json()]).toEqual([400, { error: 'name must be the vm of the agent' }])
+    expect(posts()).toEqual([])
+  })
+
+  it('a control plane failure leaves the agent with its vm and no live VM', async () => {
+    setup()
+    api.controlPlane.on('POST', '/v1/vms', jsonResponse(502, { error: 'ec2 failed' }))
+    const res = await create(body(), as(LUIS))
+    expect([res.status, await res.json()]).toEqual([502, { error: 'ec2 failed' }])
+    expect(recordOf('p1')?.vm).toBe('lima')
+    const listed = await (await api.request('GET', '/agents', { token: as(LUIS) })).json()
+    const p1 = listed.agents.find((a: { id: string }) => a.id === 'p1')
+    expect(p1).toMatchObject({ vm: { name: 'lima' }, can: { create_vm: true } })
+    // Create VM again, with the name of the agent.
+    api.controlPlane.on('POST', '/v1/vms', jsonResponse(201, VM))
+    expect((await create(body(), as(LUIS))).status).toBe(201)
+  })
+
+  it('passes a control plane 409 through', async () => {
+    setup()
+    api.controlPlane.on('POST', '/v1/vms', jsonResponse(409, { error: 'name in use' }))
     const res = await create(body())
-    expect(res.status).toBe(status)
-    expect(await res.json()).toEqual(expected)
-    const agents = await (await api.request('GET', '/agents')).json()
-    expect(agents).toEqual([
-      expect.objectContaining({ workstation: 'lima', free: true, preset: 'opencode' }),
-    ])
+    expect([res.status, await res.json()]).toEqual([409, { error: 'name in use' }])
   })
 
   describe('when the create went through but its answer is lost', () => {
@@ -332,32 +433,21 @@ describe('a new agent', () => {
       setup({ controlPlaneTimeoutMs: 30 })
       api.controlPlane.on('POST', '/v1/vms', stalledResponse(201))
       const res = await create(body())
-      expect(res.status).toBe(502)
-      expect(await res.json()).toEqual({ error: lost })
+      expect([res.status, await res.json()]).toEqual([502, { error: lost }])
     })
 
     it('says the same when the body is not JSON', async () => {
       setup()
       api.controlPlane.on('POST', '/v1/vms', new Response('<html>', { status: 201 }))
       const res = await create(body())
-      expect(res.status).toBe(502)
-      expect(await res.json()).toEqual({ error: lost })
-    })
-
-    it('keeps the identity free for the next try, like any control plane failure', async () => {
-      setup({ controlPlaneTimeoutMs: 30 })
-      api.controlPlane.on('POST', '/v1/vms', stalledResponse(201))
-      await create(body())
-      const agents = (await (await api.request('GET', '/agents')).json()) as { free: boolean }[]
-      expect(agents.map((a) => a.free)).toEqual([true])
+      expect([res.status, await res.json()]).toEqual([502, { error: lost }])
     })
 
     it('answers 502 control plane unreachable when an error answer stalls', async () => {
       setup({ controlPlaneTimeoutMs: 30 })
       api.controlPlane.on('POST', '/v1/vms', stalledResponse(409))
       const res = await create(body())
-      expect(res.status).toBe(502)
-      expect(await res.json()).toEqual({ error: 'control plane unreachable' })
+      expect([res.status, await res.json()]).toEqual([502, { error: 'control plane unreachable' }])
     })
   })
 
@@ -368,160 +458,91 @@ describe('a new agent', () => {
       '/v1/vms',
       new Response('Payload Too Large', { status: 413, headers: { 'content-type': 'text/plain' } }),
     )
-    const res = await create(body({ name: 'lima2' }))
+    const res = await create(body())
     expect([res.status, await res.text()]).toEqual([413, 'Payload Too Large'])
   })
 })
 
-describe('an existing agent', () => {
-  const existing = (over: Record<string, unknown> = {}) =>
-    body({ agent: { mode: 'existing', name: 'lima' }, instance_type: undefined, ...over })
-
-  it('moves a free agent to a new VM without touching Matrix', async () => {
-    setup()
-    await api.bundle('lima', 'echo')
-    const matrixCalls = api.fake.calls.length
-    const res = await create(existing())
-    expect(res.status).toBe(201)
-    expect(await res.json()).toEqual({ ...VM, agent_id: '@lima.echo:example.org' })
-    expect(upstreamCreate().bootstrap.files[0]?.content).toBe(
-      readFileSync(join(api.workstationsDir, 'lima', '.env'), 'utf8'),
-    )
-    expect(api.fake.messages).toEqual([])
-    expect(api.fake.calls.slice(matrixCalls).some((c) => c.method !== 'GET')).toBe(false)
-  })
-
-  it('takes the workstation from name and ignores agent.name', async () => {
-    setup()
-    await api.bundle('lima', 'echo')
-    expect((await create(existing({ agent: { mode: 'existing' } }))).status).toBe(201)
-    expect((await create(existing({ agent: { mode: 'existing', name: 'whatever' } }))).status).toBe(201)
-  })
-
+describe('a homeserver that does not answer', () => {
   it.each([
-    ['a VM has the name', async () => {
-      await api.bundle('lima', 'echo')
-      api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, [VM]))
-    }],
-    ['the preset is not opencode', async () => {
-      await api.bundle('lima', 'echo')
-      writeFileSync(
-        join(api.workstationsDir, 'lima', 'workforce', 'zooid.yaml'),
-        "agents:\n  echo:\n    acp: { command: sh, args: ['-c', 'true'] }\n",
-      )
-    }],
-    ['there is no bundle', async () => {}],
-  ])('answers 400 when %s', async (_name, arrange) => {
-    setup()
-    await arrange()
-    const res = await create(existing())
-    expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ error: 'lima is not a free agent' })
-    expect(api.controlPlane.requests.filter((r) => r.method === 'POST')).toEqual([])
+    ['a call of the central client', 'GET', /\/directory\/room\//, 'register_appservice'],
+    ['a call of the VM client', 'POST', /\/join\//, 'join'],
+    ['a call of the API itself', 'GET', /\/register\/available$/, 'bundle'],
+  ])('ends %s as a 502, and the next write in the queue still runs', { timeout: 2000 }, async (_case, method, path, step) => {
+    setup({ matrixTimeoutMs: 30 })
+    api.fake.hangOnce(method, path)
+    const answers = await Promise.all([
+      create(body(), as(LUIS)),
+      create(body({ agent: 'p2', name: 'quito' }), as(VERA)),
+    ])
+    const [ok, failed] = answers.sort((a, b) => a.status - b.status)
+    expect(ok!.status).toBe(201)
+    expect([failed!.status, await failed!.json()]).toEqual([502, expect.objectContaining({ step })])
   })
+})
 
-  it('answers 409 for an agent whose admission stopped, and sends nothing', async () => {
-    setup()
-    await api.bundle('lima', 'echo', {}, { registered: false })
-    const seen = api.fake.calls.length
-    const res = await create(existing())
-    expect(res.status).toBe(409)
-    expect(await res.json()).toEqual({
-      error: 'lima is only partly admitted: send the new-agent request again',
+describe('POST /vms/:id/recreate', () => {
+  const recreate = (json: unknown, token?: string) => api.request('POST', `/vms/${VM.id}/recreate`, { json, token })
+  const upstream = () => api.controlPlane.requests.find((r) => r.path === `/v1/vms/${VM.id}/recreate`)
+  async function running() {
+    vms = [{ ...VM, state: 'running', creator: LUIS }]
+    await ensureVmBundle(join(api.workstationsDir, 'lima'), {
+      workstation: 'lima',
+      serverName: 'example.org',
+      homeserverUrl: 'https://chat.example.org',
+      space: 'dev',
     })
-    expect(api.controlPlane.requests.filter((r) => r.method === 'POST')).toEqual([])
-    // A read-only check: admission is not run again, which would reset the persona and the project.
-    expect(api.fake.calls.slice(seen).filter((c) => c.method !== 'GET')).toEqual([])
-    expect(api.fake.messages).toEqual([])
-  })
+    api.controlPlane.on('POST', `/v1/vms/${VM.id}/recreate`, jsonResponse(201, { ...VM, id: 'i-0fedcba9876543210' }))
+  }
 
-  it('takes the agent once a new-agent request has finished its admission', async () => {
-    setup({ whoamiTimeoutMs: 60, pollIntervalMs: 5 })
-    const free = async () =>
-      ((await (await api.request('GET', '/agents')).json()) as { free: boolean }[]).map((a) => a.free)
-    api.fake.knobs.adminCommandWorks = false
-    expect((await create(body())).status).toBe(502)
-    expect(await free()).toEqual([false])
-    expect((await create(existing())).status).toBe(409)
-
-    api.fake.knobs.adminCommandWorks = true
-    expect((await create(body())).status).toBe(201)
-    expect(await free()).toEqual([true])
-    expect((await create(existing())).status).toBe(201)
-  })
-
-  // tuwunel loaded the registration in each of these, so whoami works: the admission still did not finish.
-  it.each([
-    [
-      'register_user',
-      'the agent user is not registered',
-      {},
-      () => api.fake.failOnce('POST', /\/register$/, 500),
-      () => {},
-    ],
-    [
-      'join',
-      'a room of the agent does not exist yet',
-      { vmRooms: ['#general', '#ops'] },
-      () => {},
-      () => api.fake.addRoom('#ops', '!ops:example.org', 'public'),
-    ],
-    [
-      'join',
-      'the agent is in the space but a room refuses it',
-      {},
-      () => api.fake.setMember(api.fake.generalRoomId, '@lima.echo:example.org', 'ban'),
-      () => api.fake.setMember(api.fake.generalRoomId, '@lima.echo:example.org', 'leave'),
-    ],
-    [
-      'roster',
-      'the roster entry is not published',
-      {},
-      () => api.fake.failOnce('PUT', /\/state\/dev\.zooid\.workforce/, 500),
-      () => {},
-    ],
-  ])(
-    'keeps an agent whose admission failed at %s (%s) out of the free list until a new-agent request finishes it',
-    async (step, _what, over, arrange, repair) => {
-      setup(over)
-      arrange()
-      const free = async () =>
-        ((await (await api.request('GET', '/agents')).json()) as { free: boolean }[]).map((a) => a.free)
-      const vmCreates = () => api.controlPlane.requests.filter((r) => r.method === 'POST')
-
-      const failed = await create(body())
-      expect(failed.status).toBe(502)
-      expect(await failed.json()).toMatchObject({ step })
-      expect(await free()).toEqual([false])
-
-      const asked = await create(existing())
-      expect(asked.status).toBe(409)
-      expect(await asked.json()).toEqual({
-        error: 'lima is only partly admitted: send the new-agent request again',
-      })
-      expect(vmCreates()).toEqual([])
-
-      repair()
-      expect((await create(body())).status).toBe(201)
-      expect(await free()).toEqual([true])
-      expect((await create(existing())).status).toBe(201)
-    },
-  )
-
-  it('does not ask tuwunel about a bundle of add-workstation.sh', async () => {
+  it('replaces a VM with new credentials', async () => {
     setup()
-    await api.bundle('lima', 'echo', {}, { legacy: true, registered: false })
-    expect((await create(existing())).status).toBe(201)
+    await running()
+    const res = await recreate({ haven_api_key: 'hk-new' }, as(LUIS))
+    expect([res.status, await res.json()]).toEqual([201, { ...VM, id: 'i-0fedcba9876543210' }])
+    const sent = upstream()?.body as { bootstrap: { files: { path: string; content: string }[]; script: string } }
+    expect(Object.keys(sent)).toEqual(['bootstrap'])
+    expect(sent.bootstrap.files.map((f) => [f.path, f.content])).toEqual([
+      ['/home/ubuntu/zooid/.env', readFileSync(join(api.workstationsDir, 'lima', '.env'), 'utf8')],
+      // No FABRIUM_CREATOR and no FABRIUM_AGENT: the VM does not greet again.
+      ['/run/fabrium-agent-secrets.env', "HAVEN_API_KEY='hk-new'\n"],
+    ])
+    expect(sent.bootstrap.script).not.toContain('greet-creator.sh')
+    // An admin replaces any VM.
+    expect((await recreate({ haven_api_key: 'hk-new' })).status).toBe(201)
   })
 
-  it('passes a failure of the VM list through and creates nothing', async () => {
+  it('another vm-creator gets 404', async () => {
     setup()
-    await api.bundle('lima', 'echo')
-    api.controlPlane.on('GET', '/v1/vms', jsonResponse(502, { error: 'ec2 failed' }))
-    const res = await create(existing())
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: 'ec2 failed' })
-    expect(api.controlPlane.requests.filter((r) => r.method === 'POST')).toEqual([])
+    await running()
+    const res = await recreate({ haven_api_key: 'hk-new' }, as(VERA))
+    expect([res.status, await res.json()]).toEqual([404, { error: 'not found' }])
+    expect(upstream()).toBeUndefined()
+  })
+
+  it('a VM whose name has no bundle is 409', async () => {
+    setup()
+    vms = [{ ...VM, state: 'running', creator: LUIS }]
+    const res = await recreate({ haven_api_key: 'hk-new' }, as(LUIS))
+    expect([res.status, await res.json()]).toEqual([409, { error: 'the vm has no bundle' }])
+    expect(upstream()).toBeUndefined()
+  })
+
+  it('needs haven_api_key', async () => {
+    setup()
+    await running()
+    for (const json of [{}, { github_token: GITHUB }, { haven_api_key: ' ' }]) {
+      const res = await recreate(json, as(LUIS))
+      expect([res.status, await res.json()]).toEqual([400, { error: 'haven_api_key is required' }])
+    }
+    expect(upstream()).toBeUndefined()
+  })
+
+  it('a missing ZOOID_COMMIT is 503', async () => {
+    setup({ zooidCommit: undefined })
+    await running()
+    expect((await recreate({ haven_api_key: 'hk-new' }, as(LUIS))).status).toBe(503)
+    expect(upstream()).toBeUndefined()
   })
 })
 
@@ -531,9 +552,10 @@ describe('secrets', () => {
     setup()
     texts.push(await (await create(body())).text())
     api.fake.failOnce('POST', /\/join\//, 500)
-    texts.push(await (await create(body({ name: 'lima2', agent: { mode: 'new', name: 'two' } }))).text())
+    texts.push(await (await create(body({ agent: 'p2', name: 'lima2' }))).text())
     api.controlPlane.on('POST', '/v1/vms', jsonResponse(502, { error: 'ec2 failed' }))
-    texts.push(await (await create(body({ name: 'lima3', agent: { mode: 'new', name: 'three' } }))).text())
+    record('p3', 'scout', null, ANA)
+    texts.push(await (await create(body({ agent: 'p3', name: 'lima3' }))).text())
     const logged = logSpies.flatMap((spy) => spy.mock.calls)
     expect(logged.length).toBeGreaterThan(0)
     const seen = JSON.stringify([...texts, ...logged])

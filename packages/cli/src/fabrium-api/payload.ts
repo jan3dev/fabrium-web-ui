@@ -1,3 +1,5 @@
+import { AGENT_NAME_RE } from './bundle.js'
+
 export interface BootstrapFile {
   path: string
   mode: string
@@ -10,17 +12,18 @@ export interface BootstrapPayload {
   script: string
 }
 
+/** The payload of contracts section 4. The VM reads its agents from the control plane. */
 export interface PayloadInput {
-  /** The bundle `.env` and `workforce/zooid.yaml`, as written on the central box. */
+  /** The bundle `.env`, as written on the central box. */
   env: string
-  yaml: string
   havenApiKey: string
-  havenModel: string
   githubToken?: string
   /** Full commit of the running zooid image; the VM checks it out. */
   commit: string
   /** The user who asked for the VM. The new agent greets them in a direct message once it works. */
   creator?: string
+  /** The agent that the VM is created for: the test turn and the greeting run as it. */
+  agent?: string
 }
 
 export const FULL_COMMIT_RE = /^[0-9a-f]{40}$/
@@ -63,6 +66,9 @@ const setupScript = (commit: string, greet: boolean): string =>
     '    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" "$@"',
     '}',
     "trap 'rm -f /run/fabrium-agent-secrets.env' EXIT",
+    // The commit first: the VM then runs the provision.sh of that commit, not the one of the image.
+    `as_ubuntu bash -lc 'git -C ~/fabrium-web-ui fetch --quiet origin ${commit}'`,
+    `as_ubuntu bash -lc 'git -C ~/fabrium-web-ui checkout --quiet --detach ${commit}'`,
     `as_ubuntu bash -lc 'bash ~/fabrium-web-ui/deploy/agent-vm/provision.sh --ref ${commit}'`,
     "as_ubuntu bash -lc 'set -a; . /run/fabrium-agent-secrets.env; set +a; bash ~/fabrium-web-ui/deploy/agent-vm/configure-agent.sh'",
     // The greeting is a courtesy: its failure must not fail the setup.
@@ -83,12 +89,14 @@ export function buildPayload(input: PayloadInput): BootstrapPayload {
   if (input.creator !== undefined && !isStrictUserId(input.creator)) {
     throw new Error('creator must be a Matrix user ID')
   }
-  const secrets: [string, string][] = [
-    ['HAVEN_API_KEY', input.havenApiKey],
-    ['HAVEN_MODEL', input.havenModel],
-  ]
+  // The agent name goes into a file that the VM sources.
+  if (input.agent !== undefined && !AGENT_NAME_RE.test(input.agent)) {
+    throw new Error('agent must be an agent name')
+  }
+  const secrets: [string, string][] = [['HAVEN_API_KEY', input.havenApiKey]]
   if (input.githubToken) secrets.push(['GH_TOKEN', input.githubToken])
   if (input.creator !== undefined) secrets.push(['FABRIUM_CREATOR', input.creator])
+  if (input.agent !== undefined) secrets.push(['FABRIUM_AGENT', input.agent])
 
   const file = (path: string, content: string): BootstrapFile => ({
     path,
@@ -99,7 +107,6 @@ export function buildPayload(input: PayloadInput): BootstrapPayload {
   return {
     files: [
       file(`${ZOOID_DIR}/.env`, input.env),
-      file(`${ZOOID_DIR}/workforce/zooid.yaml`, input.yaml),
       file(SECRETS_PATH, secrets.map(([key, value]) => `${key}=${shellQuote(value)}\n`).join('')),
     ],
     script: setupScript(input.commit, input.creator !== undefined),

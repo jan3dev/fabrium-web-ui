@@ -1,6 +1,7 @@
 /**
  * Test helper: an in-memory homeserver behind a `fetch`, answering like tuwunel 1.9.3 for the
- * cases the tests need (including `!admin appservices register`). Production code never imports it.
+ * cases the tests need (including `!admin appservices register` and `unregister`). Production code never
+ * imports it.
  */
 import { parse } from 'yaml'
 
@@ -64,6 +65,8 @@ export interface FakeMatrix {
   joinSpace(userId: string, level?: number): void
   /** The next request that matches answers `status`. */
   failOnce(method: string, path: RegExp, status: number): void
+  /** The next request that matches never answers: it ends only when its signal aborts. */
+  hangOnce(method: string, path: RegExp): void
 }
 
 interface StateEvent {
@@ -96,7 +99,7 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
   const joinRules = new Map<string, JoinRule>()
   const aliases = new Map<string, string>()
   const appservices = new Map<string, Appservice>()
-  const failures: { method: string; path: RegExp; status: number }[] = []
+  const failures: { method: string; path: RegExp; status: number | 'hang' }[] = []
   const calls: FakeCall[] = []
   const messages: FakeMessage[] = []
   const knobs = { adminCommandWorks: true, registerAfterWhoamiPolls: 0 }
@@ -141,10 +144,19 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
   addRoom('#general', generalRoomId, 'public')
   addRoom('#admins', adminRoomId, 'invite')
 
-  /** What tuwunel does with a message in the admin room: `!admin appservices register` and a code block. */
+  /**
+   * What tuwunel does with a message in the admin room: `!admin appservices register` and a code block, or
+   * `!admin appservices unregister <id>`, after which the token of that registration fails. Its users stay.
+   */
   function runAdminCommand(text: string): void {
+    if (!knobs.adminCommandWorks) return
+    const unregister = /^!admin appservices unregister (\S+)$/.exec(text)
+    if (unregister) {
+      for (const [token, a] of appservices) if (a.id === unregister[1]) appservices.delete(token)
+      return
+    }
     const match = /^!admin appservices register\n```\n([\s\S]*)\n```$/.exec(text)
-    if (!knobs.adminCommandWorks || !match) return
+    if (!match) return
     const registration = parse(match[1]!) as {
       id: string
       as_token: string
@@ -229,6 +241,14 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
       setState(roomId, 'm.room.member', actor, { membership: 'join' }, actor)
       return json(200, { room_id: roomId })
     }
+    const leave = /^\/_matrix\/client\/v3\/rooms\/([^/]+)\/leave$/.exec(path)
+    if (method === 'POST' && leave) {
+      const roomId = decodeURIComponent(leave[1]!)
+      const current = membershipOf(roomId, actor)
+      if (!mayAct || (current !== 'join' && current !== 'invite')) return forbidden()
+      setState(roomId, 'm.room.member', actor, { membership: 'leave' }, actor)
+      return json(200, {})
+    }
     const invite = /^\/_matrix\/client\/v3\/rooms\/([^/]+)\/invite$/.exec(path)
     if (method === 'POST' && invite) {
       const roomId = decodeURIComponent(invite[1]!)
@@ -305,6 +325,11 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
     const failure = failures.find((f) => f.method === method && f.path.test(url.pathname))
     if (failure) {
       failures.splice(failures.indexOf(failure), 1)
+      if (failure.status === 'hang') {
+        return new Promise<Response>((_, reject) =>
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason)),
+        )
+      }
       return json(failure.status, { errcode: 'M_UNKNOWN', error: 'injected failure' })
     }
     const body =
@@ -350,5 +375,6 @@ export function createFakeMatrix(opts: { serverName?: string } = {}): FakeMatrix
       if (level !== undefined) this.setLevel(spaceId, userId, level)
     },
     failOnce: (method, path, status) => void failures.push({ method, path, status }),
+    hangOnce: (method, path) => void failures.push({ method, path, status: 'hang' }),
   }
 }

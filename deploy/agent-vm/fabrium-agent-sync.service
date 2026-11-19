@@ -1,0 +1,9 @@
+# Installed by deploy/agent-vm/provision.sh into /etc/systemd/system on a VM of the web UI.
+[Unit]
+Description=Apply the agents of this VM from the control plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/fabrium-agent-sync

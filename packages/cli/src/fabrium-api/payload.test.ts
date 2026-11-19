@@ -8,14 +8,12 @@ import { buildPayload, FULL_COMMIT_RE, shellQuote } from './payload.js'
 const commit = '0123456789abcdef0123456789abcdef01234567'
 const input = {
   env: 'WORKSTATION=lima\n',
-  yaml: "workstation: 'lima'\n",
   havenApiKey: 'hk',
-  havenModel: 'glm-5-3',
   githubToken: 'gh',
   commit,
 }
 
-// The script of contracts section 3, one array entry per line. With a creator, a greeting step ends it.
+// The script of contracts section 4, one array entry per line. With a creator, a greeting step ends it.
 const expectedScript = (ref: string, greet = false) =>
   [
     '#!/bin/bash',
@@ -30,6 +28,8 @@ const expectedScript = (ref: string, greet = false) =>
     '    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" "$@"',
     '}',
     "trap 'rm -f /run/fabrium-agent-secrets.env' EXIT",
+    `as_ubuntu bash -lc 'git -C ~/fabrium-web-ui fetch --quiet origin ${ref}'`,
+    `as_ubuntu bash -lc 'git -C ~/fabrium-web-ui checkout --quiet --detach ${ref}'`,
     `as_ubuntu bash -lc 'bash ~/fabrium-web-ui/deploy/agent-vm/provision.sh --ref ${ref}'`,
     "as_ubuntu bash -lc 'set -a; . /run/fabrium-agent-secrets.env; set +a; bash ~/fabrium-web-ui/deploy/agent-vm/configure-agent.sh'",
     ...(greet
@@ -42,38 +42,60 @@ const expectedScript = (ref: string, greet = false) =>
   ].join('\n')
 
 describe('buildPayload', () => {
-  it('lists the three files with owner ubuntu and mode 600', () => {
+  it('has the two files of section 4 and no zooid.yaml', () => {
     const { files } = buildPayload(input)
-    expect(files.map((f) => f.path)).toEqual([
-      '/home/ubuntu/zooid/.env',
-      '/home/ubuntu/zooid/workforce/zooid.yaml',
-      '/run/fabrium-agent-secrets.env',
-    ])
+    expect(files.map((f) => f.path)).toEqual(['/home/ubuntu/zooid/.env', '/run/fabrium-agent-secrets.env'])
     expect(files.every((f) => f.owner === 'ubuntu' && f.mode === '600')).toBe(true)
     expect(files[0]!.content).toBe(input.env)
-    expect(files[1]!.content).toBe(input.yaml)
   })
 
-  it("writes the secrets as KEY='value' lines", () => {
-    const secrets = buildPayload(input).files[2]!.content
-    expect(secrets).toBe("HAVEN_API_KEY='hk'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='gh'\n")
+  it('the secrets file has HAVEN_API_KEY, and GH_TOKEN, FABRIUM_CREATOR and FABRIUM_AGENT only when given', () => {
+    const all = buildPayload({ ...input, creator: '@ann:example.org', agent: 'reviewer' })
+    expect(all.files[1]!.content).toBe(
+      "HAVEN_API_KEY='hk'\nGH_TOKEN='gh'\nFABRIUM_CREATOR='@ann:example.org'\nFABRIUM_AGENT='reviewer'\n",
+    )
+    expect(buildPayload({ ...input, githubToken: undefined }).files[1]!.content).toBe("HAVEN_API_KEY='hk'\n")
   })
 
   it.each(['', undefined])('omits GH_TOKEN when the token is %j', (githubToken) => {
-    const secrets = buildPayload({ ...input, githubToken }).files[2]!.content
-    expect(secrets).toBe("HAVEN_API_KEY='hk'\nHAVEN_MODEL='glm-5-3'\n")
+    expect(buildPayload({ ...input, githubToken }).files[1]!.content).toBe("HAVEN_API_KEY='hk'\n")
   })
 
-  it('builds the script of contracts section 3 with the commit', () => {
+  it('has no HAVEN_MODEL', () => {
+    const payload = buildPayload({ ...input, creator: '@ann:example.org', agent: 'reviewer' })
+    expect(JSON.stringify(payload)).not.toContain('HAVEN_MODEL')
+  })
+
+  it('builds the script of contracts section 4 with the commit', () => {
     expect(buildPayload(input).script).toBe(expectedScript(commit))
+  })
+
+  it('the script checks out the commit before provision.sh', () => {
+    const lines = buildPayload(input).script.split('\n')
+    const at = (text: string) => lines.findIndex((line) => line.includes(text))
+    const fetch = at(`git -C ~/fabrium-web-ui fetch --quiet origin ${commit}`)
+    const checkout = at(`checkout --quiet --detach ${commit}`)
+    const provision = at('provision.sh')
+    expect(fetch).toBeGreaterThan(-1)
+    expect(fetch).toBeLessThan(checkout)
+    expect(checkout).toBeLessThan(provision)
+    // As ubuntu, in a login shell: `~` is the home of ubuntu, not of root.
+    for (const i of [fetch, checkout]) expect(lines[i]).toMatch(/^as_ubuntu bash -lc 'git -C ~\//)
   })
 
   it('adds the creator to the secrets and a greeting step that cannot fail the setup', () => {
     const payload = buildPayload({ ...input, creator: '@ann:example.org' })
-    expect(payload.files[2]!.content).toBe(
-      "HAVEN_API_KEY='hk'\nHAVEN_MODEL='glm-5-3'\nGH_TOKEN='gh'\nFABRIUM_CREATOR='@ann:example.org'\n",
-    )
+    expect(payload.files[1]!.content).toBe("HAVEN_API_KEY='hk'\nGH_TOKEN='gh'\nFABRIUM_CREATOR='@ann:example.org'\n")
     expect(payload.script).toBe(expectedScript(commit, true))
+  })
+
+  it('without a creator, the script has no greeting', () => {
+    expect(buildPayload({ ...input, agent: 'reviewer' }).script).not.toContain('greet-creator.sh')
+  })
+
+  // It goes into a file that the VM sources in a shell.
+  it.each(['', 'Reviewer', '1abc', "x'; id", 'a'.repeat(33)])('refuses the agent name %j', (agent) => {
+    expect(() => buildPayload({ ...input, agent })).toThrow(/agent/)
   })
 
   it.each(['', 'ann', '@ann', '@Ann:example.org', "@ann:example.org'; id", '@ann:example.org\n'])(
@@ -102,7 +124,7 @@ describe('shellQuote', () => {
       const file = join(dir, 'secrets.env')
       writeFileSync(
         file,
-        buildPayload({ ...input, havenApiKey: value, githubToken: value }).files[2]!.content,
+        buildPayload({ ...input, havenApiKey: value, githubToken: value }).files[1]!.content,
       )
       return execFileSync('bash', ['-c', `set -a; . "$0"; set +a; printf %s "$${name}"`, file], {
         encoding: 'utf8',

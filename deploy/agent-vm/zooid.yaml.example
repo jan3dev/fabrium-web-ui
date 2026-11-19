@@ -1,5 +1,6 @@
-# Agent VM config, rendered by deploy/add-workstation.sh into ${ZOOID_HOME}/workstations/<workstation>/workforce/zooid.yaml
-# (copy that bundle to the VM; see deploy/README.md). The quotes keep the names strings in YAML.
+# Agent VM config of a VM made by hand, rendered by deploy/add-workstation.sh into ${ZOOID_HOME}/workstations/<workstation>/workforce/zooid.yaml
+# (copy that bundle to the VM; see deploy/README.md). On a VM of the web UI, fabrium-agent-sync writes zooid.yaml
+# as JSON from the control plane instead. The quotes keep the names strings in YAML.
 # zooid reads "${HOMESERVER_URL}" from the daemon environment (~/zooid/.env, ~/zooid/secrets.env).
 workstation: '${WORKSTATION}'
 # The agent is a process of the VM, with the access of the VM user (Docker, sudo).

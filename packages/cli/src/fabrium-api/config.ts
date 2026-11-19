@@ -6,6 +6,7 @@ export interface FabriumApiConfig {
   controlPlaneUrl: string
   /** The tenant API key. It never leaves the daemon. */
   controlPlaneKey: string
+  /** FABRIUM_HAVEN_MODEL: the model that the agent dialog selects first, when it is on the Haven list. */
   havenModel?: string
   /** Rooms of a new agent: `#alias`, `#alias:server`, or `!id:server`. */
   vmRooms: string[]
@@ -84,7 +85,7 @@ export function loadFabriumApiConfig(
     )
   }
 
-  // The model goes into the same secrets file as the Haven key: the VM script refuses the same values.
+  // Only the default of GET /models now; the old start check stays, so a refused value stays refused.
   const havenModel = env.FABRIUM_HAVEN_MODEL?.trim() || undefined
   const modelProblem = havenModel && secretProblem(havenModel, 'FABRIUM_HAVEN_MODEL')
   if (modelProblem) throw new Error(modelProblem)

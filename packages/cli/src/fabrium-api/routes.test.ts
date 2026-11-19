@@ -1,7 +1,5 @@
-import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CONTROL_PLANE_KEY, createTestApi, jsonResponse, stalledResponse } from './test-api.js'
+import { CONTROL_PLANE_KEY, createTestApi, fakeAgentStore, jsonResponse, stalledResponse } from './test-api.js'
 
 const VM_ID = 'i-0123456789abcdef0'
 const vm = (name: string, extra: Record<string, unknown> = {}) => ({
@@ -41,6 +39,36 @@ describe('access', () => {
     expect(api.controlPlane.requests).toEqual([])
   })
 
+  it('an agents-manager gets its role from /access', async () => {
+    api.fake.joinSpace('@ana:example.org', 40)
+    const res = await api.request('GET', '/access', { token: api.fake.openIdToken('@ana:example.org') })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ user_id: '@ana:example.org', role: 'agents-manager' })
+  })
+
+  it('an agents-manager gets 403 on every VM route', async () => {
+    api.fake.joinSpace('@ana:example.org', 69)
+    const token = api.fake.openIdToken('@ana:example.org')
+    // Bodies that the routes would accept: the refusal comes before any check of the request.
+    const create = { name: 'mike', agent: { mode: 'new', name: 'foxtrot' }, haven_api_key: 'hk-1' }
+    for (const [method, path, json] of [
+      ['GET', '/vms'],
+      ['POST', '/vms', create],
+      ['GET', '/instance-types'],
+      ['DELETE', '/vms/i-0a'],
+      ['POST', '/vms/i-0a/start'],
+      ['POST', '/vms/i-0a/stop'],
+      ['POST', '/vms/i-0a/reboot'],
+      ['PUT', '/vms/i-0a/auto-stop', { auto_stop_hours: 3 }],
+      ['POST', '/vms/i-0a/recreate', { haven_api_key: 'hk-1' }],
+    ] as [string, string, unknown?][]) {
+      const res = await api.request(method, path, { token, json })
+      expect(res.status, `${method} ${path}`).toBe(403)
+      expect(await res.json()).toEqual({ error: 'forbidden' })
+    }
+    expect(api.controlPlane.requests).toEqual([])
+  })
+
   it('exists only under /_fabrium/v1', async () => {
     expect((await api.app.request('/vms')).status).toBe(404)
     expect((await api.app.request('/_fabrium/v1/vms')).status).toBe(401)
@@ -48,14 +76,27 @@ describe('access', () => {
 })
 
 describe('GET /vms', () => {
-  it('adds agent_id from the bundle, and null without one', async () => {
-    await api.bundle('lima', 'echo')
-    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, [vm('lima'), vm('nobundle')]))
+  it('GET /vms lists the agents of each VM', async () => {
+    const store = fakeAgentStore(api.controlPlane)
+    const record = (id: string, name: string, onVm: string | null) =>
+      store.records.push({ id, name, owner: '@ann:example.org', description: '', model: 'glm-5-3', tag: null, project: null, vm: onVm, rooms: [] })
+    record('a2', 'tester', 'lima')
+    record('a1', 'reviewer', 'lima')
+    record('p1', 'draft', null)
+    // A replace: the old VM is shutting down, the new one is live. Only the live one lists the agents.
+    const old = vm('lima', { id: 'i-0000000000000old0', state: 'shutting-down' })
+    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, [vm('lima'), old, vm('kilo')]))
     const res = await api.request('GET', '/vms')
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual([
-      vm('lima', { agent_id: '@lima.echo:example.org' }),
-      vm('nobundle', { agent_id: null }),
+      vm('lima', {
+        agents: [
+          { id: 'a1', name: 'reviewer', agent_id: '@lima.reviewer:example.org' },
+          { id: 'a2', name: 'tester', agent_id: '@lima.tester:example.org' },
+        ],
+      }),
+      { ...old, agents: [] },
+      vm('kilo', { agents: [] }),
     ])
   })
 
@@ -65,6 +106,7 @@ describe('GET /vms', () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {}),
       vi.spyOn(console, 'error').mockImplementation(() => {}),
     ]
+    fakeAgentStore(api.controlPlane)
     api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, [vm('lima')]))
     const res = await api.request('GET', '/vms')
     expect(api.controlPlane.requests[0]?.authorization).toBe(`Bearer ${CONTROL_PLANE_KEY}`)
@@ -72,11 +114,17 @@ describe('GET /vms', () => {
     expect(JSON.stringify(logs.map((l) => l.mock.calls))).not.toContain(CONTROL_PLANE_KEY)
   })
 
-  it('answers 502 when the control plane sends something that is not a list', async () => {
-    api.controlPlane.on('GET', '/v1/vms', new Response('<html>', { status: 200 }))
-    const res = await api.request('GET', '/vms')
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: 'control plane sent an invalid response' })
+  it('answers 502 when the control plane sends something that is not a list of VMs', async () => {
+    for (const reply of [
+      new Response('<html>', { status: 200 }),
+      jsonResponse(200, [{ id: VM_ID, name: 'lima' }]),
+      jsonResponse(200, [{ name: 'lima', state: 'running' }]),
+    ]) {
+      api.controlPlane.on('GET', '/v1/vms', reply)
+      const res = await api.request('GET', '/vms')
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: 'control plane sent an invalid response' })
+    }
   })
 })
 
@@ -225,139 +273,5 @@ describe('proxy routes', () => {
   it('encodes the VM id in the upstream path', async () => {
     await api.request('POST', '/vms/a%2F..%2Fb/start')
     expect(api.controlPlane.requests.at(-1)?.path).toBe('/v1/vms/a%2F..%2Fb/start')
-  })
-})
-
-describe('GET /agents', () => {
-  it('lists every bundle sorted by workstation, with the free rule', async () => {
-    await api.bundle('c-echo', 'echo')
-    await api.bundle('a-free', 'amy')
-    await api.bundle('b-used', 'bob')
-    writeFileSync(
-      join(api.workstationsDir, 'c-echo', 'workforce', 'zooid.yaml'),
-      "agents:\n  echo:\n    acp: { command: sh, args: ['-c', 'true'] }\n",
-    )
-    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, [vm('b-used')]))
-    const res = await api.request('GET', '/agents')
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual([
-      { workstation: 'a-free', agent_id: '@a-free.amy:example.org', preset: 'opencode', free: true },
-      { workstation: 'b-used', agent_id: '@b-used.bob:example.org', preset: 'opencode', free: false },
-      { workstation: 'c-echo', agent_id: '@c-echo.echo:example.org', preset: null, free: false },
-    ])
-  })
-
-  it('passes a control plane failure through', async () => {
-    api.controlPlane.on('GET', '/v1/vms', jsonResponse(502, { error: 'ec2 failed' }))
-    const res = await api.request('GET', '/agents')
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: 'ec2 failed' })
-  })
-
-  const whoamiCalls = () =>
-    api.fake.calls.filter((c) => c.path.startsWith('/_matrix/client/v3/account/whoami')).length
-  const rosterReads = () =>
-    api.fake.calls.filter((c) => /\/state\/dev\.zooid\.workforce\//.test(c.path)).length
-  const frees = async () =>
-    ((await (await api.request('GET', '/agents')).json()) as { free: boolean }[]).map((a) => a.free)
-
-  it('lists an agent as not free when its admission stopped before tuwunel loaded the registration', async () => {
-    await api.bundle('half', 'amy', {}, { registered: false })
-    await api.bundle('whole', 'bob')
-    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
-    const res = await api.request('GET', '/agents')
-    expect(await res.json()).toEqual([
-      expect.objectContaining({ workstation: 'half', preset: 'opencode', free: false }),
-      expect.objectContaining({ workstation: 'whole', preset: 'opencode', free: true }),
-    ])
-  })
-
-  // tuwunel loaded the registration (whoami works), but a later step of the admission failed.
-  describe('an agent whose admission stopped after tuwunel loaded the registration', () => {
-    const HALF = '@half.amy:example.org'
-    it.each([
-      ['the agent is not in the workforce space', () => {}],
-      ['the agent is in the space and the roster has no entry for it', () => api.fake.joinSpace(HALF)],
-      [
-        'the agent is in the space and the roster entry is empty',
-        () => {
-          api.fake.joinSpace(HALF)
-          api.fake.setState(api.fake.spaceId, 'dev.zooid.workforce', 'half', {})
-        },
-      ],
-    ])('is not free when %s', async (_name, arrange) => {
-      await api.bundle('half', 'amy', {}, { admitted: false })
-      await api.bundle('whole', 'bob')
-      arrange()
-      api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
-      const res = await api.request('GET', '/agents')
-      expect(await res.json()).toEqual([
-        expect.objectContaining({ workstation: 'half', preset: 'opencode', free: false }),
-        expect.objectContaining({ workstation: 'whole', preset: 'opencode', free: true }),
-      ])
-    })
-
-    it('is not free when the agent left the workforce space after its admission', async () => {
-      await api.bundle('lima', 'amy')
-      api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
-      expect(await frees()).toEqual([true])
-      api.fake.setMember(api.fake.spaceId, '@lima.amy:example.org', 'leave')
-      expect(await frees()).toEqual([false])
-    })
-
-    it('is free once the admission is complete', async () => {
-      await api.bundle('half', 'amy', {}, { admitted: false })
-      api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
-      expect(await frees()).toEqual([false])
-      api.fake.joinSpace('@half.amy:example.org')
-      api.fake.setState(api.fake.spaceId, 'dev.zooid.workforce', 'half', {
-        version: 1,
-        agents: [{ user_id: '@half.amy:example.org', name: 'amy', rooms: [] }],
-      })
-      expect(await frees()).toEqual([true])
-    })
-  })
-
-  it('asks tuwunel only about the bundles that the VM API made', async () => {
-    await api.bundle('one', 'amy')
-    await api.bundle('two', 'bob')
-    await api.bundle('legacy', 'cat', {}, { legacy: true })
-    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
-    const before = whoamiCalls()
-    const rosterBefore = rosterReads()
-    const res = await api.request('GET', '/agents')
-    expect((await res.json()).map((a: { free: boolean }) => a.free)).toEqual([true, true, true])
-    expect(whoamiCalls() - before).toBe(2)
-    expect(rosterReads() - rosterBefore).toBe(2)
-  })
-
-  it('reads the space only for a bundle whose token tuwunel accepts', async () => {
-    await api.bundle('half', 'amy', {}, { registered: false })
-    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
-    const rosterBefore = rosterReads()
-    expect(await frees()).toEqual([false])
-    expect(rosterReads() - rosterBefore).toBe(0)
-  })
-
-  it('does not list an agent as free when tuwunel answers an error to whoami', async () => {
-    await api.bundle('lima', 'amy')
-    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
-    api.fake.failOnce('GET', /account\/whoami/, 500)
-    const res = await api.request('GET', '/agents')
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual([expect.objectContaining({ workstation: 'lima', free: false })])
-  })
-
-  it('does not list an agent as free when tuwunel answers an error to a read of the roster', async () => {
-    await api.bundle('lima', 'amy')
-    await api.bundle('legacy', 'cat', {}, { legacy: true })
-    api.controlPlane.on('GET', '/v1/vms', jsonResponse(200, []))
-    api.fake.failOnce('GET', /state\/dev\.zooid\.workforce/, 500)
-    const res = await api.request('GET', '/agents')
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual([
-      expect.objectContaining({ workstation: 'legacy', free: true }),
-      expect.objectContaining({ workstation: 'lima', free: false }),
-    ])
   })
 })

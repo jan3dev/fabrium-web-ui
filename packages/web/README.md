@@ -19,7 +19,7 @@ One build serves every deployment. Host-specific settings live in a same-origin 
 
 If the value is malformed, or the alias can't be resolved or joined, login still succeeds: the client opens the only joined space if there is exactly one, and Home otherwise.
 
-The client calls the Fabrium service API at `/_fabrium/v1/...` on its own origin, with a Matrix OpenID token. The reverse proxy sends `/_fabrium/*` to the zooid daemon. The daemon has no CORS, so the API must be on the origin of the web UI. The VM button in the workspace rail shows only when `GET /_fabrium/v1/access` answers `200`, which means the user is an admin or an owner and VM management is on.
+The client calls the Fabrium service API at `/_fabrium/v1/...` on its own origin, with a Matrix OpenID token. The reverse proxy sends `/_fabrium/*` to the zooid daemon. The daemon has no CORS, so the API must be on the origin of the web UI. `GET /_fabrium/v1/access` answers `200` with the role of the user (`agents-manager`, `vm-creator`, `admin`, or `owner`) when VM management is on. The VM button in the workspace rail needs `vm-creator` or more.
 
 ## Development
 

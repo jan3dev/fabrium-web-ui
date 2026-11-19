@@ -3,14 +3,17 @@
  * a scripted control plane, and a temporary ZOOID_HOME. Production code never
  * imports it.
  */
+import { randomBytes } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MatrixClient } from '@zooid/transport-matrix'
 import { Hono } from 'hono'
-import { MARKER, ensureBundle, type BundleSpec } from './bundle.js'
+import { createAdmission } from './admission.js'
+import type { AgentRecord } from './agent-records.js'
 import { createFakeMatrix } from './fake-matrix.js'
 import { mountFabriumApi, type FabriumApiDeps } from './index.js'
+import { HAVEN_PRICING_URL } from './models.js'
 
 export const CONTROL_PLANE_URL = 'https://control.example.org'
 export const CONTROL_PLANE_KEY = 'tenant-key-0123456789'
@@ -45,6 +48,68 @@ export const stalledResponse =
       }),
       { status, headers: { 'content-type': 'application/json' } },
     )
+
+/**
+ * Serves the agent routes of contracts section 1 from memory on the fake control plane, with its two 409 rules.
+ * A later `controlPlane.on` for the same route wins, so a test can still make one route fail.
+ */
+export function fakeAgentStore(controlPlane: ReturnType<typeof createTestApi>['controlPlane']): {
+  records: AgentRecord[]
+} {
+  const records: AgentRecord[] = []
+  const BY_ID = /^\/v1\/agents\/([^/]+)$/
+  const find = (req: ControlPlaneRequest) => {
+    const id = decodeURIComponent(BY_ID.exec(req.path.split('?')[0]!)?.[1] ?? '')
+    return records.find((r) => r.id === id)
+  }
+  // SQLite treats each NULL vm as distinct: two profiles can share a name.
+  const nameInUse = (name: string, vm: string | null, id?: string) =>
+    vm !== null && records.some((r) => r.vm === vm && r.name === name && r.id !== id)
+  type Body = Partial<AgentRecord>
+
+  controlPlane.on('GET', '/v1/agents', () => jsonResponse(200, records))
+  controlPlane.on('POST', '/v1/agents', (req) => {
+    const b = req.body as Body
+    const record: AgentRecord = {
+      id: randomBytes(16).toString('hex'),
+      name: b.name!,
+      owner: b.owner!,
+      description: b.description ?? '',
+      model: b.model!,
+      tag: b.tag || null,
+      project: b.project || null,
+      vm: b.vm ?? null,
+      rooms: b.rooms ?? [],
+    }
+    if (nameInUse(record.name, record.vm)) return jsonResponse(409, { error: 'name in use' })
+    records.push(record)
+    return jsonResponse(201, record)
+  })
+  controlPlane.on('PUT', BY_ID, (req) => {
+    const record = find(req)
+    if (!record) return jsonResponse(404, { error: 'not found' })
+    const b = req.body as Body
+    if (b.vm !== undefined) {
+      if (record.vm !== null) return jsonResponse(409, { error: 'vm already set' })
+      if (nameInUse(record.name, b.vm, record.id)) return jsonResponse(409, { error: 'name in use' })
+    }
+    Object.assign(
+      record,
+      Object.fromEntries(Object.entries(b).filter(([, value]) => value !== undefined)),
+      // "" clears tag and project.
+      b.tag === undefined ? {} : { tag: b.tag || null },
+      b.project === undefined ? {} : { project: b.project || null },
+    )
+    return jsonResponse(200, record)
+  })
+  controlPlane.on('DELETE', BY_ID, (req) => {
+    const record = find(req)
+    if (!record) return jsonResponse(404, { error: 'not found' })
+    records.splice(records.indexOf(record), 1)
+    return new Response(null, { status: 204 })
+  })
+  return { records }
+}
 
 export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
   const fake = createFakeMatrix()
@@ -83,12 +148,18 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
     if (!match) return jsonResponse(404, { error: 'not found' })
     return typeof match.reply === 'function' ? match.reply(req) : match.reply.clone()
   }
+  /** The public Haven model list. With `up` false it answers 503. No test reaches the network. */
+  const haven = { up: true, models: [{ id: 'glm-5-3' }] as unknown[] }
   const fetchAll = ((input: string, init?: RequestInit) =>
     input.startsWith(CONTROL_PLANE_URL)
       ? controlPlaneFetch(input, init)
-      : fake.fetch(input, init)) as typeof fetch
+      : input.startsWith(HAVEN_PRICING_URL)
+        ? Promise.resolve(haven.up ? jsonResponse(200, haven.models) : jsonResponse(503, {}))
+        : fake.fetch(input, init)) as typeof fetch
 
   const homeserver = 'http://tuwunel:8448'
+  /** The central appservice client, `@zooid`, without the timeout of the API. */
+  const client = new MatrixClient({ homeserver, asToken: fake.centralToken, fetch: fetchAll })
   const deps: FabriumApiDeps = {
     controlPlaneUrl: CONTROL_PLANE_URL,
     controlPlaneKey: CONTROL_PLANE_KEY,
@@ -98,7 +169,6 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
     homeserverUrl: 'https://chat.example.org',
     zooidHome,
     conn: { homeserver, fetch: fetchAll },
-    client: new MatrixClient({ homeserver, asToken: fake.centralToken, fetch: fetchAll }),
     asToken: fake.centralToken,
     asUserId: '@zooid:example.org',
     serverName: 'example.org',
@@ -107,7 +177,7 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
     ...overrides,
   }
   const app = new Hono()
-  mountFabriumApi(app, deps)
+  const { rebuildRosters } = mountFabriumApi(app, deps)
 
   fake.joinSpace(ADMIN, 90)
   fake.joinSpace(MEMBER, 0)
@@ -118,12 +188,15 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
     app,
     fake,
     deps,
+    client,
     controlPlane,
+    haven,
     zooidHome,
     workstationsDir,
     registrationsDir,
     adminToken,
     memberToken,
+    rebuildRosters,
     /** A request under /_fabrium/v1, as the admin unless `token` says otherwise (`null`: no header). */
     request(method: string, path: string, o: { token?: string | null; json?: unknown } = {}) {
       const token = o.token === undefined ? adminToken : o.token
@@ -136,44 +209,21 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
         body: o.json === undefined ? undefined : JSON.stringify(o.json),
       })
     },
-    /**
-     * A bundle for `workstation` as a finished admission leaves it. `registered: false` stops it before the
-     * registration loads, `admitted: false` before the join and the roster; `legacy: true` is add-workstation.sh's.
-     */
-    async bundle(
-      workstation: string,
-      agent: string,
-      spec: Partial<BundleSpec> = {},
-      opts: { registered?: boolean; admitted?: boolean; legacy?: boolean } = {},
-    ) {
-      const dir = join(workstationsDir, workstation)
-      const bundle = await ensureBundle(dir, {
-        workstation,
-        agent,
-        serverName: 'example.org',
-        homeserverUrl: 'https://chat.example.org',
-        space: 'dev',
-        rooms: ['#general'],
-        ...spec,
-      })
-      if (opts.legacy) rmSync(join(dir, MARKER))
-      if (opts.registered !== false) {
-        fake.registerAppservice({
-          id: workstation,
-          asToken: bundle.asToken,
-          senderLocalpart: workstation,
-          users: `@${workstation}\\..*:example\\.org`,
-        })
-        if (opts.admitted !== false) {
-          fake.joinSpace(`@${workstation}:example.org`)
-          fake.joinSpace(bundle.agentId)
-          fake.setState(fake.spaceId, 'dev.zooid.workforce', workstation, {
-            version: 1,
-            agents: [{ user_id: bundle.agentId, name: agent, rooms: [fake.generalRoomId] }],
-          })
-        }
-      }
-      return bundle
+    /** Admit `agent` on the VM name `vm`, as an assign does before it writes the record. */
+    admit(vm: string, agent: string) {
+      return createAdmission({
+        conn: deps.conn,
+        client,
+        asToken: deps.asToken,
+        asUserId: deps.asUserId,
+        serverName: deps.serverName,
+        homeserverUrl: deps.homeserverUrl,
+        workforceSpace: deps.workforceSpace,
+        getSpaceRoomId: deps.getSpaceRoomId,
+        rooms: deps.vmRooms,
+        workstationsDir,
+        registrationsDir,
+      }).admit({ workstation: vm, agent })
     },
     cleanup() {
       rmSync(zooidHome, { recursive: true, force: true })

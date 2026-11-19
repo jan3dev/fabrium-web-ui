@@ -1,13 +1,11 @@
 import { randomBytes } from 'node:crypto'
-import { chmod, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
-import { parse } from 'yaml'
+import { access, chmod, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { readTokens } from '../bootstrap/tokens.js'
 
 /**
- * A VM bundle is `workstations/<ws>/` on the central box: the `.env` and
- * `workforce/zooid.yaml` that the VM receives. The files follow
- * deploy/add-workstation.sh, so that script and the VM scripts read them alike.
+ * A VM bundle is `workstations/<vm>/` on the central box: the `.env` that the VM receives, and the marker.
+ * The `.env` follows deploy/add-workstation.sh, so that script and the VM scripts read it alike.
  */
 
 /** Marks a bundle admitted by the daemon: its registration lives in the tuwunel database. */
@@ -16,18 +14,14 @@ export const MARKER = '.runtime-registration'
 export const VM_NAME_RE = /^[a-z0-9][a-z0-9-]{0,62}$/
 export const AGENT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/
 
-export interface BundleSpec {
+/** The bundle of a VM name: one Matrix credential for every agent of the VM (contracts section 3). */
+export interface VmBundleSpec {
   workstation: string
-  agent: string
   serverName: string
   /** Public URL of the homeserver: the VM reaches it with this. */
   homeserverUrl: string
   /** Localpart of the workforce space. */
   space: string
-  /** Rooms of the agent: `#alias`, `#alias:server`, or `!id:server`. */
-  rooms: string[]
-  /** Recorded with the marker, so a retry of a failed admission still belongs to its creator. */
-  creator?: string
 }
 
 export interface Tokens {
@@ -35,23 +29,8 @@ export interface Tokens {
   hsToken: string
 }
 
-export interface BundleFiles {
+export interface VmBundle extends Tokens {
   env: string
-  yaml: string
-}
-
-export interface Bundle extends BundleFiles, Tokens {
-  agentId: string
-}
-
-export interface BundleSummary {
-  workstation: string
-  agent: string
-  agentId: string
-  /** `acp.preset` of the agent in zooid.yaml; null for another kind of agent, such as the echo fixture. */
-  preset: string | null
-  /** The Matrix user who created its first VM; absent for an older bundle. */
-  creator?: string
 }
 
 /** A room without a server part gets this server, as zooid.yaml does. */
@@ -59,12 +38,12 @@ export function withServer(room: string, serverName: string): string {
   return room.includes(':') ? room : `${room}:${serverName}`
 }
 
-export function renderEnv(spec: BundleSpec, tokens: Tokens): string {
+/** The `.env` of a bundle (contracts section 3). */
+export function renderEnv(spec: VmBundleSpec, tokens: Tokens): string {
   return [
     `# Agent VM environment for workstation ${spec.workstation}. Written by the zooid daemon (VM management API).`,
     '# Copy to the VM as ~/zooid/.env (mode 600). Format rules: deploy/README.md.',
     `WORKSTATION=${spec.workstation}`,
-    `AGENT_NAME=${spec.agent}`,
     `SERVER_NAME=${spec.serverName}`,
     `HOMESERVER_URL=${spec.homeserverUrl}`,
     `WORKFORCE_SPACE=${spec.space}`,
@@ -77,42 +56,8 @@ export function renderEnv(spec: BundleSpec, tokens: Tokens): string {
   ].join('\n')
 }
 
-/** `deploy/agent-vm/zooid.yaml.example` for preset opencode. `${...}` stays for zooid to read from the VM environment. */
-export function renderYaml(spec: BundleSpec): string {
-  const rooms = spec.rooms.map((room) => `'${withServer(room, spec.serverName)}'`).join(', ')
-  return [
-    '# Agent VM config, written by the zooid daemon (VM management API) into ${ZOOID_HOME}/workstations/<workstation>/workforce/zooid.yaml',
-    '# (delivered to the VM at first boot; see deploy/README.md). The quotes keep the names strings in YAML.',
-    '# zooid reads "${HOMESERVER_URL}" from the daemon environment (~/zooid/.env, ~/zooid/secrets.env).',
-    `workstation: '${spec.workstation}'`,
-    '# The agent is a process of the VM, with the access of the VM user (Docker, sudo).',
-    'runtime: local',
-    'transports:',
-    '  matrix:',
-    '    homeserver: "${HOMESERVER_URL}"',
-    '    # The VM reads with /sync and opens no port.',
-    '    mode: client',
-    `    sender_localpart: '${spec.workstation}'`,
-    `    user_namespace: '@${spec.workstation}\\..*:${spec.serverName}'   # host part: SERVER_NAME, dots not escaped`,
-    `    space: '${spec.space}'`,
-    'agents:',
-    '  # Persona and project are in the roster that the daemon publishes.',
-    '  # The rooms must stay equal to the rooms of the roster entry.',
-    `  '${spec.agent}':`,
-    "    acp: { preset: 'opencode' }",
-    `    matrix: { display_name: '${spec.agent}', rooms: [${rooms}], trigger: mention }`,
-    '',
-    '# Optional, not recommended: run the harness in a container to pin its version.',
-    '# Replace `runtime: local` above with `runtime: docker` and add this block.',
-    '# The agent then cannot use the VM directly or start other containers.',
-    '# container:',
-    '#   image: ghcr.io/zooid-ai/agent-claude-code@sha256:<digest>',
-    '',
-  ].join('\n')
-}
-
 /** `deploy/templates/registration-workstation.yaml`: the YAML that `!admin appservices register` takes. */
-export function renderRegistration(spec: BundleSpec, tokens: Tokens): string {
+export function renderRegistration(spec: VmBundleSpec, tokens: Tokens): string {
   // The namespace is a regex: escape the dots of the server name.
   const serverRe = spec.serverName.replaceAll('.', '\\.')
   return [
@@ -142,29 +87,20 @@ async function createIfMissing(path: string, content: string, mode: number): Pro
   }
 }
 
-const CREATOR_FILE = '.creator'
-
-/** Keeps the first creator of a workstation: a resume or a later VM does not change it. */
-export async function recordCreator(dir: string, userId: string): Promise<void> {
-  await createIfMissing(join(dir, CREATOR_FILE), `${userId}\n`, 0o600)
-}
+const markerText = (workstation: string) =>
+  `Admitted by the zooid daemon (VM management API). The tuwunel registration of '${workstation}' is in the tuwunel database, not in registrations/.\n` +
+  `Remove it with: !admin appservices unregister ${workstation}\n`
 
 /**
- * Create the bundle, or complete one that an earlier try left unfinished. Files
- * that exist stay as they are, so the tokens never change under a running VM.
+ * Create the bundle of a VM name, or complete one that an earlier try left unfinished: the marker and the
+ * `.env`. Files that exist stay as they are, so the tokens never change under a running VM.
  */
-export async function ensureBundle(dir: string, spec: BundleSpec): Promise<Bundle> {
-  await mkdir(join(dir, 'workforce'), { recursive: true, mode: 0o700 })
+export async function ensureVmBundle(dir: string, spec: VmBundleSpec): Promise<VmBundle> {
+  await mkdir(dir, { recursive: true, mode: 0o700 })
   await chmod(dirname(dir), 0o700)
   await chmod(dir, 0o700)
   // The marker comes first: a bundle that exists was made here, even after a crash.
-  await createIfMissing(
-    join(dir, MARKER),
-    `Admitted by the zooid daemon (VM management API). The tuwunel registration of '${spec.workstation}' is in the tuwunel database, not in registrations/.\n` +
-      `Remove it with: !admin appservices unregister ${spec.workstation}\n`,
-    0o600,
-  )
-  if (spec.creator) await recordCreator(dir, spec.creator)
+  await createIfMissing(join(dir, MARKER), markerText(spec.workstation), 0o600)
   const envPath = join(dir, '.env')
   let tokens = readTokens(envPath)
   if (!tokens) {
@@ -174,75 +110,19 @@ export async function ensureBundle(dir: string, spec: BundleSpec): Promise<Bundl
     }
     await writeFile(envPath, renderEnv(spec, tokens), { flag: 'wx', mode: 0o600 })
   }
-  const yamlPath = join(dir, 'workforce', 'zooid.yaml')
-  await createIfMissing(yamlPath, renderYaml(spec), 0o644)
-  return {
-    agentId: `@${spec.workstation}.${spec.agent}:${spec.serverName}`,
-    ...tokens,
-    env: await readFile(envPath, 'utf8'),
-    yaml: await readFile(yamlPath, 'utf8'),
-  }
+  return { ...tokens, env: await readFile(envPath, 'utf8') }
 }
 
-/** The last `KEY=value` line wins, as in the scripts (`tail -n 1`). */
-export function envVar(env: string, key: string): string | undefined {
-  let value: string | undefined
-  for (const match of env.matchAll(new RegExp(`^${key}=(.*)$`, 'gm'))) value = match[1]
-  return value || undefined
+const hasMarker = (dir: string) => access(join(dir, MARKER)).then(() => true, () => false)
+
+/** The `.env` of a bundle that the VM API made, or null. */
+export async function readBundleEnv(dir: string): Promise<string | null> {
+  if (!(await hasMarker(dir))) return null
+  return readFile(join(dir, '.env'), 'utf8').catch(() => null)
 }
 
-/** `AGENT_NAME` of the `.env` in `dir`, if there is one. */
-export async function bundleAgent(dir: string): Promise<string | undefined> {
-  try {
-    return envVar(await readFile(join(dir, '.env'), 'utf8'), 'AGENT_NAME')
-  } catch {
-    return undefined
-  }
-}
-
-function presetOf(yaml: string, agent: string): string | null {
-  try {
-    const doc = parse(yaml) as { agents?: Record<string, { acp?: { preset?: unknown } }> } | null
-    const preset = doc?.agents?.[agent]?.acp?.preset
-    return typeof preset === 'string' ? preset : null
-  } catch {
-    return null
-  }
-}
-
-/** Both files and the agent and server of the `.env` must be there; otherwise it is not a bundle. */
-export async function readBundle(
-  dir: string,
-): Promise<(BundleFiles & { summary: BundleSummary }) | null> {
-  let env: string
-  let yaml: string
-  try {
-    ;[env, yaml] = await Promise.all([
-      readFile(join(dir, '.env'), 'utf8'),
-      readFile(join(dir, 'workforce', 'zooid.yaml'), 'utf8'),
-    ])
-  } catch {
-    return null
-  }
-  const agent = envVar(env, 'AGENT_NAME')
-  const serverName = envVar(env, 'SERVER_NAME')
-  if (!agent || !serverName) return null
-  const workstation = basename(dir)
-  const creator = (await readFile(join(dir, CREATOR_FILE), 'utf8').catch(() => '')).trim()
-  return {
-    env,
-    yaml,
-    summary: {
-      workstation,
-      agent,
-      agentId: `@${envVar(env, 'WORKSTATION') ?? workstation}.${agent}:${serverName}`,
-      preset: presetOf(yaml, agent),
-      ...(creator ? { creator } : {}),
-    },
-  }
-}
-
-export async function listBundles(root: string): Promise<BundleSummary[]> {
+/** The VM names that have a bundle with the marker, sorted. */
+export async function listBundleNames(root: string): Promise<string[]> {
   let entries
   try {
     entries = await readdir(root, { withFileTypes: true })
@@ -250,10 +130,18 @@ export async function listBundles(root: string): Promise<BundleSummary[]> {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
     throw err
   }
-  const bundles = await Promise.all(
-    entries.filter((e) => e.isDirectory()).map((e) => readBundle(join(root, e.name))),
-  )
-  return bundles
-    .flatMap((b) => (b ? [b.summary] : []))
-    .sort((a, b) => (a.workstation < b.workstation ? -1 : a.workstation > b.workstation ? 1 : 0))
+  const names = entries.filter((e) => e.isDirectory() && VM_NAME_RE.test(e.name)).map((e) => e.name)
+  const marked = await Promise.all(names.map((name) => hasMarker(join(root, name))))
+  return names.filter((_, i) => marked[i]).sort()
+}
+
+export async function removeBundle(dir: string): Promise<void> {
+  await rm(dir, { recursive: true, force: true })
+}
+
+/** The last `KEY=value` line wins, as in the scripts (`tail -n 1`). */
+export function envVar(env: string, key: string): string | undefined {
+  let value: string | undefined
+  for (const match of env.matchAll(new RegExp(`^${key}=(.*)$`, 'gm'))) value = match[1]
+  return value || undefined
 }

@@ -34,6 +34,11 @@ turn with the service's binary and environment, configures git for GitHub, and
 restarts fabrium-agent. ZOOID_HOME defaults to \$HOME/zooid.
 Never prints secret values.
 
+On a VM of the web UI, fabrium-agent-sync writes zooid.yaml (as JSON) and the
+opencode.json of each agent: there the script needs no HAVEN_MODEL and writes no
+opencode.json. It runs the test turn as FABRIUM_AGENT, or as the first agent of
+zooid.yaml in sorted order when FABRIUM_AGENT is unset or no longer on the VM.
+
   -h, --help       show this help
 USAGE
 }
@@ -73,7 +78,21 @@ SECRETS_FILE="$ZOOID_HOME/secrets.env"
 [ -f "$YAML_FILE" ] || die "$YAML_FILE not found: copy the bundle from the central instance first"
 [ -f "$HOME/.config/systemd/user/fabrium-agent.service" ] ||
   die "fabrium-agent is not installed: run deploy/agent-vm/provision.sh first"
-AGENT_NAME="$(file_value "$ENV_FILE" AGENT_NAME)"
+# A VM of the web UI: fabrium-agent-sync writes zooid.yaml as JSON, and the files of each agent.
+MANAGED=0
+if jq -e 'type == "object"' "$YAML_FILE" >/dev/null 2>&1; then MANAGED=1; fi
+if [ "$MANAGED" -eq 1 ]; then
+  AGENT_NAME="${FABRIUM_AGENT:-}"
+  # The name goes into a path: the rule of the agent names.
+  [[ -z "$AGENT_NAME" || "$AGENT_NAME" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || die "FABRIUM_AGENT is not an agent name"
+  # The agent that the VM was created for can leave it before this runs: then the first one, as without it.
+  if [ -z "$AGENT_NAME" ] || [ ! -d "$ZOOID_HOME/workforce/agents/$AGENT_NAME" ]; then
+    AGENT_NAME="$(jq -r '.agents // {} | keys | first // empty' "$YAML_FILE")"
+  fi
+  [[ "$AGENT_NAME" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || die "the first agent of $YAML_FILE is not an agent name"
+else
+  AGENT_NAME="$(file_value "$ENV_FILE" AGENT_NAME)"
+fi
 WORKSTATION="$(file_value "$ENV_FILE" WORKSTATION)"
 SERVER_NAME="$(file_value "$ENV_FILE" SERVER_NAME)"
 for key in AGENT_NAME WORKSTATION SERVER_NAME; do
@@ -84,9 +103,10 @@ AGENT_DIR="$ZOOID_HOME/workforce/agents/$AGENT_NAME"
 [ -d "$AGENT_DIR" ] || die "$AGENT_DIR not found: run deploy/agent-vm/provision.sh first"
 
 # The central box chooses the harness: add-workstation.sh --preset writes it into the bundle.
-grep -Eq '^runtime: *local' "$YAML_FILE" ||
+# On a VM of the web UI, fabrium-agent-sync writes runtime local and preset opencode.
+[ "$MANAGED" -eq 1 ] || grep -Eq '^runtime: *local' "$YAML_FILE" ||
   die "$YAML_FILE does not use runtime: local; this script configures the opencode of this VM"
-if ! grep -Eq "preset: *[\"']?opencode[\"']?" "$YAML_FILE"; then
+if [ "$MANAGED" -eq 0 ] && ! grep -Eq "preset: *[\"']?opencode[\"']?" "$YAML_FILE"; then
   ROOM_ARGS="$(sed -n '/rooms: *\[/{s/.*rooms: *\[\([^]]*\)\].*/\1/;s/, */ --room /g;p;q;}' "$YAML_FILE" || true)"
   die "the bundle does not use preset opencode. On the central box, run:
     rm ~/zooid/workstations/$WORKSTATION/workforce/zooid.yaml
@@ -109,21 +129,28 @@ for key in $VARS; do
   esac
 done
 
-log "Reading the Haven model list"
-PRICING="$(curl -fsS --max-time 30 "$HAVEN_PRICING_URL")" || die "cannot read $HAVEN_PRICING_URL"
-# Skip models the list marks deprecated or without tool calling. Today it marks none: the test turn decides.
-MODELS="$(jq -r '.[] | select(.status != "deprecated" and (.capabilities // {}).tool_call != false) | .id' <<<"$PRICING")" ||
-  die "unexpected answer from $HAVEN_PRICING_URL"
-MODEL_LIST="$(tr '\n' ' ' <<<"$MODELS")"
-missing=""
-for key in HAVEN_API_KEY HAVEN_MODEL; do
-  [ -n "${!key}" ] || missing="$missing $key"
-done
-[ -z "$missing" ] ||
-  die "missing:$missing. Export it (a variable set without export does not reach this script)," \
-    "or add a KEY=value line to $SECRETS_FILE. Haven models now: $MODEL_LIST"
-grep -Fxq -- "$HAVEN_MODEL" <<<"$MODELS" ||
-  die "HAVEN_MODEL=$HAVEN_MODEL is not on the Haven model list, or the list marks it deprecated or without tool calling. Haven models now: $MODEL_LIST"
+if [ "$MANAGED" -eq 1 ]; then
+  # The model of each agent is in its opencode.json, from the control plane: zooid checked it on the list.
+  [ -n "$HAVEN_API_KEY" ] ||
+    die "missing: HAVEN_API_KEY. Export it (a variable set without export does not reach this script)," \
+      "or add a KEY=value line to $SECRETS_FILE."
+else
+  log "Reading the Haven model list"
+  PRICING="$(curl -fsS --max-time 30 "$HAVEN_PRICING_URL")" || die "cannot read $HAVEN_PRICING_URL"
+  # Skip models the list marks deprecated or without tool calling. Today it marks none: the test turn decides.
+  MODELS="$(jq -r '.[] | select(.status != "deprecated" and (.capabilities // {}).tool_call != false) | .id' <<<"$PRICING")" ||
+    die "unexpected answer from $HAVEN_PRICING_URL"
+  MODEL_LIST="$(tr '\n' ' ' <<<"$MODELS")"
+  missing=""
+  for key in HAVEN_API_KEY HAVEN_MODEL; do
+    [ -n "${!key}" ] || missing="$missing $key"
+  done
+  [ -z "$missing" ] ||
+    die "missing:$missing. Export it (a variable set without export does not reach this script)," \
+      "or add a KEY=value line to $SECRETS_FILE. Haven models now: $MODEL_LIST"
+  grep -Fxq -- "$HAVEN_MODEL" <<<"$MODELS" ||
+    die "HAVEN_MODEL=$HAVEN_MODEL is not on the Haven model list, or the list marks it deprecated or without tool calling. Haven models now: $MODEL_LIST"
+fi
 case "$HAVEN_API_KEY" in
   hvn1_*) ;;
   *) warn "HAVEN_API_KEY does not start with hvn1_: check the key" ;;
@@ -162,28 +189,35 @@ done
 
 # --- opencode.json --------------------------------------------------------------
 # This script owns model and provider.haven; other keys stay. deploy/README.md explains the limits.
+# On a VM of the web UI, fabrium-agent-sync writes it with the same program.
 OPENCODE_JSON="$AGENT_DIR/opencode.json"
-CURRENT='{}'
-if [ -f "$OPENCODE_JSON" ]; then
-  CURRENT="$(jq -c 'if type == "object" then . else error("not an object") end' "$OPENCODE_JSON" 2>/dev/null)" ||
-    die "$OPENCODE_JSON is not a JSON object: fix it or remove it"
-fi
-NEW="$(jq --arg model "$HAVEN_MODEL" --arg npm "$HAVEN_PROVIDER_NPM" '
-  .["$schema"] = "https://opencode.ai/config.json"
-  | .model = "haven/" + $model
-  | .provider.haven = {
-      npm: $npm,
-      name: "Haven",
-      options: {apiKey: "{env:HAVEN_API_KEY}"},
-      models: {($model): {name: ($model + " (Haven)"), tool_call: true, limit: {context: 64000, output: 16384}}}
-    }
-  | .permission.webfetch //= "allow"' <<<"$CURRENT")"
-if [ "$(jq -cS . <<<"$NEW")" = "$(jq -cS . <<<"$CURRENT")" ]; then
-  log "$OPENCODE_JSON is up to date"
+if [ "$MANAGED" -eq 1 ]; then
+  MODEL="$(jq -r '.model // empty' "$OPENCODE_JSON" 2>/dev/null || true)"
+  [ -n "$MODEL" ] || die "$OPENCODE_JSON has no model: fabrium-agent-sync writes it, run sudo fabrium-agent-sync"
 else
-  printf '%s\n' "$NEW" >"$OPENCODE_JSON.tmp"
-  mv -f "$OPENCODE_JSON.tmp" "$OPENCODE_JSON"
-  log "wrote $OPENCODE_JSON: model haven/$HAVEN_MODEL"
+  MODEL="haven/$HAVEN_MODEL"
+  CURRENT='{}'
+  if [ -f "$OPENCODE_JSON" ]; then
+    CURRENT="$(jq -c 'if type == "object" then . else error("not an object") end' "$OPENCODE_JSON" 2>/dev/null)" ||
+      die "$OPENCODE_JSON is not a JSON object: fix it or remove it"
+  fi
+  NEW="$(jq --arg model "$HAVEN_MODEL" --arg npm "$HAVEN_PROVIDER_NPM" '
+    .["$schema"] = "https://opencode.ai/config.json"
+    | .model = "haven/" + $model
+    | .provider.haven = {
+        npm: $npm,
+        name: "Haven",
+        options: {apiKey: "{env:HAVEN_API_KEY}"},
+        models: {($model): {name: ($model + " (Haven)"), tool_call: true, limit: {context: 64000, output: 16384}}}
+      }
+    | .permission.webfetch //= "allow"' <<<"$CURRENT")"
+  if [ "$(jq -cS . <<<"$NEW")" = "$(jq -cS . <<<"$CURRENT")" ]; then
+    log "$OPENCODE_JSON is up to date"
+  else
+    printf '%s\n' "$NEW" >"$OPENCODE_JSON.tmp"
+    mv -f "$OPENCODE_JSON.tmp" "$OPENCODE_JSON"
+    log "wrote $OPENCODE_JSON: model haven/$HAVEN_MODEL"
+  fi
 fi
 
 # --- Test turn -------------------------------------------------------------------
@@ -209,10 +243,10 @@ OUT="$(systemd-run --user --quiet --wait --pipe --collect \
 rm -f "$TEST_FILE"
 if [ "$rc" -ne 0 ] || ! grep -Fq -- "$NONCE" <<<"$OUT"; then
   printf '%s\n' "$OUT" | tail -n 30 >&2
-  die "the test turn failed (exit $rc): check HAVEN_API_KEY, the Haven balance and HAVEN_MODEL in the output above." \
+  die "the test turn failed (exit $rc): check HAVEN_API_KEY, the Haven balance and the model ($MODEL) in the output above." \
     "$SECRETS_FILE already holds the new values; fabrium-agent keeps the old ones until it restarts"
 fi
-log "opencode answered on Haven with haven/$HAVEN_MODEL and used a tool"
+log "opencode answered on Haven with $MODEL and used a tool"
 
 # --- GitHub ----------------------------------------------------------------------
 if [ -z "$GH_TOKEN" ]; then
@@ -260,7 +294,7 @@ fi
 
 cat <<EOF_NEXT
 
-AGENT READY: $AGENT_ID runs opencode with haven/$HAVEN_MODEL.
+AGENT READY: $AGENT_ID runs opencode with $MODEL.
 
 NEXT STEPS
   1. Mention $AGENT_ID in one of its rooms, and approve its requests.
