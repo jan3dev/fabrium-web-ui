@@ -544,15 +544,15 @@ The role is the power level in the workforce space:
 | Role | Level | Agents | VMs |
 |---|---|---|---|
 | Owner, admin | 100 (or a room creator from room version 12), 90 to 99 | Every agent. | Every VM of the instance. |
-| VM creator | 70 to 89 | Their agents, the agents on the VMs that they created, and every agent without a live VM. | Only the VMs that they created. Any other VM answers `404`. |
-| Agents manager | 40 to 69 | Their agents. | No VM page; the VM routes answer `403`. |
+| VM creator | 70 to 89 | Their agents, every project agent, the agents on the VMs that they manage, and every agent without a live VM. | The VMs that they created, and every project VM. Any other VM answers `404`. |
+| Agents manager | 40 to 69 | Their agents, and every project agent. | No VM page; the VM routes answer `403`. |
 | Below 40 | | The API answers `403`. | |
 
 Give a role by setting its power level (for example 40 or 70) in the workforce space from a Matrix client: the
 web UI does not edit the levels of that space, and its room member lists show such a level as `Custom (70)`. The
-control plane keeps the creator of each VM; a VM from before that has no creator, so only admins and owners
-manage it. The daemon decides who may do what, and gives each agent the actions that the caller may do: the web
-holds no rule.
+control plane keeps the creator of each VM; a personal VM from before that has no creator, so only admins and
+owners manage it. The daemon decides who may do what, and gives each agent and each VM the actions that the
+caller may do: the web holds no rule. [Projects](#projects) say what changes for a project agent or VM.
 
 The VM page shows the owner of each VM next to its agents, and an **Auto-stop [N] hs Set** control before the
 actions: it changes the hours of a running or stopped VM, and the VM reads them on its next check (within 5
@@ -592,6 +592,37 @@ A setting that is wrong (a key file that cannot be read, is empty, or holds more
 room; a Haven model with a line break, a backslash, or a leading quote) stops the daemon at start with a message that names the variable.
 The message never holds the key.
 
+### Projects
+
+A project holds agents and VMs of the team, not of one member. A project agent or VM has no personal owner: the
+role decides who manages it. Every role changes a project agent, and every VM creator manages a project VM. In
+chat, a personal agent answers only its owner, and a project agent answers every member of its rooms (see
+[the agent sync](#the-agent-sync)). The control plane keeps the projects.
+
+Only an admin or an owner creates, renames, and deletes a project, takes an agent or a VM out of a project, or
+moves it to another project. The owner of a personal agent or VM can put it into a project. An agent or a VM
+that leaves a project gets an owner again, who must be a person.
+
+A project agent runs only on a project VM. The daemon answers `409` to each request that would break the rule:
+
+| Request | Refused when |
+|---|---|
+| Assign an agent to a VM | The agent is a project agent and the VM is personal. |
+| Create an agent on a VM, in a project | The VM is personal. |
+| Put an agent into a project | The agent has a live VM and that VM is personal. |
+| Create a personal VM | An agent of that VM name is a project agent. |
+| Take a VM out of a project | An agent of that VM name is a project agent. |
+
+So for a personal agent on a personal VM, put the VM into the project first, then the agent.
+
+Every member with a role can put an agent on a project VM and write its instructions, and the agent runs with the
+credentials of the VM. Make the Haven API key and the GitHub token of a project VM for the project, not for one
+person.
+
+A project can be deleted when no agent and no VM has it. The control plane also counts the registry row of a VM
+that was terminated outside it, which the VM list does not show. So a delete can answer `409` while the web shows
+the project as not in use.
+
 ### Make `@zooid` a tuwunel admin (once)
 
 The daemon registers the appservice of each new VM name at run time, so tuwunel does not restart. It sends
@@ -623,10 +654,11 @@ The daemon relies on these tuwunel v1.9.3 behaviors (source: `https://github.com
 
 | Item | Where |
 |---|---|
-| The record of an agent: name, owner, description, model, tag, project, VM name, rooms | the control plane |
+| The record of an agent: name, owner, description, model, tag, project ID, VM name, rooms | the control plane |
+| The projects: ID and name, and the project ID of each VM | the control plane |
 | The Matrix credential of a VM name, for every agent of the VM | this box, `workstations/<vm>/`: `.env` with the VM tokens, and the marker `.runtime-registration`. It names no agent |
 | The registration of a VM name | the tuwunel database, not `data/matrix/config/registrations/` |
-| The roster entry of a VM name | built by this box from the records, after each write to an agent with a VM and for every VM name at start. The VM publishes none |
+| The roster entry of a VM name | built by this box from the records, after each write to an agent with a VM, after the rename of a project of one of its agents, and for every VM name at start. The `project` of an agent is the name of its project, absent for a personal agent. The VM publishes none |
 | `zooid.yaml`, `AGENTS.md`, and `opencode.json` on the VM | written by [the agent sync](#the-agent-sync) from the records |
 
 The agent of a VM is `@<vm>.<name>:SERVER_NAME`. An agent name must be free on its VM only: two VMs can each
@@ -698,27 +730,37 @@ agents of the VM from the control plane with the VM token (`/etc/fabrium/vm-toke
 
 | File | Content |
 |---|---|
-| `zooid.yaml` | JSON, which is valid YAML: the values of `~/zooid/.env`, and one block per agent with preset `opencode`, its rooms, and the mention trigger |
+| `zooid.yaml` | JSON, which is valid YAML: the values of `~/zooid/.env`, and one block per agent with preset `opencode`, its rooms, the mention trigger, and `matrix.senders` when the control plane gives one |
 | `agents/<name>/AGENTS.md` | The description of the agent: its instructions |
 | `agents/<name>/opencode.json` | The model of the agent, as `configure-agent.sh` writes it. Other keys stay |
 
 Nothing else writes these files, so an edit of them on the VM is lost at the next change. The sync removes the
 directory of an agent that is no longer in the list. When a file changed, it restarts `fabrium-agent` (a stopped
-service stays stopped): every agent of the VM stops for a few seconds, and a turn in progress is lost. A change of
-the tag, the project, or the owner changes no file and restarts nothing.
+service stays stopped): every agent of the VM stops for a few seconds, and a turn in progress is lost. When the
+restart fails, the next run tries it again, also when that run writes nothing; until then the agents run with the
+earlier files.
+
+An agent that the control plane gives a `senders` list gets `matrix.senders` in `zooid.yaml`: it answers only
+those users, and a cron or webhook trigger no longer reaches it. The control plane gives a personal agent the
+list of its owner, and a project agent none. So a change of the owner or the project of an agent changes
+`zooid.yaml` and restarts `fabrium-agent`, on a VM that was created after the chat filter: an older VM does not
+read `senders`. A change of the tag changes no file and restarts nothing.
 
 When the request fails, the answer is not a list of agents, or the list is empty, it keeps every file. It skips an
-agent whose name breaks `^[a-z][a-z0-9-]{0,31}$`, or whose room is not a `#alias` or a `!id` without spaces,
-quotes, commas, or backslashes. When it skips every agent, it keeps every file.
+agent whose name breaks `^[a-z][a-z0-9-]{0,31}$`, whose room is not a `#alias` or a `!id` without spaces,
+quotes, commas, or backslashes, or whose `senders` value breaks the rule of the contracts. When it skips every
+agent, it keeps every file. When it skips every agent and one of them has a `senders` value, it also stops
+`fabrium-agent`, because the earlier files can have no filter or the filter of an earlier owner. The next run with a
+list to apply starts it again.
 
 | Option or variable | Use |
 |---|---|
 | `--dry-run` | Prints what it would write, remove, and restart. Changes nothing |
 | `--require` | Exits `1` when it has no agent list to apply. `provision.sh` runs the first sync with it |
-| `FABRIUM_AGENT_SYNC_DIR=DIR` | A prefix of `/etc/fabrium` and `/home/ubuntu`, for tests: no user switch and no restart |
+| `FABRIUM_AGENT_SYNC_DIR=DIR` | A prefix of `/etc/fabrium` and `/home/ubuntu`, for tests: no user switch, and `systemctl` only when a unit file of `fabrium-agent` is under `DIR` |
 
 The output has one line for each change: `write: <path>`, `remove: <path>`, or `skip: <name>: <reason>`, then
-`restart: fabrium-agent` or `no change`. On a VM: `sudo fabrium-agent-sync --dry-run`, and
+`restart: fabrium-agent`, `stop: fabrium-agent`, or `no change`. On a VM: `sudo fabrium-agent-sync --dry-run`, and
 `journalctl -u fabrium-agent-sync`.
 
 ### Secrets and names
