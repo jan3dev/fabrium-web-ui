@@ -14,6 +14,9 @@ const vm = (name: string, extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 
+/** The three fields of the VM view, for an admin and a personal VM. */
+const viewed = (v: Record<string, unknown>) => ({ ...v, project_id: null, project: null, can: { set_project: true } })
+
 let api: ReturnType<typeof createTestApi>
 beforeEach(() => {
   api = createTestApi()
@@ -89,14 +92,15 @@ describe('GET /vms', () => {
     const res = await api.request('GET', '/vms')
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual([
-      vm('lima', {
+      {
+        ...viewed(vm('lima')),
         agents: [
           { id: 'a1', name: 'reviewer', agent_id: '@lima.reviewer:example.org' },
           { id: 'a2', name: 'tester', agent_id: '@lima.tester:example.org' },
         ],
-      }),
-      { ...old, agents: [] },
-      vm('kilo', { agents: [] }),
+      },
+      { ...viewed(old), agents: [] },
+      { ...viewed(vm('kilo')), agents: [] },
     ])
   })
 
@@ -235,7 +239,7 @@ describe('proxy routes', () => {
     api.controlPlane.on('POST', `/v1/vms/${VM_ID}/${action}`, jsonResponse(202, vm('lima')))
     const res = await api.request('POST', `/vms/${VM_ID}/${action}`)
     expect(res.status).toBe(202)
-    expect(await res.json()).toEqual(vm('lima'))
+    expect(await res.json()).toEqual(viewed(vm('lima')))
     expect(api.controlPlane.requests.at(-1)).toMatchObject({
       method: 'POST',
       path: `/v1/vms/${VM_ID}/${action}`,

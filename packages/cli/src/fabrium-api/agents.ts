@@ -121,7 +121,7 @@ const NO_CAN = {
 const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
 /** The name of the project, or null when there is none or no project has the ID. */
-const projectName = (projects: readonly Project[], id: string | null | undefined): string | null =>
+export const projectName = (projects: readonly Project[], id: string | null | undefined): string | null =>
   id == null ? null : (projects.find((p) => p.id === id)?.name ?? null)
 
 function view(ctx: AgentContext, world: World & { projects: readonly Project[] }, r: AgentRecord) {

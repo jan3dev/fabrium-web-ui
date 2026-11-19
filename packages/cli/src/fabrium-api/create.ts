@@ -8,6 +8,7 @@ import { describeFailure, relay } from './control-plane.js'
 import { ApiError } from './errors.js'
 import { buildPayload, isStrictUserId, secretProblem } from './payload.js'
 import { sees } from './policy.js'
+import { relayVm, type VmDecorator } from './vm-projects.js'
 import type { Vm } from './vms.js'
 
 /** The body of `POST /vms` (contracts section 2). */
@@ -172,18 +173,20 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
 
 /**
  * `POST /vms/:id/recreate`: the same bundle `.env` with new credentials. No creator and no agent, so the new
- * VM does not greet again. The answer of the control plane passes on as it is.
+ * VM does not greet again. The answer of the control plane passes on with the fields of the VM view.
  */
 export async function recreateVm(
   deps: CreateDeps,
   vm: Vm,
   creds: { havenApiKey: string; githubToken?: string },
+  decorate: VmDecorator,
 ): Promise<Response> {
   // The name comes from the control plane list: check it before it reaches a path.
   const env = VM_NAME_RE.test(vm.name) ? await readBundleEnv(join(deps.workstationsDir, vm.name)) : null
   if (env === null) throw new ApiError(409, { error: 'the vm has no bundle' })
   const payload = buildPayload({ env, ...creds, commit: deps.commit })
-  return relay(
+  return relayVm(
     await deps.controlPlane.request('POST', `/v1/vms/${encodeURIComponent(vm.id)}/recreate`, { bootstrap: payload }),
+    decorate,
   )
 }

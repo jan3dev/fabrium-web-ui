@@ -492,14 +492,21 @@ describe('POST /vms/:id/recreate', () => {
       homeserverUrl: 'https://chat.example.org',
       space: 'dev',
     })
-    api.controlPlane.on('POST', `/v1/vms/${VM.id}/recreate`, jsonResponse(201, { ...VM, id: 'i-0fedcba9876543210' }))
+    api.controlPlane.on(
+      'POST',
+      `/v1/vms/${VM.id}/recreate`,
+      jsonResponse(201, { ...VM, id: 'i-0fedcba9876543210', creator: LUIS }),
+    )
   }
 
   it('replaces a VM with new credentials', async () => {
     setup()
     await running()
     const res = await recreate({ haven_api_key: 'hk-new' }, as(LUIS))
-    expect([res.status, await res.json()]).toEqual([201, { ...VM, id: 'i-0fedcba9876543210' }])
+    expect([res.status, await res.json()]).toEqual([
+      201,
+      { ...VM, id: 'i-0fedcba9876543210', creator: LUIS, project_id: null, project: null, can: { set_project: true } },
+    ])
     const sent = upstream()?.body as { bootstrap: { files: { path: string; content: string }[]; script: string } }
     expect(Object.keys(sent)).toEqual(['bootstrap'])
     expect(sent.bootstrap.files.map((f) => [f.path, f.content])).toEqual([
