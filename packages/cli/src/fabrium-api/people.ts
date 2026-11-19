@@ -2,9 +2,10 @@
  * The person rule (contracts section 2, "Person"): a joined member of the workforce space, on this server, who is
  * not an agent. One read of the space state gives the members, their names, and every roster.
  */
+import { readdir } from 'node:fs/promises'
 import { fetchRecords } from './agent-records.js'
 import type { AgentContext } from './agents.js'
-import { listBundleNames } from './bundle.js'
+import { VM_NAME_RE } from './bundle.js'
 import { describeFailure } from './control-plane.js'
 import { ApiError } from './errors.js'
 
@@ -21,6 +22,18 @@ const onServer = (ctx: AgentContext, userId: string) =>
 
 const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
+/**
+ * Every bundle under `workstations/`. Unlike `listBundleNames`, also a bundle without the marker of the VM API:
+ * deploy/add-workstation.sh makes one, and joins its sender to the space.
+ */
+async function workstationNames(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT') return []
+    throw err
+  })
+  return entries.filter((e) => e.isDirectory() && VM_NAME_RE.test(e.name)).map((e) => e.name)
+}
+
 /** The joined members of this server with their names, and those of them that are not people. */
 async function readSpace(ctx: AgentContext): Promise<{ members: Map<string, string>; agents: Set<string> }> {
   const spaceId = ctx.getSpaceRoomId()
@@ -28,7 +41,7 @@ async function readSpace(ctx: AgentContext): Promise<{ members: Map<string, stri
   const [state, records, bundles] = await Promise.all([
     ctx.client.fetchRoomState(spaceId, ctx.asUserId),
     fetchRecords(ctx.controlPlane),
-    listBundleNames(ctx.workstationsDir),
+    workstationNames(ctx.workstationsDir),
   ]).catch((err: unknown) => {
     // A control plane failure is a 502 of its own already.
     if (err instanceof ApiError) throw err

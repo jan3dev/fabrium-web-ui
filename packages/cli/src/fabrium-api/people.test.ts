@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs'
+import { join as joinPath } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRecord } from './agent-records.js'
 import type { AgentContext } from './agents.js'
@@ -27,6 +29,9 @@ beforeEach(async () => {
   // The bundles lima and kilo, with @lima, @lima.scout, @kilo, and @kilo.draft joined. No record has vm kilo.
   await api.admit('lima', 'scout')
   await api.admit('kilo', 'draft')
+  // A workstation of deploy/add-workstation.sh: its bundle has no marker of the VM API.
+  mkdirSync(joinPath(api.workstationsDir, 'echo'), { recursive: true })
+  join('@echo:example.org')
   // A record of the VM name tango, which has no bundle.
   store.records.push({
     id: 'r1',
@@ -91,6 +96,7 @@ describe('checkPerson', () => {
     '@lima:example.org',
     '@lima.scout:example.org',
     '@kilo.draft:example.org',
+    '@echo:example.org',
     '@tango:example.org',
     '@rost:example.org',
     '@s-meow:example.org',
