@@ -21,6 +21,8 @@ If the value is malformed, or the alias can't be resolved or joined, login still
 
 The client calls the Fabrium service API at `/_fabrium/v1/...` on its own origin, with a Matrix OpenID token. The reverse proxy sends `/_fabrium/*` to the zooid daemon. The daemon has no CORS, so the API must be on the origin of the web UI. `GET /_fabrium/v1/access` answers `200` with the role of the user (`agents-manager`, `vm-creator`, `admin`, or `owner`) when VM management is on. The Agents button in the workspace rail shows on that `200`, so for each of the four roles, and opens `/agents`. The VM button needs `vm-creator` or more, and opens `/vm`. A direct visit to either page without the role shows a no-access notice.
 
+`GET /_fabrium/v1/projects` answers for each of the four roles. Its `can.manage` (an admin or an owner) turns on **Manage projects** on the Agents page and "Create project" in the Project field. The web needs the zooid release that serves the project routes: an older daemon answers `404`, and the Project field then shows "Could not load the projects."
+
 ## Development
 
 From the repo root:
