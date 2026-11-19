@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 import type { AxeResults } from "axe-core";
 import {
   INSTANCE_AGENT,
+  INSTANCE_TYPES,
   PAYMENTS,
   PROFILE,
   PROJECTS,
@@ -157,6 +158,9 @@ for (const theme of ["light", "dark"] as const) {
     );
     await page.route("**/_fabrium/v1/models", (route) =>
       route.fulfill({ json: { models: [{ id: "glm-5-3" }], default: "glm-5-3" } }),
+    );
+    await page.route("**/_fabrium/v1/instance-types", (route) =>
+      route.fulfill({ json: INSTANCE_TYPES }),
     );
     await page.route("**/_fabrium/v1/projects", (route) =>
       route.fulfill({ json: { projects: PROJECTS, can: { manage: true } } }),
