@@ -31,7 +31,7 @@ export const STATE_TONE: Record<VmState, "success" | "neutral" | "warning"> = {
   "shutting-down": "warning",
 };
 
-const HEADERS = ["Name", "Agents", "Owner", "Type", "State", "IP", "Launched"];
+const HEADERS = ["Name", "Agents", "Owner", "Project", "Type", "State", "IP", "Launched"];
 
 function launchedLabel(iso: string): string {
   const ts = Date.parse(iso);
@@ -217,7 +217,7 @@ function VmTable({
 }) {
   return (
     <div className="overflow-x-auto rounded-card border border-surface-border-primary">
-      <table className="w-full min-w-[68rem] border-collapse text-left">
+      <table className="w-full min-w-[76rem] border-collapse text-left">
         <thead className="bg-surface-secondary">
           <tr>
             {HEADERS.map((header) => (
@@ -281,7 +281,10 @@ function VmRow({
   const expired = vm.setup === "expired";
   const actions = useRef<HTMLTableCellElement>(null);
   return (
-    <tr className="border-t border-surface-border-primary align-top first:border-t-0">
+    <tr
+      data-vm-id={vm.id}
+      className="border-t border-surface-border-primary align-top first:border-t-0"
+    >
       <th
         scope="row"
         className="px-4 py-3 text-left text-body2 font-medium text-text-primary"
@@ -301,9 +304,11 @@ function VmRow({
           </ul>
         )}
       </td>
+      {/* The stored creator of a project VM is data only. */}
       <td className="px-4 py-3 text-body2 break-all text-text-secondary">
-        {vm.creator ?? "Unknown"}
+        {vm.project_id !== null ? "Project" : (vm.creator ?? "Unknown")}
       </td>
+      <td className="px-4 py-3 text-body2 break-all text-text-secondary">{vm.project}</td>
       <td className="px-4 py-3">
         <span className="flex flex-wrap items-center gap-2 text-body2 text-text-primary">
           {vm.instance_type}
