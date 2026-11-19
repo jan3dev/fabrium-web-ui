@@ -12,7 +12,7 @@ export function projectNameError(name: string): string | null {
     : SERVER_TEXT["invalid project name"];
 }
 
-const lowerAscii = (s: string) => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+export const lowerAscii = (s: string) => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
 
 /** Two names are equal when they differ only in the case of ASCII letters. */
 export const sameProjectName = (a: string, b: string) => lowerAscii(a) === lowerAscii(b);
