@@ -203,7 +203,6 @@ export interface AgentInput {
   description?: string;
   model?: string;
   tag?: string;
-  project?: string;
   project_id?: string;
   owner?: string;
   vm?: string;

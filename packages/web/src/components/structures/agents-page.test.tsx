@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeRoom, mkMatrixEvent } from "../../../test/factories";
 import { mswServer } from "../../../test/setup";
 import { signInForVmApi } from "../../../test/vm-api";
@@ -9,13 +9,15 @@ import {
   CAN_NOTHING,
   INSTANCE_AGENT,
   INSTANCE_TYPES,
+  PAYMENTS,
   PROFILE,
+  PROJECTS,
   VM_GONE,
   makeAgent,
 } from "../../../test/vm-fixtures";
 import { MatrixClientPeg } from "../../client/peg";
 import { WorkforceSpaceContext } from "../../hooks/use-workforce";
-import type { Agent, AgentList } from "../../model/types";
+import type { Agent, AgentList, ProjectList } from "../../model/types";
 import { AgentsRoute } from "./agents-page";
 
 const API = "/_fabrium/v1";
@@ -80,7 +82,23 @@ const buttonsIn = (row: HTMLElement) =>
     .queryAllByRole("button")
     .map((b) => b.textContent);
 
+/** `GET /projects`, for every test: it answers `projects.list` and counts its requests apart. */
+const projects = { list: null as unknown as ProjectList, gets: 0 };
+beforeEach(() => {
+  projects.list = { projects: PROJECTS, can: { manage: true } };
+  projects.gets = 0;
+  mswServer.use(
+    http.get(`${API}/projects`, () => {
+      projects.gets++;
+      return HttpResponse.json(projects.list);
+    }),
+  );
+});
+
 afterEach(() => MatrixClientPeg.reset());
+
+const projectField = (dialog: HTMLElement) =>
+  within(dialog).getByRole("combobox", { name: "Project" });
 
 describe("<AgentsRoute>", () => {
   it("shows a row for an agent on a VM", async () => {
@@ -329,6 +347,92 @@ describe("<AgentsRoute>", () => {
     await user.click(within(dialog).getByRole("button", { name: "Delete agent and VM" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(api.calls.slice(3)).toEqual([`DELETE ${sibling.id}?vm=1`, "GET /agents"]);
+  });
+
+  it("creates a project from the selector and sends its id", async () => {
+    const api = serve([makeAgent()]);
+    mswServer.use(
+      http.post(`${API}/projects`, async ({ request }) => {
+        api.calls.push(`POST /projects ${await request.text()}`);
+        return HttpResponse.json({ id: "p9", name: "Billing", in_use: false }, { status: 201 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("rowheader", { name: /^echo/ });
+
+    await user.click(screen.getByRole("button", { name: "New agent" }));
+    const dialog = await screen.findByRole("dialog", { name: "New agent" });
+    await waitFor(() => expect(within(dialog).getByLabelText("Model")).toHaveValue("glm-5-3"));
+    await user.type(within(dialog).getByLabelText("Name"), "nova");
+    await waitFor(() => expect(projectField(dialog)).toBeEnabled());
+    await user.click(projectField(dialog));
+    await user.type(
+      screen.getByRole("combobox", { name: "Search or create a project" }),
+      "Billing",
+    );
+    await user.click(screen.getByRole("option", { name: 'Create project "Billing"' }));
+    await waitFor(() => expect(projectField(dialog)).toHaveTextContent("Billing"));
+    await user.click(within(dialog).getByRole("button", { name: "Create agent" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(api.calls).toEqual([
+      "GET /agents",
+      'POST /projects {"name":"Billing"}',
+      'POST /agents {"name":"nova","model":"glm-5-3","project_id":"p9"}',
+      "GET /agents",
+    ]);
+  });
+
+  it("an agents-manager gets no Create project", async () => {
+    serve([makeAgent()]);
+    projects.list = { projects: PROJECTS, can: { manage: false } };
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("rowheader", { name: /^echo/ });
+
+    await user.click(screen.getByRole("button", { name: "New agent" }));
+    const dialog = await screen.findByRole("dialog", { name: "New agent" });
+    await waitFor(() => expect(projectField(dialog)).toBeEnabled());
+    await user.click(projectField(dialog));
+    await user.type(
+      screen.getByRole("combobox", { name: "Search or create a project" }),
+      "Billing",
+    );
+    expect(screen.queryByRole("option", { name: /Create project/ })).toBeNull();
+    expect(screen.getByText("No projects match")).toBeInTheDocument();
+  });
+
+  it("loads the projects again after unknown project, and the dialog shows it", async () => {
+    const api = serve([makeAgent()]);
+    mswServer.use(
+      http.put(`${API}/agents/:id`, () => {
+        api.calls.push("PUT (400)");
+        // Another admin deleted Marketing while the dialog was open.
+        projects.list = { projects: [PAYMENTS], can: { manage: true } };
+        return HttpResponse.json({ error: "unknown project" }, { status: 400 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Edit echo" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit agent" });
+    await waitFor(() => expect(projectField(dialog)).toBeEnabled());
+    const before = projects.gets;
+    await user.click(projectField(dialog));
+    await user.click(await screen.findByRole("option", { name: "Marketing" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(projectField(dialog)).toHaveAccessibleDescription(
+        "That project no longer exists. Pick another one.",
+      ),
+    );
+    expect(projects.gets).toBe(before + 1);
+    expect(projectField(dialog)).toHaveTextContent("Marketing");
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(within(dialog).getAllByRole("alert")).toHaveLength(1);
   });
 
   it("shows the empty state", async () => {
