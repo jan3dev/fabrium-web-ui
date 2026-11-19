@@ -18,6 +18,7 @@ interface Agent {
   description: string
   model: string
   rooms: string[]
+  senders?: unknown
 }
 
 const reviewer: Agent = {
@@ -309,6 +310,97 @@ describe('fabrium-agent-sync', () => {
     for (const dir of [root, zooid(), workforce(), workforce('agents/reviewer'), process.cwd()]) {
       expect(existsSync(join(dir, 'pwned')), dir).toBe(false)
     }
+  })
+
+  describe('senders', () => {
+    const ana = ['@ana:example.org']
+    const yaml = () => JSON.parse(read('zooid.yaml'))
+
+    it('writes senders in the matrix block of an agent that has a list', async () => {
+      reply = list({ ...reviewer, senders: ana }, tester)
+      expect((await sync()).code).toBe(0)
+      expect(yaml().agents.reviewer.matrix).toEqual({
+        display_name: 'reviewer',
+        rooms: ['#general:example.org'],
+        trigger: 'mention',
+        senders: ana,
+      })
+      expect(yaml().agents.tester.matrix).not.toHaveProperty('senders')
+    })
+
+    it('writes no senders for null, and for an absent field', async () => {
+      reply = list({ ...reviewer, senders: null }, tester)
+      expect((await sync()).code).toBe(0)
+      expect(yaml().agents.reviewer.matrix).not.toHaveProperty('senders')
+      expect(yaml().agents.tester.matrix).not.toHaveProperty('senders')
+    })
+
+    it('a second run with senders changes nothing', async () => {
+      reply = list({ ...reviewer, senders: ana }, tester)
+      await sync()
+      expect(lines((await sync()).out)).toEqual(['no change'])
+    })
+
+    it('a changed list rewrites zooid.yaml and restarts', async () => {
+      reply = list({ ...reviewer, senders: ana }, tester)
+      await sync()
+      reply = list({ ...reviewer, senders: ['@bo:example.org'] }, tester)
+      expect(lines((await sync()).out)).toEqual([`write: ${workforce('zooid.yaml')}`, 'restart: fabrium-agent'])
+      expect(yaml().agents.reviewer.matrix.senders).toEqual(['@bo:example.org'])
+    })
+
+    it.each([
+      ['a string', '@ana:example.org'],
+      ['an empty list', []],
+      ['21 entries', Array.from({ length: 21 }, (_, i) => `@u${i}:example.org`)],
+      ['a non-string entry', [7]],
+      ['an entry without @', ['ana:example.org']],
+      ['an entry without a server', ['@ana']],
+      ['an entry with a space', ['@a na:example.org']],
+      ['an entry with a line break', ['@ana:example.org\n@bo:example.org']],
+      ['an entry that ends with a line break', ['@ana:example.org\n']],
+      ['an entry over 255 bytes', [`@${'a'.repeat(250)}:example.org`]],
+      ['an object', { owner: '@ana:example.org' }],
+      ['a number', 7],
+    ])('skips an agent whose senders is %s', async (_case, senders) => {
+      reply = list({ ...reviewer, senders }, tester)
+      const { code, out } = await sync()
+      expect(code).toBe(0)
+      expect(lines(out).filter((l) => l.startsWith('skip:'))).toEqual([
+        'skip: reviewer: senders breaks the rule of the contracts',
+      ])
+      expect(Object.keys(yaml().agents)).toEqual(['tester'])
+    })
+
+    it('accepts 20 entries, and a server with a port', async () => {
+      const many = [...Array.from({ length: 19 }, (_, i) => `@u${i}:example.org`), '@ana:example.org:8448']
+      reply = list({ ...reviewer, senders: many })
+      expect((await sync()).code).toBe(0)
+      expect(yaml().agents.reviewer.matrix.senders).toEqual(many)
+    })
+
+    it('a skipped senders never writes the agent without a filter', async () => {
+      reply = list({ ...reviewer, senders: ana }, tester)
+      await sync()
+      const before = snapshot()
+      reply = list({ ...reviewer, senders: [] })
+      const { code, out } = await sync()
+      expect([code, lines(out)]).toEqual([0, ['skip: reviewer: senders breaks the rule of the contracts']])
+      expect(snapshot()).toEqual(before)
+      expect(yaml().agents.reviewer.matrix.senders).toEqual(ana)
+    })
+
+    it('writes a hostile senders entry byte for byte or skips it, and runs nothing', async () => {
+      const passes = '@a:b$(touch${IFS}pwned)`id`'
+      reply = list({ ...reviewer, senders: [passes] }, { ...tester, senders: ['@a:b$(touch pwned)'] })
+      const { code, out } = await sync()
+      expect(code).toBe(0)
+      expect(yaml().agents.reviewer.matrix.senders).toEqual([passes])
+      expect(lines(out)).toContain('skip: tester: senders breaks the rule of the contracts')
+      for (const dir of [root, zooid(), workforce(), workforce('agents/reviewer'), process.cwd()]) {
+        expect(existsSync(join(dir, 'pwned')), dir).toBe(false)
+      }
+    })
   })
 
   // The agent of the test turn of configure-agent.sh on these files: this runs the script's own block.

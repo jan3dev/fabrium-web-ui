@@ -16,6 +16,11 @@ HAVEN_PROVIDER_NPM="github:jan3dev/haven-proxy#semver:0.x" # as in configure-age
 NAME_RULE='^[a-z][a-z0-9-]{0,31}$'
 NAME_RE='\A[a-z][a-z0-9-]{0,31}\z'
 ROOM_RE='\A[#!][^\s'"'"'",\\]+\z'
+# senders (contracts, section 5): absent or null, or 1 to 20 user IDs. zooid core applies the same rule.
+# Both jq programs below use this one definition, so the skip line and the list cannot disagree.
+SENDER_RE='\A@[^\s:]+:\S+\z'
+SENDERS_OK='def senders_ok: .senders == null or (.senders | type == "array" and length >= 1 and length <= 20
+  and all(.[]; type == "string" and test($sender_re) and utf8bytelength <= 255));'
 VM_RE='^[a-z0-9][a-z0-9-]{0,62}$'
 
 dry_run=0
@@ -74,16 +79,19 @@ apply_list() {
   cat >"$work/answer.json" || die "cannot read the list"
 
   # A skip line per refused agent (its name as JSON, so on one line), then the others.
-  jq -r --arg name_re "$NAME_RE" --arg rule "$NAME_RULE" --arg room_re "$ROOM_RE" '
+  jq -r --arg name_re "$NAME_RE" --arg rule "$NAME_RULE" --arg room_re "$ROOM_RE" --arg sender_re "$SENDER_RE" \
+    "$SENDERS_OK"'
     .agents[]
     | if (.name | test($name_re) | not) then "skip: \(.name | tojson): the name breaks the rule \($rule)"
       elif (.rooms | length > 20 or any(.[]; (test($room_re) | not) or utf8bytelength > 255))
       then "skip: \(.name): a room breaks the rule of the contracts"
+      elif (senders_ok | not) then "skip: \(.name): senders breaks the rule of the contracts"
       else empty end' "$work/answer.json" || die "cannot read the list"
-  jq --arg name_re "$NAME_RE" --arg room_re "$ROOM_RE" '
+  jq --arg name_re "$NAME_RE" --arg room_re "$ROOM_RE" --arg sender_re "$SENDER_RE" "$SENDERS_OK"'
     [.agents[]
      | select((.name | test($name_re))
-              and (.rooms | length <= 20 and all(.[]; test($room_re) and utf8bytelength <= 255)))]' \
+              and (.rooms | length <= 20 and all(.[]; test($room_re) and utf8bytelength <= 255))
+              and senders_ok)]' \
     "$work/answer.json" >"$work/list.json" || die "cannot read the list"
   count=$(jq length "$work/list.json") || die "cannot read the list"
   # zooid refuses a zooid.yaml without agents: an empty list keeps the files, as no list does.
@@ -105,7 +113,7 @@ apply_list() {
       }},
       agents: (map({key: .name, value: {
         acp: {preset: "opencode"},
-        matrix: {display_name: .name, rooms: .rooms, trigger: "mention"}
+        matrix: ({display_name: .name, rooms: .rooms, trigger: "mention"} + (if .senders then {senders} else {} end))
       }}) | from_entries)
     }' "$work/list.json" >"$work/new" || die "cannot build zooid.yaml"
   put "$WORKFORCE/zooid.yaml"

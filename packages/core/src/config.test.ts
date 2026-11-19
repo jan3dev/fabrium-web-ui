@@ -1672,4 +1672,34 @@ agents:
     })
     expect(fromJson.agents.reviewer!.matrix?.user_id).toBe('@lima.reviewer:example.org')
   })
+
+  it('loads the senders that fabrium-agent-sync writes', () => {
+    const json = {
+      workstation: 'lima',
+      runtime: 'local',
+      transports: {
+        matrix: {
+          homeserver: '${HOMESERVER_URL}',
+          mode: 'client',
+          sender_localpart: 'lima',
+          user_namespace: '@lima\\..*:example.org',
+          space: 'dev',
+        },
+      },
+      agents: {
+        reviewer: {
+          acp: { preset: 'opencode' },
+          matrix: {
+            display_name: 'reviewer',
+            rooms: ['#general:example.org'],
+            trigger: 'mention',
+            senders: ['@ana:example.org', '@bo:example.org:8448'],
+          },
+        },
+      },
+    }
+    const env = { HOMESERVER_URL: 'https://chat.example.org', MATRIX_AS_TOKEN: 'as', MATRIX_HS_TOKEN: 'hs' }
+    const config = withEnv(env, () => loadZooidConfig(JSON.stringify(json)))
+    expect(config.agents.reviewer!.matrix?.senders).toEqual(['@ana:example.org', '@bo:example.org:8448'])
+  })
 })
