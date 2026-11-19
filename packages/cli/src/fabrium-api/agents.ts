@@ -12,8 +12,9 @@ import type { Caller } from './auth.js'
 import { AGENT_NAME_RE, VM_NAME_RE } from './bundle.js'
 import { describeFailure, readBody, type ControlPlane } from './control-plane.js'
 import { ApiError } from './errors.js'
-import { stateEvent, type MatrixConn } from './matrix.js'
+import type { MatrixConn } from './matrix.js'
 import type { Models } from './models.js'
+import { checkPerson, listPeople } from './people.js'
 import { can, canUse, liveVms, sees, type World } from './policy.js'
 import type { createRoster } from './roster.js'
 import { fetchVms, type Vm } from './vms.js'
@@ -156,16 +157,6 @@ async function checkModel(ctx: AgentContext, model: string): Promise<void> {
   }
 }
 
-/** A user of this server who is a joined member of the workforce space. */
-async function checkMember(ctx: AgentContext, owner: string): Promise<void> {
-  const match = /^@[^:]+:(.+)$/.exec(owner)
-  if (match?.[1] !== ctx.serverName || owner.length > 255 || !/^[\x21-\x7e]+$/.test(owner)) throw notMember()
-  const spaceId = ctx.getSpaceRoomId()
-  if (!spaceId) throw new ApiError(503, { error: 'workforce space is not ready' })
-  const member = await stateEvent(ctx.conn, ctx.asToken, spaceId, 'm.room.member', owner)
-  if (member?.membership !== 'join') throw notMember()
-}
-
 /** `DELETE /v1/vms/{id}`. A VM that is gone already is done. The error holds the status, never the body. */
 async function deleteVm(ctx: AgentContext, id: string): Promise<void> {
   const upstream = await ctx.controlPlane.request('DELETE', `/v1/vms/${encodeURIComponent(id)}`)
@@ -238,7 +229,7 @@ export function agentRoutes(app: Hono<Env>, ctx: AgentContext): void {
       .filter((vm) => canUse(world, vm))
       .sort((a, b) => order(a.name, b.name))
       .map((vm) => ({ name: vm.name, state: vm.state }))
-    return c.json({ agents: [...agents, ...instance], vms })
+    return c.json({ agents: [...agents, ...instance], vms, people: await listPeople(ctx) })
   })
 
   app.post('/agents', async (c) => {
@@ -290,7 +281,7 @@ export function agentRoutes(app: Hono<Env>, ctx: AgentContext): void {
         checkNameFree(world, vm, agent.name)
       }
       if (fields.model !== undefined && fields.model !== agent.model) await checkModel(ctx, fields.model)
-      if (owner !== undefined) await checkMember(ctx, owner)
+      if (owner !== undefined) await checkPerson(ctx, owner)
       const change = { ...fields, ...(owner === undefined ? {} : { owner }) }
       let record = agent
       if (vm !== undefined) {
