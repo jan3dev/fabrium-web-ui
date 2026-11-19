@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { serve, type ServerType } from '@hono/node-server'
 import {
@@ -13,7 +13,6 @@ import {
   findMatrixTransport,
   loadZooidConfig,
   mergeCliFlags,
-  resolveAgentRuntime,
   type CliFlags,
   type TapEvent,
   type SessionLifecycleEvent,
@@ -45,6 +44,7 @@ import { ApiError } from '../fabrium-api/errors.js'
 import { mountFabriumApi } from '../fabrium-api/index.js'
 import { prepullImages } from '../prepull-images.js'
 import { mountPushGateway } from '../push-gateway/index.js'
+import { toAgentBinding } from './agent-binding.js'
 import { makeSyncCursorStore } from './sync-cursors.js'
 import { makeTaskJournal } from './task-journal.js'
 import { shouldBindHttpListener } from './pull-wiring.js'
@@ -234,22 +234,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     const bindings: AgentBinding[] = []
     for (const a of Object.values(config.agents)) {
       if (a.matrix?.transport !== matrix.name) continue
-      const binding: AgentBinding = {
-        name: a.name,
-        userId: a.matrix.user_id,
-        rooms: a.matrix.rooms,
-        trigger: a.matrix.trigger,
-      }
-      if (a.matrix.display_name !== undefined) binding.displayName = a.matrix.display_name
-      if (a.persona !== undefined) binding.persona = a.persona
-      if (a.project !== undefined) binding.project = a.project
-      // Resolve workspace dirs for media attachment routing.
-      const workspaceDir = isAbsolute(a.workdir) ? a.workdir : resolve(configDir, a.workdir)
-      binding.workspaceDir = workspaceDir
-      // Containers see the workdir at /workspace.
-      binding.agentWorkspacePath =
-        resolveAgentRuntime(a, config) === 'local' ? workspaceDir : '/workspace'
-      bindings.push(binding)
+      bindings.push(toAgentBinding(a, config, configDir))
     }
     // user_namespace is a regex like `@.*:localhost`; the part after the last
     // `:` is the homeserver's server_name. Fall back to the homeserver URL's
