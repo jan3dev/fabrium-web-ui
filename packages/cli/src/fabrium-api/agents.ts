@@ -12,10 +12,11 @@ import type { Caller } from './auth.js'
 import { AGENT_NAME_RE, VM_NAME_RE } from './bundle.js'
 import { describeFailure, readBody, type ControlPlane } from './control-plane.js'
 import { ApiError } from './errors.js'
+import type { Launches } from './launches.js'
 import type { MatrixConn } from './matrix.js'
 import type { Models } from './models.js'
 import { checkPerson, listPeople } from './people.js'
-import { breaksProjectVmRule, can, canUse, isProject, liveVms, sees, type World } from './policy.js'
+import { breaksProjectVmRule, can, canUse, isProject, liveVms, sees, vmKind, type World } from './policy.js'
 import { fetchProjects, type Project } from './project-records.js'
 import type { createRoster } from './roster.js'
 import { fetchVms, type Vm } from './vms.js'
@@ -43,6 +44,8 @@ export interface AgentContext {
   instanceAgents: readonly { name: string; userId: string }[]
   /** FABRIUM_HAVEN_MODEL: the default of `GET /models`. */
   havenModel?: string
+  /** The VM launches of the last 10 minutes: only the rule of the project VM and a project in use read them. */
+  launches: Launches
 }
 
 const MAX_DESCRIPTION_BYTES = 16384
@@ -286,9 +289,9 @@ export function agentRoutes(app: Hono<Env>, ctx: AgentContext): void {
       const world = await loadWorld(ctx, caller)
       if (projectId !== undefined) checkProject(world, projectId)
       if (vm !== undefined) {
-        const live = usableVm(world, vm)
+        usableVm(world, vm)
         checkNameFree(world, vm, name)
-        if (breaksProjectVmRule(projectId !== undefined, live)) throw needsProjectVm()
+        if (breaksProjectVmRule(projectId !== undefined, vmKind(world, ctx.launches, vm))) throw needsProjectVm()
       }
       await checkModel(ctx, model)
       // The control plane refuses a label of "": a new agent leaves it out.
@@ -336,13 +339,13 @@ export function agentRoutes(app: Hono<Env>, ctx: AgentContext): void {
       if (owner !== undefined && !isProject(agent) && !allowed.set_owner) throw forbidden()
       if (owner !== undefined && projectAfter) throw bad('a project agent has no owner')
       if (projectId) checkProject(world, projectId)
-      let vmAfter = agent.vm === null ? undefined : world.live.get(agent.vm)
       if (vm !== undefined) {
         if (agent.vm !== null) throw new ApiError(409, { error: 'vm already set' })
-        vmAfter = usableVm(world, vm)
+        usableVm(world, vm)
         checkNameFree(world, vm, agent.name)
       }
-      if (breaksProjectVmRule(projectAfter, vmAfter)) throw needsProjectVm()
+      // A VM that is launching counts: the list shows a new VM late.
+      if (breaksProjectVmRule(projectAfter, vmKind(world, ctx.launches, vm ?? agent.vm))) throw needsProjectVm()
       if (fields.model !== undefined && fields.model !== agent.model) await checkModel(ctx, fields.model)
       // An agent that leaves without an owner gets its stored owner back, who must still be a person.
       if (owner !== undefined || leaves) await checkPerson(ctx, owner ?? agent.owner)

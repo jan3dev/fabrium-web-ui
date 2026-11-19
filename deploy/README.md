@@ -615,6 +615,11 @@ A project agent runs only on a project VM. The daemon answers `409` to each requ
 
 So for a personal agent on a personal VM, put the VM into the project first, then the agent.
 
+The control plane lists a new VM some seconds late. So the daemon keeps each create and replace that it asked
+for in memory for 10 minutes, with the project of the request: for the rule above the launching VM counts as the
+VM of its name, and its project counts as in use. A refusal of the control plane drops the launch, and a restart
+of the daemon forgets them all.
+
 Every member with a role can put an agent on a project VM and write its instructions, and the agent runs with the
 credentials of the VM. Make the Haven API key and the GitHub token of a project VM for the project, not for one
 person.

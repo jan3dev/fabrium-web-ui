@@ -3,16 +3,17 @@ import { MatrixClient } from '@zooid/transport-matrix'
 import { Hono } from 'hono'
 import { createAdmission } from './admission.js'
 import { fetchRecords } from './agent-records.js'
-import { agentRoutes, type AgentContext } from './agents.js'
+import { agentRoutes, needsProjectVm, type AgentContext } from './agents.js'
 import { isAdmin, managesVms, requireRole, type Caller } from './auth.js'
 import type { FabriumApiConfig } from './config.js'
 import { createControlPlane, relay } from './control-plane.js'
 import { createVm, parseAutoStopHours, parseCreateRequest, parseCredentials, recreateVm } from './create.js'
 import { ApiError, apiErrorHandler } from './errors.js'
+import { createLaunches } from './launches.js'
 import type { MatrixConn } from './matrix.js'
 import { createModels } from './models.js'
 import { FULL_COMMIT_RE } from './payload.js'
-import { liveVms, managesVm } from './policy.js'
+import { breaksProjectVmRule, hasProjectAgent, liveVms, managesVm } from './policy.js'
 import { fetchProjects } from './project-records.js'
 import { projectRoutes } from './projects.js'
 import { createQueue } from './queue.js'
@@ -147,6 +148,7 @@ export function fabriumApi(deps: FabriumApiDeps): {
     serverName: deps.serverName,
     instanceAgents: deps.instanceAgents ?? [],
     havenModel: deps.havenModel,
+    launches: createLaunches(deps.now),
   }
   agentRoutes(app, agents)
   projectRoutes(app, agents)
@@ -211,6 +213,9 @@ export function fabriumApi(deps: FabriumApiDeps): {
       // Only who manages the VM. Any other VM is a 404, as for the other VM actions.
       const vm = result.vms.find((v) => v.id === id && managesVm(caller, v))
       if (!vm) throw new ApiError(404, { error: 'not found' })
+      // The new VM keeps the project of this one: a personal VM may not hold a project agent.
+      const records = await fetchRecords(controlPlane)
+      if (breaksProjectVmRule(hasProjectAgent(records, vm.name), vm)) throw needsProjectVm()
       return recreateVm({ ...agents, commit, workstationsDir }, vm, creds, await decorator(caller))
     })
   })

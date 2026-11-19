@@ -7,6 +7,7 @@ import type { AgentRecord } from './agent-records.js'
 import { loadWorld, rebuildRoster, type AgentContext, type Env } from './agents.js'
 import { isAdmin, type Caller } from './auth.js'
 import { ApiError } from './errors.js'
+import type { Launches } from './launches.js'
 import { createProject, removeProject, renameProject, type Project } from './project-records.js'
 import type { Vm } from './vms.js'
 
@@ -16,10 +17,14 @@ export interface ProjectView {
   in_use: boolean
 }
 
-/** `in_use`: an agent record, or a VM that the control plane lists, has the project. */
-export function projectView(p: Project, world: { records: AgentRecord[]; vms: Vm[] }): ProjectView {
+/** `in_use`: an agent record, a VM that the control plane lists, or a launch of the last 10 minutes has it. */
+export function projectView(
+  p: Project,
+  world: { records: AgentRecord[]; vms: Vm[] },
+  launches: Pick<Launches, 'hasProject'>,
+): ProjectView {
   const has = (x: { project_id?: string | null }) => x.project_id === p.id
-  return { id: p.id, name: p.name, in_use: world.records.some(has) || world.vms.some(has) }
+  return { id: p.id, name: p.name, in_use: world.records.some(has) || world.vms.some(has) || launches.hasProject(p.id) }
 }
 
 function checkAdmin(caller: Caller): void {
@@ -41,7 +46,7 @@ export function projectRoutes(app: Hono<Env>, ctx: AgentContext): void {
     const caller = c.get('caller')
     const world = await loadWorld(ctx, caller)
     return c.json({
-      projects: world.projects.map((p) => projectView(p, world)),
+      projects: world.projects.map((p) => projectView(p, world, ctx.launches)),
       can: { manage: isAdmin(caller.role) },
     })
   })
@@ -66,16 +71,18 @@ export function projectRoutes(app: Hono<Env>, ctx: AgentContext): void {
       const projects = [...world.projects.filter((p) => p.id !== renamed.id), renamed]
       const names = new Set(world.records.filter((r) => r.project_id === renamed.id).map((r) => r.vm))
       for (const vm of names) if (vm !== null) await rebuildRoster(ctx, vm, world.records, projects)
-      return c.json(projectView(renamed, world))
+      return c.json(projectView(renamed, world, ctx.launches))
     })
   })
 
   // Not gated on in_use: a registry row that the VM list does not show can keep the project, and the control
-  // plane answers 409 for it.
+  // plane answers 409 for it. A launch is not in the control plane yet: zooid refuses it itself.
   app.delete('/projects/:id', async (c) => {
     checkAdmin(c.get('caller'))
+    const id = c.req.param('id')
     return ctx.queue(async () => {
-      await removeProject(ctx.controlPlane, c.req.param('id'))
+      if (ctx.launches.hasProject(id)) throw new ApiError(409, { error: 'project in use' })
+      await removeProject(ctx.controlPlane, id)
       return c.body(null, 204)
     })
   })

@@ -60,8 +60,25 @@ export function vmCanSetProject(caller: Caller, vm: Vm): boolean {
   return isAdmin(caller.role) || (!isProject(vm) && vm.creator != null && vm.creator === caller.userId)
 }
 
-/** The rule of the project VM, over the state after the request: a project agent on a live personal VM. */
-export function breaksProjectVmRule(projectAfter: boolean, vmAfter: Vm | undefined): boolean {
+/** The VM of a name for the rule of the project VM: its project, or null for a personal VM. */
+export type VmKind = { project_id?: string | null }
+
+/**
+ * The kind of the VM of a name, for every check of the rule of the project VM: the live VM when the list has one,
+ * else a launch of the last 10 minutes (the control plane lists a new VM late), else none. Only the rule reads a
+ * launch: the views, the lists, and `canUse` do not.
+ */
+export function vmKind(
+  world: World,
+  launches: { get(name: string): VmKind | undefined },
+  name: string | null,
+): VmKind | undefined {
+  if (name === null) return undefined
+  return world.live.get(name) ?? launches.get(name)
+}
+
+/** The rule of the project VM, over the state after the request: a project agent on a personal VM. */
+export function breaksProjectVmRule(projectAfter: boolean, vmAfter: VmKind | undefined): boolean {
   return projectAfter && vmAfter !== undefined && !isProject(vmAfter)
 }
 

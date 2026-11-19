@@ -569,6 +569,57 @@ describe('a VM in a project', () => {
   })
 })
 
+describe('a VM that is launching', () => {
+  // The control plane lists a new VM late: in these tests the list never shows it.
+  const needsProjectVm = [409, { error: 'a project agent needs a project vm' }]
+  const enter = () => api.request('PUT', '/agents/p1', { token: as(ANA), json: { project_id: PR1 } })
+
+  it('a project agent cannot enter while its personal VM launches', async () => {
+    setup()
+    expect((await create(body(), as(LUIS))).status).toBe(201)
+    const before = posts().length
+    const res = await enter()
+    expect([res.status, await res.json()]).toEqual(needsProjectVm)
+    expect(posts()).toHaveLength(before)
+    expect(recordOf('p1')).toMatchObject({ vm: 'lima', project_id: null })
+  })
+
+  it.each([
+    ['a 503', () => jsonResponse(503, { error: 'the launch did not answer in time' })],
+    ['no answer', () => Promise.reject(new TypeError('fetch failed'))],
+  ])('the launch still counts after %s of the control plane', async (_case, reply) => {
+    setup()
+    api.controlPlane.on('POST', '/v1/vms', reply)
+    expect((await create(body(), as(LUIS))).status).toBeGreaterThanOrEqual(500)
+    const res = await enter()
+    expect([res.status, await res.json()]).toEqual(needsProjectVm)
+  })
+
+  it('a 4xx refusal drops the launch', async () => {
+    setup()
+    api.controlPlane.on('POST', '/v1/vms', jsonResponse(409, { error: 'name in use' }))
+    expect((await create(body(), as(LUIS))).status).toBe(409)
+    expect((await enter()).status).toBe(200)
+  })
+
+  it('after 10 minutes without a listed VM the launch no longer counts', async () => {
+    let clock = Date.parse('2026-11-19T19:00:00Z')
+    setup({ now: () => clock })
+    expect((await create(body(), as(LUIS))).status).toBe(201)
+    clock += 10 * 60_000 - 1000
+    expect((await enter()).status).toBe(409)
+    clock += 1000
+    expect((await enter()).status).toBe(200)
+  })
+
+  it('a launch with a project lets a project agent in', async () => {
+    setup()
+    expect((await create(body({ project_id: PR1 }), as(LUIS))).status).toBe(201)
+    expect((await enter()).status).toBe(200)
+    expect(recordOf('p1')).toMatchObject({ vm: 'lima', project_id: PR1 })
+  })
+})
+
 describe('a homeserver that does not answer', () => {
   it.each([
     ['a call of the central client', 'GET', /\/directory\/room\//, 'register_appservice'],
@@ -604,6 +655,31 @@ describe('POST /vms/:id/recreate', () => {
       jsonResponse(201, { ...VM, id: 'i-0fedcba9876543210', creator: LUIS }),
     )
   }
+
+  it('refuses a personal VM with a project agent, and sends nothing', async () => {
+    setup()
+    await running()
+    record('q1', 'planner', 'lima', ANA, PR1)
+    const res = await recreate({ haven_api_key: 'hk-new' }, as(LUIS))
+    expect([res.status, await res.json()]).toEqual([409, { error: 'a project agent needs a project vm' }])
+    expect(upstream()).toBeUndefined()
+    // A project VM with a project agent is replaced.
+    vms = [{ ...VM, state: 'running', creator: LUIS, project_id: PR1 }]
+    expect((await recreate({ haven_api_key: 'hk-new' }, as(LUIS))).status).toBe(201)
+  })
+
+  it('a project agent cannot enter while the replacement of its personal VM launches', async () => {
+    setup()
+    await running()
+    Object.assign(recordOf('p1')!, { vm: 'lima', rooms: ['#general:example.org'] })
+    expect((await recreate({ haven_api_key: 'hk-new' }, as(LUIS))).status).toBe(201)
+    // The old VM shuts down, and the list does not show the new one yet.
+    vms = [{ ...VM, state: 'shutting-down', creator: LUIS }]
+    const before = posts().length
+    const res = await api.request('PUT', '/agents/p1', { token: as(ANA), json: { project_id: PR1 } })
+    expect([res.status, await res.json()]).toEqual([409, { error: 'a project agent needs a project vm' }])
+    expect(posts()).toHaveLength(before)
+  })
 
   it('replaces a VM with new credentials', async () => {
     setup()

@@ -159,6 +159,8 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
       creator,
       agent: agent.name,
     })
+    // Recorded before the call, and kept after a 5xx or no answer: the launch can go on.
+    const launch = deps.launches.add(req.name, req.projectId ?? null)
     const upstream = await deps.controlPlane.request('POST', '/v1/vms', {
       name: req.name,
       ...(req.instanceType ? { instance_type: req.instanceType } : {}),
@@ -168,7 +170,10 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
       ...(req.projectId === undefined ? {} : { project_id: req.projectId }),
       bootstrap: payload,
     })
-    if (!upstream.ok) return relay(upstream)
+    if (!upstream.ok) {
+      if (upstream.status < 500) deps.launches.drop(launch)
+      return relay(upstream)
+    }
     // The create went through: with its answer lost, the VM exists or may, so report no failure.
     let vm: unknown
     try {
@@ -204,8 +209,10 @@ export async function recreateVm(
   const env = VM_NAME_RE.test(vm.name) ? await readBundleEnv(join(deps.workstationsDir, vm.name)) : null
   if (env === null) throw new ApiError(409, { error: 'the vm has no bundle' })
   const payload = buildPayload({ env, ...creds, commit: deps.commit })
-  return relayVm(
-    await deps.controlPlane.request('POST', `/v1/vms/${encodeURIComponent(vm.id)}/recreate`, { bootstrap: payload }),
-    decorate,
-  )
+  // The new VM gets the project of the registry row. Kept after a 5xx or no answer, as for a create.
+  const launch = deps.launches.add(vm.name, vm.project_id ?? null)
+  const path = `/v1/vms/${encodeURIComponent(vm.id)}/recreate`
+  const upstream = await deps.controlPlane.request('POST', path, { bootstrap: payload })
+  if (!upstream.ok && upstream.status < 500) deps.launches.drop(launch)
+  return relayVm(upstream, decorate)
 }

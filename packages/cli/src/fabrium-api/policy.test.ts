@@ -13,6 +13,7 @@ import {
   managesVm,
   sees,
   vmCanSetProject,
+  vmKind,
   type World,
 } from './policy.js'
 import type { Vm } from './vms.js'
@@ -222,6 +223,21 @@ it('breaksProjectVmRule', () => {
   expect(breaksProjectVmRule(true, vmByName('hub'))).toBe(false)
   expect(breaksProjectVmRule(true, undefined)).toBe(false)
   expect(breaksProjectVmRule(false, undefined)).toBe(false)
+})
+
+it('vmKind: the live VM of the name, else a launch, else none', () => {
+  const launching = new Map([
+    ['lima', { project_id: 'pr1' }],
+    ['quito', { project_id: null }],
+  ])
+  const launches = { get: (name: string) => launching.get(name) }
+  const w = world('@ann')
+  // The listed live VM wins over a launch of its name.
+  expect(vmKind(w, launches, 'lima')).toBe(w.live.get('lima'))
+  expect(vmKind(w, launches, 'quito')).toEqual({ project_id: null })
+  expect(breaksProjectVmRule(true, vmKind(w, launches, 'quito'))).toBe(true)
+  expect(vmKind(w, launches, 'nowhere')).toBeUndefined()
+  expect(vmKind(w, launches, null)).toBeUndefined()
 })
 
 it('hasProjectAgent looks at every record of the VM name, live or not', () => {

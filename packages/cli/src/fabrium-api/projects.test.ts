@@ -22,6 +22,7 @@ const CUSCO = { id: 'i-0c0c0c0c0c0c0c0c0', name: 'cusco', state: 'running', crea
 const HUB = { id: 'i-0b0b0b0b0b0b0b0b0', name: 'hub', state: 'running', creator: LUIS, launched_at: '2026-11-18T19:00:00Z', project_id: PAYMENTS.id }
 
 let api: ReturnType<typeof createTestApi>
+let clock: number
 let store: { records: AgentRecord[] }
 let projects: Project[]
 let vms: Record<string, unknown>[]
@@ -43,7 +44,8 @@ const place = (id: string, vm: string | null, projectId: string | null) =>
 
 beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => {})
-  api = createTestApi()
+  clock = Date.parse('2026-11-19T19:00:00Z')
+  api = createTestApi({ now: () => clock, whoamiTimeoutMs: 100, pollIntervalMs: 5 })
   projects = [{ ...PAYMENTS }, { ...BILLING }]
   store = fakeAgentStore(api.controlPlane, projects)
   vms = [LIMA, CUSCO]
@@ -202,6 +204,41 @@ describe('PUT /projects/:id', () => {
       expect([res.status, await res.json()], user).toEqual([403, { error: 'forbidden' }])
     }
     expect(api.controlPlane.requests.length).toBe(before)
+  })
+})
+
+describe('a VM that is launching', () => {
+  // The control plane lists a new VM late: in these tests the list never shows it.
+  beforeEach(async () => {
+    place('p1', null, null)
+    api.controlPlane.on('POST', '/v1/vms', (req) =>
+      jsonResponse(201, { id: 'i-0d0d0d0d0d0d0d0d0', name: 'kilo', state: 'pending', ...(req.body as object) }),
+    )
+    const res = await as(LUIS, 'POST', '/vms', {
+      agent: 'p1',
+      name: 'kilo',
+      haven_api_key: 'hk-1',
+      project_id: PAYMENTS.id,
+    })
+    expect(res.status).toBe(201)
+  })
+  const inUse = async () =>
+    ((await (await as(ANA, 'GET', '/projects')).json()) as { projects: { name: string; in_use: boolean }[] }).projects
+      .filter((p) => p.in_use)
+      .map((p) => p.name)
+
+  it('keeps its project in use for 10 minutes', async () => {
+    expect(await inUse()).toEqual(['Payments'])
+    clock += 10 * 60_000
+    expect(await inUse()).toEqual([])
+  })
+
+  it('makes a delete of its project 409 without a control plane call', async () => {
+    const res = await as(ANN, 'DELETE', `/projects/${PAYMENTS.id}`)
+    expect([res.status, await res.json()]).toEqual([409, { error: 'project in use' }])
+    expect(writes().filter((r) => r.path.startsWith('/v1/projects'))).toEqual([])
+    clock += 10 * 60_000
+    expect((await as(ANN, 'DELETE', `/projects/${PAYMENTS.id}`)).status).toBe(204)
   })
 })
 
