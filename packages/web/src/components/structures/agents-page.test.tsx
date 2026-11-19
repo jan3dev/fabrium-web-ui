@@ -12,6 +12,7 @@ import {
   PAYMENTS,
   PROFILE,
   PROJECTS,
+  PROJECT_AGENT,
   VM_GONE,
   makeAgent,
 } from "../../../test/vm-fixtures";
@@ -298,6 +299,32 @@ describe("<AgentsRoute>", () => {
     expect(api.calls).toEqual([
       "GET /agents",
       `POST /vms {"agent":"${VM_GONE.id}","name":"kilo","instance_type":"t3a.medium","auto_stop_hours":12,"haven_api_key":"hk-1"}`,
+      "GET /agents",
+    ]);
+  });
+
+  it("creates a project VM for a project agent", async () => {
+    const agent = {
+      ...PROJECT_AGENT,
+      vm: { name: "kilo" },
+      can: { ...PROJECT_AGENT.can, create_vm: true },
+    };
+    const api = serve([agent]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Create VM for triage" }));
+    const dialog = await screen.findByRole("dialog", { name: "Create a VM for triage" });
+    await within(dialog).findByLabelText("Instance type");
+    await waitFor(() => expect(projectField(dialog)).toBeEnabled());
+    expect(projectField(dialog)).toHaveTextContent("Payments");
+    await user.type(within(dialog).getByLabelText("Haven API key"), "hk-1");
+    await user.click(within(dialog).getByRole("button", { name: "Create VM" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(api.calls).toEqual([
+      "GET /agents",
+      `POST /vms {"agent":"${agent.id}","name":"kilo","instance_type":"t3a.medium","auto_stop_hours":12,"haven_api_key":"hk-1","project_id":"${PAYMENTS.id}"}`,
       "GET /agents",
     ]);
   });

@@ -53,13 +53,16 @@ export function AgentsRoute() {
     projects.add(project);
     return project;
   };
+  // Another admin deleted the project: the dialog shows it once the list has it gone.
+  const reloadIfGone = async (e: unknown) => {
+    if (e instanceof Error && e.message === "unknown project") await projects.refresh();
+  };
   const save = async (input: AgentInput) => {
     try {
       if (target) await updateAgent(target.id, input);
       else await createAgent(input);
     } catch (e) {
-      // Another admin deleted the project: the dialog shows it once the list has it gone.
-      if (e instanceof Error && e.message === "unknown project") await projects.refresh();
+      await reloadIfGone(e);
       throw e;
     }
     refresh();
@@ -68,6 +71,9 @@ export function AgentsRoute() {
   const createVmFor = async (req: CreateVmRequest) => {
     try {
       await createVm(req);
+    } catch (e) {
+      await reloadIfGone(e);
+      throw e;
     } finally {
       refresh();
     }
@@ -113,6 +119,10 @@ export function AgentsRoute() {
             agent={target}
             types={types}
             typesError={typesError}
+            projects={projects.list?.projects ?? null}
+            projectsError={projects.error}
+            canManageProjects={projects.list?.can.manage ?? false}
+            onCreateProject={createProjectFor}
             onSubmit={createVmFor}
           />
           <DeleteAgentDialog
