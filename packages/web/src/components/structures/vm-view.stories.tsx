@@ -72,20 +72,19 @@ export const ActionInFlight: Story = {
   args: { busyIds: new Set([lima.id]) },
 };
 
+/** Opens the actions menu of a VM and chooses an action. The menu is in a portal. */
+async function choose(vmName: string, label: string) {
+  const body = within(document.body);
+  await userEvent.click(await body.findByRole("button", { name: `Actions for ${vmName}` }));
+  await userEvent.click(await body.findByRole("menuitem", { name: label }));
+}
+
 export const ConfirmDelete: Story = {
-  async play({ canvasElement }) {
-    await userEvent.click(
-      await within(canvasElement).findByRole("button", { name: "Delete lima" }),
-    );
-  },
+  play: () => choose("lima", "Delete"),
 };
 
 export const ConfirmStart: Story = {
-  async play({ canvasElement }) {
-    await userEvent.click(
-      await within(canvasElement).findByRole("button", { name: "Start kilo" }),
-    );
-  },
+  play: () => choose("kilo", "Start"),
 };
 
 export const Loading: Story = { args: { vms: null } };
