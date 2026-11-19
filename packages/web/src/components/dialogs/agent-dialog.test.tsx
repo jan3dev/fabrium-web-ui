@@ -24,7 +24,7 @@ function setup({
     open: true,
     onOpenChange,
     agent: null,
-    vms: [{ name: "lima", state: "running" }],
+    vms: [{ name: "lima", state: "running", project_id: null }],
     models: MODELS,
     modelsError: null,
     members: MEMBERS,
@@ -236,9 +236,9 @@ describe("<AgentDialog>", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("the Haven model list does not answer");
     expect(screen.getByLabelText("Model")).toHaveValue("glm-5-3");
 
-    await user.type(screen.getByLabelText("Project"), "-2");
+    await user.type(screen.getByLabelText("Tag"), "-2");
     await user.click(button("Save"));
-    expect(onSubmit.mock.calls).toStrictEqual([[{ project: "Payments-2" }]]);
+    expect(onSubmit.mock.calls).toStrictEqual([[{ tag: "Reviewer-2" }]]);
   });
 
   it("a new agent cannot be created while the model list failed", async () => {

@@ -35,7 +35,7 @@ const VMS = [
 // One agent per look of /agents: on a VM, a profile (Create VM disabled with its reason), an instance agent.
 const AGENTS = {
   agents: [makeAgent(), PROFILE, INSTANCE_AGENT],
-  vms: [{ name: "lima", state: "running" }],
+  vms: [{ name: "lima", state: "running", project_id: null }],
   people: [],
 };
 

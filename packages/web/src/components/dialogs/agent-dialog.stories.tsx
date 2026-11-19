@@ -11,7 +11,7 @@ const meta = {
     open: true,
     onOpenChange: () => {},
     agent: null,
-    vms: [{ name: "lima", state: "running" }],
+    vms: [{ name: "lima", state: "running", project_id: null }],
     models: { models: [{ id: "glm-5-3" }, { id: "qwen-3" }], default: "glm-5-3" },
     modelsError: null,
     members: [

@@ -27,7 +27,7 @@ const PEOPLE: AgentList["people"] = [
 /** A fake browser API: `GET /agents` answers `list`; `calls` records each request, with its body. */
 function serve(
   agents: Agent[],
-  vms: AgentList["vms"] = [{ name: "lima", state: "running" }],
+  vms: AgentList["vms"] = [{ name: "lima", state: "running", project_id: null }],
   people: AgentList["people"] = [],
 ) {
   const api = { list: { agents, vms, people } as AgentList, calls: [] as string[] };
@@ -104,7 +104,6 @@ describe("<AgentsRoute>", () => {
       "@lima.echo:example.org",
       "@ann:example.org",
       "Reviewer",
-      "Payments",
       "glm-5-3",
       "lima",
       "running",
