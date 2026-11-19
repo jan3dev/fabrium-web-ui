@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
+import { makeRoom, mkMatrixEvent } from "../../../test/factories";
 import { mswServer } from "../../../test/setup";
 import { signInForVmApi } from "../../../test/vm-api";
 import {
@@ -13,14 +14,23 @@ import {
   makeAgent,
 } from "../../../test/vm-fixtures";
 import { MatrixClientPeg } from "../../client/peg";
+import { WorkforceSpaceContext } from "../../hooks/use-workforce";
 import type { Agent, AgentList } from "../../model/types";
 import { AgentsRoute } from "./agents-page";
 
 const API = "/_fabrium/v1";
+const PEOPLE: AgentList["people"] = [
+  { user_id: "@ana:example.org", name: "Ana" },
+  { user_id: "@bob:example.org", name: "bob" },
+];
 
 /** A fake browser API: `GET /agents` answers `list`; `calls` records each request, with its body. */
-function serve(agents: Agent[], vms: AgentList["vms"] = [{ name: "lima", state: "running" }]) {
-  const api = { list: { agents, vms } as AgentList, calls: [] as string[] };
+function serve(
+  agents: Agent[],
+  vms: AgentList["vms"] = [{ name: "lima", state: "running" }],
+  people: AgentList["people"] = [],
+) {
+  const api = { list: { agents, vms, people } as AgentList, calls: [] as string[] };
   const record = async (request: Request, line: string) => {
     const body = await request.text();
     api.calls.push(body ? `${line} ${body}` : line);
@@ -207,6 +217,52 @@ describe("<AgentsRoute>", () => {
       "GET /agents",
       `PUT ${makeAgent().id} {"tag":"Lead"}`,
       "GET /agents",
+    ]);
+  });
+
+  it("offers the people of the agents answer as owners", async () => {
+    serve([makeAgent({ owner: "@ana:example.org" })], undefined, PEOPLE);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Edit echo" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit agent" });
+    const owner = within(dialog).getByLabelText("Owner");
+    expect(within(owner).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Ana (@ana:example.org)",
+      "bob (@bob:example.org)",
+    ]);
+  });
+
+  it("does not read the members of the space for the owner list", async () => {
+    serve([makeAgent({ owner: "@ana:example.org" })], undefined, PEOPLE);
+    const user = userEvent.setup();
+    // The space has a joined member who is not a person: the page must not offer them.
+    const { client } = signInForVmApi();
+    const spaceId = "!space:example.org";
+    const space = makeRoom(spaceId, { client, myUserId: "@ann:example.org" });
+    space.currentState.setStateEvents([
+      mkMatrixEvent({
+        roomId: spaceId,
+        sender: "@lima.echo:example.org",
+        type: "m.room.member",
+        stateKey: "@lima.echo:example.org",
+        content: { membership: "join", displayname: "echo" },
+      }),
+    ]);
+    (client as unknown as { addRoom(room: typeof space): void }).addRoom(space);
+    render(
+      <WorkforceSpaceContext.Provider value={spaceId}>
+        <AgentsRoute />
+      </WorkforceSpaceContext.Provider>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Edit echo" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit agent" });
+    const owner = within(dialog).getByLabelText("Owner");
+    expect(within(owner).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Ana (@ana:example.org)",
+      "bob (@bob:example.org)",
     ]);
   });
 
