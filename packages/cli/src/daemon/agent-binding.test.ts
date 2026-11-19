@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { loadZooidConfig } from '@zooid/core'
+import { loadZooidConfig, mergeCliFlags } from '@zooid/core'
 import { buildWorkforceRoster } from '@zooid/transport-matrix'
 import { toAgentBinding } from './agent-binding.js'
 
+// The config goes through the same calls as in startDaemon.
 function load(senders?: string) {
-  const config = loadZooidConfig(`
+  const base = loadZooidConfig(`
 runtime: local
 transports:
   matrix:
@@ -26,6 +27,7 @@ agents:
       rooms: ['!r:example.org']
 ${senders === undefined ? '' : `      senders: ${senders}`}
 `)
+  const config = mergeCliFlags(base, {})
   return toAgentBinding(config.agents.reviewer!, config, '/srv/agents')
 }
 
