@@ -1,11 +1,12 @@
 import { THREAD_START_FIELD, type ThreadCompletion, type ThreadStartContent } from '@zooid/core'
 import { buildMentionContent } from './mention-content.js'
-import type { AgentBinding } from './router.js'
+import { senderAllowed, type AgentBinding } from './router.js'
 export type Admission = { ok: true } | { ok: false; reason: string }
 export function checkDelegable(
   agentName: string,
   roomId: string,
   bindings: AgentBinding[],
+  callerUserId: string,
 ): Admission {
   const target = bindings.find((b) => b.name === agentName)
   if (!target)
@@ -17,6 +18,13 @@ export function checkDelegable(
     return {
       ok: false,
       reason: `not_in_room: "${agentName}" is not a member of this room`,
+    }
+  // The task root is posted as the caller, and route() would drop it for the
+  // assignee: refuse first, so the caller is told and no slot stays reserved.
+  if (!senderAllowed(target, { sender: callerUserId }))
+    return {
+      ok: false,
+      reason: `not_allowed: "${agentName}" answers only its owner`,
     }
   return { ok: true }
 }

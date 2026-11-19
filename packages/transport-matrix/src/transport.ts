@@ -39,6 +39,7 @@ import {
   route,
   isMediaMsgtype,
   isReturnRoute,
+  senderAllowed,
   wouldCycleCallers,
   type AgentBinding,
   type ThreadState,
@@ -824,6 +825,11 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       console.warn(`[matrix] membership check failed for ${sender}; response ignored:`, err)
       return
     }
+    // Silent, as for a non-member: the question stays open for its owner.
+    if (!senderAllowed(agent, evt)) {
+      console.warn(`[matrix] elicitation response from ${sender} ignored: ${agent.name} does not answer them`)
+      return
+    }
     if (elicitations.get(record.requestId)?.state !== 'pending') return sendElicitationRejected(record, evt.event_id, 'stale')
     let response: ElicitationResponse
     if (parsed.action === 'accept') {
@@ -993,23 +999,28 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         return
       }
       console.log(`[matrix] inbound dev.zooid.session_reset in ${evt.room_id} thread=${threadRoot}`)
+      // An agent with `senders` is reset only by its senders: skip it whole
+      // (questions, returns, open call, sessions, task generation).
+      const resets = (a: AgentBinding) => senderAllowed(a, evt)
       // /clear must not allow a pre-reset deferred return to wake an agent up
       // later via either its old turn.end or the fallback timer.
-      returns.dropThread(threadRoot)
+      returns.dropThread(threadRoot, resets)
       // Spec § Cancellation: clearing cancels a waiting turn's questions and the
       // turn itself before its memory is replaced. Sessions without an open
       // question are left alone (ZOD039 behaviour unchanged).
       if (elicitations) {
         for (const [sessionId, ctx] of [...sessions]) {
           if (ctx.threadRoot !== threadRoot || elicitations.countForSession(sessionId) === 0) continue
+          if (!resets(ctx.agent)) continue
           elicitations.cancelSession(sessionId, 'clear')
           await agents.cancelSession(ctx.agent.name, sessionId).catch((err) => {
             console.error(`[matrix] cancelSession(${ctx.agent.name}, ${sessionId}) on clear failed:`, err)
           })
         }
       }
-      // [[ZOD092]] No open handoff in this thread survives a reset.
-      for (const k of [...openHandoffs.keys()]) if (k.endsWith(`::${threadRoot}`)) openHandoffs.delete(k)
+      // [[ZOD092]] No open handoff in this thread survives a reset. Keys carry the
+      // caller, which is always one of our bindings.
+      for (const b of bindings) if (resets(b)) openHandoffs.delete(openKey(b.userId, threadRoot))
       // [[ZOD071]]: a thread's sessions are the thread-level one plus one per
       // handoff arc — end them all. Reset events aren't m.room.message, so
       // the self-heal rebuild above doesn't cover them; rebuild here if the
@@ -1027,6 +1038,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       const st = threadStates.get(threadRoot)
       const cleanup: Array<{ name: string; key: string; result: Promise<void> }> = []
       for (const a of bindings) {
+        if (!resets(a)) continue
         cleanup.push({
           name: a.name,
           key: threadRoot,
@@ -1068,15 +1080,21 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         | undefined
       const threadRoot =
         relates?.rel_type === 'm.thread' && relates.event_id ? relates.event_id : undefined
+      // An agent with `senders` is interrupted only by its senders.
+      const stops = (a: AgentBinding) => senderAllowed(a, evt)
       if (threadRoot) {
-        returns.interrupt(threadRoot)
-        const targets: Array<{ sessionId: string; agent: string }> = []
+        returns.interrupt(threadRoot, stops)
+        const targets: Array<{ sessionId: string; agent: string; allowed: boolean }> = []
         for (const [sessionId, ctx] of sessions) {
           if (ctx.threadRoot === threadRoot) {
-            targets.push({ sessionId, agent: ctx.agent.name })
+            targets.push({ sessionId, agent: ctx.agent.name, allowed: stops(ctx.agent) })
           }
         }
         for (const t of targets) {
+          if (!t.allowed) {
+            console.warn(`[matrix] interrupt from ${evt.sender} ignored for ${t.agent} (session=${t.sessionId})`)
+            continue
+          }
           console.log(
             `[matrix] interrupt session=${t.sessionId} agent=${t.agent} thread=${threadRoot}` +
               (content.reason ? ` reason=${content.reason}` : ''),
@@ -1091,7 +1109,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         const task = taskRegistry.taskForRoot(threadRoot)
         if (task?.phase === 'open' && !targets.some((t) => t.agent === task.assignee)) {
           const assignee = bindingFor(task.assignee)
-          if (assignee)
+          if (assignee && stops(assignee))
             await finishTask(task, {
               agent: assignee,
               completion: { agent: assignee.name, thread_id: threadRoot, status: 'cancelled' },
@@ -1108,11 +1126,15 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       if (!ctx) {
         return
       }
+      if (!stops(ctx.agent)) {
+        console.warn(`[matrix] interrupt from ${evt.sender} ignored for ${ctx.agent.name} (session=${content.session_id})`)
+        return
+      }
       console.log(
         `[matrix] interrupt session=${content.session_id} agent=${ctx.agent.name}` +
           (content.reason ? ` reason=${content.reason}` : ''),
       )
-      returns.interrupt(ctx.threadRoot)
+      returns.interrupt(ctx.threadRoot, stops)
       await agents.cancelSession(ctx.agent.name, content.session_id).catch((err) => {
         console.error(
           `[matrix] cancelSession(${ctx.agent.name}, ${content.session_id}) failed:`,
@@ -1144,6 +1166,13 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       // Agents never approve, not even their own tool calls (Fabrium trust rule).
       if (!evt.sender || isNotHuman(evt.sender)) {
         console.warn(`[matrix] ignoring approval response from agent ${evt.sender}`)
+        return
+      }
+      // `sessions` is never pruned, and a request card is sent only once its
+      // session is here, so a known approval always has its agent here.
+      const approver = sessions.get(content.session_id)?.agent
+      if (approver && !senderAllowed(approver, evt)) {
+        console.warn(`[matrix] approval response from ${evt.sender} ignored: ${approver.name} does not answer them`)
         return
       }
       const decision = content.option_id
@@ -1250,7 +1279,9 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       inboundState.participants.at(-1) !== evt.sender
     )
       inboundState.participants.push(evt.sender)
-    let matches = route(evt, bindings, threadStates, taskCtx, workforceIds)
+    let matches = route(evt, bindings, threadStates, taskCtx, workforceIds, (caller, root) =>
+      openHandoffs.get(openKey(caller, root)),
+    )
     // In a delegated task, agent-to-agent messages dispatch only when the
     // outgoing flush registered a matching invocation. This prevents a
     // circular handoff that was visibly refused from still waking its target.
@@ -1315,8 +1346,15 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     // whole call graph and acts on the edges where it hosts an end. Recorded
     // BEFORE dispatch: the callee's session key is the arc minted here.
     const handoff = readHandoff(evt.content)
+    // A call that route() refused for its callee writes no edge: an arc would
+    // move the callee's next turn to a fresh session (a reset by the caller).
+    const callee = handoff && bindings.find((b) => b.userId === handoff.callee)
     const callEdge =
-      handoff && evt.type === 'm.room.message' && handoff.caller === evt.sender && promotedRoot
+      handoff &&
+      evt.type === 'm.room.message' &&
+      handoff.caller === evt.sender &&
+      promotedRoot &&
+      (!callee || senderAllowed(callee, evt))
         ? handoff
         : undefined
     if (promotedRoot && (matches.length > 0 || callEdge)) {
@@ -1689,7 +1727,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           }
           continue
         }
-        const admission = checkDelegable(spec.agent, caller.channelId, bindings)
+        const admission = checkDelegable(spec.agent, caller.channelId, bindings, callerBinding.userId)
         if (!admission.ok) {
           results[index] = {
             agent: spec.agent,
@@ -1817,6 +1855,12 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       const target = resolved.target
       if (target.userId === callerBinding.userId)
         return { status: 'refused', reason: 'self: you cannot hand off to yourself' }
+      // route() would drop the call for a local callee with `senders`: refuse
+      // before the handoff opens, so the caller is not left waiting. A callee
+      // on another workstation is checked by its own daemon.
+      const local = bindings.find((b) => b.userId === target.userId)
+      if (local && !senderAllowed(local, { sender: callerBinding.userId }))
+        return { status: 'refused', reason: `not_allowed: "${target.name}" answers only its owner` }
       const st = threadStates.get(caller.threadRoot)
       if (st && wouldCycleCallers(st.callers, target.userId, callerBinding.userId))
         return {
@@ -2026,7 +2070,14 @@ export async function rebuildThreadState(
     }
     // [[ZOD092]] Call edges only from structured handoffs whose caller is the sender.
     const h = readHandoff(content)
-    if (h && h.caller === evSender && h.callee !== h.caller && !wouldCycleCallers(state.callers, h.callee, h.caller)) {
+    const callee = h && bindings.find((b) => b.userId === h.callee)
+    if (
+      h &&
+      h.caller === evSender &&
+      h.callee !== h.caller &&
+      (!callee || senderAllowed(callee, { sender: evSender })) &&
+      !wouldCycleCallers(state.callers, h.callee, h.caller)
+    ) {
       state.callers[h.callee] = h.caller
       if (evId) {
         const arcs = (state.handoffs[h.callee] ??= [])

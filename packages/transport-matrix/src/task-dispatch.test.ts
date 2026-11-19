@@ -22,11 +22,23 @@ const agents: AgentBinding[] = [
 ]
 describe('task dispatch', () => {
   it('admits only local room agents', () => {
-    expect(checkDelegable('worker', '!r:hs', agents)).toEqual({ ok: true })
-    expect(checkDelegable('ghost', '!r:hs', agents)).toMatchObject({
+    expect(checkDelegable('worker', '!r:hs', agents, '@supervisor:hs')).toEqual({ ok: true })
+    expect(checkDelegable('ghost', '!r:hs', agents, '@supervisor:hs')).toMatchObject({
       ok: false,
       reason: expect.stringContaining('unknown_agent'),
     })
+  })
+  it('checkDelegable refuses a target whose senders do not hold the caller', () => {
+    const personal = { ...agents[1]!, senders: ['@ana:hs'] }
+    expect(checkDelegable('worker', '!r:hs', [agents[0]!, personal], '@supervisor:hs')).toEqual({
+      ok: false,
+      reason: 'not_allowed: "worker" answers only its owner',
+    })
+  })
+  it('checkDelegable accepts a target without senders, and a caller that is in senders', () => {
+    expect(checkDelegable('worker', '!r:hs', agents, '@supervisor:hs')).toEqual({ ok: true })
+    const personal = { ...agents[1]!, senders: ['@supervisor:hs'] }
+    expect(checkDelegable('worker', '!r:hs', [agents[0]!, personal], '@supervisor:hs')).toEqual({ ok: true })
   })
   it('makes a visible, unthreaded signed root and renders a return', () => {
     const content = buildAssignmentContent({
