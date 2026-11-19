@@ -65,14 +65,23 @@ function seed() {
   MatrixClientPeg.injectClientForTest(client);
 }
 
+type RailProps = ComponentProps<typeof WorkspaceRail>;
+
 function renderRail(
   scope: Scope,
   onSelect = vi.fn(),
-  vm?: ComponentProps<typeof WorkspaceRail>["vm"],
+  vm?: RailProps["vm"],
+  agents?: RailProps["agents"],
 ) {
-  render(<WorkspaceRail scope={scope} onSelect={onSelect} vm={vm} />);
+  render(<WorkspaceRail scope={scope} onSelect={onSelect} vm={vm} agents={agents} />);
   return onSelect;
 }
+
+/** The labels of the rail buttons, in order. */
+const railLabels = () =>
+  within(screen.getByRole("navigation", { name: "Workspaces" }))
+    .getAllByRole("button")
+    .map((b) => b.getAttribute("aria-label"));
 
 /** Every rail button marked current, by label. */
 const currentButtons = () =>
@@ -161,6 +170,42 @@ describe("<WorkspaceRail>", () => {
       ]);
     },
   );
+
+  it("shows Agents below VM", async () => {
+    seed();
+    const open = vi.fn();
+    renderRail(
+      { kind: "home" },
+      vi.fn(),
+      { active: false, onSelect: vi.fn() },
+      { active: false, onSelect: open },
+    );
+    expect(railLabels().slice(0, 3)).toEqual(["Home", "VM", "Agents"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Agents" }));
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows Agents without VM", () => {
+    seed();
+    renderRail({ kind: "home" }, vi.fn(), undefined, { active: false, onSelect: vi.fn() });
+    expect(railLabels().slice(0, 2)).toEqual(["Home", "Agents"]);
+    expect(screen.queryByRole("button", { name: "VM" })).toBeNull();
+  });
+
+  it.each([
+    ["Home", { kind: "home" } as Scope],
+    ["a workspace", { kind: "space", spaceId: acme } as Scope],
+  ])("no workspace is current while Agents is active, over %s", (_, scope) => {
+    seed();
+    renderRail(
+      scope,
+      vi.fn(),
+      { active: false, onSelect: vi.fn() },
+      { active: true, onSelect: vi.fn() },
+    );
+    expect(currentButtons()).toEqual(["Agents"]);
+  });
 
   it("badges mentions and dots plain unread", () => {
     seed();

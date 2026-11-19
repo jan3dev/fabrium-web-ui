@@ -18,7 +18,7 @@ const vms = [
     state: "pending",
     setup: "pending",
     public_ip: null,
-    agent_id: null,
+    agents: [],
   }),
   makeVm({ id: "i-0123456789abcdef3", name: "papa", state: "stopping" }),
   makeVm({
@@ -27,7 +27,10 @@ const vms = [
     instance_type: "c6a.large",
     sev_snp: true,
     setup: "expired",
-    agent_id: "@tango.echo:example.org",
+    agents: [
+      { id: "0a1b2c3d4e5f60718293a4b5c6d7e8f9", name: "echo", agent_id: "@tango.echo:example.org" },
+      { id: "1b2c3d4e5f60718293a4b5c6d7e8f90a", name: "reviewer", agent_id: "@tango.reviewer:example.org" },
+    ],
   }),
   makeVm({
     id: "i-0123456789abcdef5",
@@ -48,7 +51,6 @@ const meta = {
     busyIds: new Set<string>(),
     onAction: () => {},
     onSetAutoStop: () => {},
-    onNew: () => {},
     onRetry: () => {},
   },
   decorators: [
@@ -63,7 +65,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** One VM for each EC2 state, a Confidential type, and an expired setup. */
+/** One VM for each EC2 state, a Confidential type, an expired setup, two agents, and none. */
 export const AllStates: Story = {};
 
 export const ActionInFlight: Story = {

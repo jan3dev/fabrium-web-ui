@@ -1,5 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useId, useState } from "react";
-import { PlusIcon, ShieldCheckIcon } from "@/components/icons";
+import { ShieldCheckIcon } from "@/components/icons";
 import { Alert } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -20,25 +20,26 @@ import type { Vm, VmState } from "../../model/types";
 import { initialAutoStopHours, parseAutoStopHours } from "../dialogs/auto-stop-field";
 import { StartVmDialog } from "../dialogs/start-vm-dialog";
 
-export type VmAction = "start" | "stop" | "reboot" | "delete";
+export type VmAction = "start" | "stop" | "reboot" | "credentials" | "delete";
 
 const LABEL: Record<VmAction, string> = {
   start: "Start",
   stop: "Stop",
   reboot: "Reboot",
+  credentials: "Update credentials",
   delete: "Delete",
 };
 
-// Delete is always offered. The other actions depend on the EC2 state.
+// Update credentials and Delete are always offered. The other actions depend on the EC2 state.
 const ACTIONS: Record<VmState, VmAction[]> = {
-  stopped: ["start", "delete"],
-  running: ["stop", "reboot", "delete"],
-  pending: ["delete"],
-  stopping: ["delete"],
-  "shutting-down": ["delete"],
+  stopped: ["start", "credentials", "delete"],
+  running: ["stop", "reboot", "credentials", "delete"],
+  pending: ["credentials", "delete"],
+  stopping: ["credentials", "delete"],
+  "shutting-down": ["credentials", "delete"],
 };
 
-const STATE_TONE: Record<VmState, "success" | "neutral" | "warning"> = {
+export const STATE_TONE: Record<VmState, "success" | "neutral" | "warning"> = {
   running: "success",
   stopped: "neutral",
   pending: "warning",
@@ -46,7 +47,7 @@ const STATE_TONE: Record<VmState, "success" | "neutral" | "warning"> = {
   "shutting-down": "warning",
 };
 
-const HEADERS = ["Name", "Agent", "Owner", "Type", "State", "IP", "Launched"];
+const HEADERS = ["Name", "Agents", "Owner", "Type", "State", "IP", "Launched"];
 
 function launchedLabel(iso: string): string {
   const ts = Date.parse(iso);
@@ -62,12 +63,10 @@ interface VmViewProps {
   noAccess: boolean;
   /** VMs with an action in flight. */
   busyIds: ReadonlySet<string>;
-  /** Start comes with the auto-stop hours chosen in its dialog. */
+  /** Start comes with the auto-stop hours chosen in its dialog. Update credentials opens its dialog. */
   onAction: (vm: Vm, action: VmAction, autoStopHours?: number) => void;
   /** Sets the hours of uptime after which the VM stops itself. */
   onSetAutoStop: (vm: Vm, hours: number) => void;
-  /** Opens the New VM dialog. Without it, the button is not shown. */
-  onNew?: () => void;
   onRetry: () => void;
 }
 
@@ -78,7 +77,6 @@ export function VmView({
   busyIds,
   onAction,
   onSetAutoStop,
-  onNew,
   onRetry,
 }: VmViewProps) {
   // The VM whose delete confirmation is open, by id.
@@ -99,12 +97,6 @@ export function VmView({
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex items-center justify-between gap-4 border-b border-border px-6 py-4">
         <h1 className="font-heading text-subtitle font-medium">VMs</h1>
-        {onNew && !noAccess ? (
-          <Button size="sm" onClick={onNew}>
-            <PlusIcon aria-hidden />
-            New VM
-          </Button>
-        ) : null}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
         {noAccess ? (
@@ -113,9 +105,11 @@ export function VmView({
             are one, VM management may be off for this workspace.
           </Notice>
         ) : vms === null ? (
-          <FirstLoad error={error} onRetry={onRetry} />
+          <FirstLoad what="VMs" error={error} onRetry={onRetry} />
         ) : vms.length === 0 ? (
-          <Notice title="No VMs yet">Each VM runs one agent.</Notice>
+          <Notice title="No VMs yet">
+            Create one from an agent on the Agents page.
+          </Notice>
         ) : (
           <>
             {error ? (
@@ -180,23 +174,28 @@ export function VmView({
 }
 
 /** Before the first answer: loading, or the reason there is none. */
-function FirstLoad({
+export function FirstLoad({
+  what,
   error,
   onRetry,
 }: {
+  /** What the page lists: "VMs", "agents". */
+  what: string;
   error: string | null;
   onRetry: () => void;
 }) {
   if (!error) {
     return (
       <p role="status" className="text-body2 text-text-secondary">
-        Loading VMs…
+        Loading {what}…
       </p>
     );
   }
   return (
     <Alert tone="danger" className="items-center justify-between">
-      <p>Could not load VMs. {error}</p>
+      <p>
+        Could not load {what}. {error}
+      </p>
       <Button variant="secondary" size="sm" onClick={onRetry}>
         Retry
       </Button>
@@ -256,7 +255,7 @@ function VmTable({
   );
 }
 
-function Notice({ title, children }: { title: string; children: ReactNode }) {
+export function Notice({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-2 rounded-card border border-dashed border-surface-border-secondary px-6 py-10 text-center">
       <h2 className="font-heading text-subtitle font-medium text-text-primary">
@@ -292,7 +291,17 @@ function VmRow({
         {vm.name}
       </th>
       <td className="px-4 py-3 text-body2 break-all text-text-secondary">
-        {vm.agent_id ?? "None"}
+        {vm.agents.length === 0 ? (
+          "No agents"
+        ) : (
+          <ul>
+            {vm.agents.map((agent) => (
+              <li key={agent.id} title={agent.agent_id}>
+                {agent.name}
+              </li>
+            ))}
+          </ul>
+        )}
       </td>
       <td className="px-4 py-3 text-body2 break-all text-text-secondary">
         {vm.creator ?? "Unknown"}
@@ -330,7 +339,7 @@ function VmRow({
         <div className="flex flex-wrap items-center justify-end gap-3">
           <AutoStopControl vm={vm} busy={busy} onSet={onSetAutoStop} />
           <div className="flex gap-1.5">
-            {(ACTIONS[vm.state] ?? ["delete"]).map((action) => (
+            {(ACTIONS[vm.state] ?? ["credentials", "delete"]).map((action) => (
               <Button
                 key={action}
                 type="button"

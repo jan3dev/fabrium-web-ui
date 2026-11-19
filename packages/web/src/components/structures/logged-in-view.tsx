@@ -23,11 +23,11 @@ import { useGlobalSearchEnabled } from "../../client/feature-flags";
 import { MatrixClientPeg } from "../../client/peg";
 import { DEFAULT_WORKFORCE_SPACE } from "../../client/runtime-config";
 import { useActiveSpaceId } from "../../hooks/use-active-space-id";
+import { useFabriumRole } from "../../hooks/use-fabrium-role";
 import { useAppShortcuts } from "../../hooks/use-app-shortcuts";
 import { useJoinedSpaces } from "../../hooks/use-joined-spaces";
 import { markAllRead } from "../../hooks/use-mark-read";
 import { useMatrixClient } from "../../hooks/use-matrix-client";
-import { useVmAccess } from "../../hooks/use-vm-access";
 import { WorkforceSpaceContext } from "../../hooks/use-workforce";
 import { useIsMobile } from "../../hooks/use-mobile";
 import { LeftPanel } from "./left-panel";
@@ -101,8 +101,10 @@ export function LoggedInView({
   useServiceWorkerMessages();
   const roomMatch = useMatch("/room/:roomId");
   const roomId = roomMatch?.params.roomId ?? null;
-  const canManageVms = useVmAccess();
+  const role = useFabriumRole();
+  const canManageVms = role === "vm-creator" || role === "admin" || role === "owner";
   const vmPageOpen = useMatch("/vm") !== null;
+  const agentsPageOpen = useMatch("/agents") !== null;
   useClearRoomNotifications(roomId);
   const [searchParams, setSearchParams] = useSearchParams();
   // One right pane at a time: an open thread wins over `?pane=`.
@@ -200,12 +202,17 @@ export function LoggedInView({
       scope={activeScope}
       onSelect={(next) => {
         setScope(next);
-        // Home and the workspaces are other destinations than the VM page.
-        if (vmPageOpen) navigate("/");
+        // Home and the workspaces are other destinations than the VM and Agents pages.
+        if (vmPageOpen || agentsPageOpen) navigate("/");
       }}
       vm={
         canManageVms
           ? { active: vmPageOpen, onSelect: () => navigate("/vm") }
+          : undefined
+      }
+      agents={
+        role !== null
+          ? { active: agentsPageOpen, onSelect: () => navigate("/agents") }
           : undefined
       }
     />

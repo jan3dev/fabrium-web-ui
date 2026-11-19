@@ -1,18 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
-  createVm,
   deleteVm,
   isNoAccess,
   rebootVm,
+  recreateVm,
   setAutoStop,
   startVm,
   stopVm,
 } from "../../client/fabrium-api";
-import { useVmFormOptions } from "../../hooks/use-vm-form-options";
 import { useVms } from "../../hooks/use-vms";
-import type { CreateVmRequest, Vm } from "../../model/types";
-import { NewVmDialog } from "../dialogs/new-vm-dialog";
+import type { Vm, VmCredentials } from "../../model/types";
+import { UpdateCredentialsDialog } from "../dialogs/update-credentials-dialog";
 import { type VmAction, VmView } from "./vm-view";
 
 const RUN = {
@@ -20,20 +19,35 @@ const RUN = {
   stop: stopVm,
   reboot: rebootVm,
   delete: deleteVm,
-} satisfies Record<VmAction, (id: string, autoStopHours?: number) => Promise<unknown>>;
+} satisfies Record<
+  Exclude<VmAction, "credentials">,
+  (id: string, autoStopHours?: number) => Promise<unknown>
+>;
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** The /vm route: the VM list, its row actions, and the New VM dialog. */
+/**
+ * The /vm route: the VM list, its row actions, and the Update credentials dialog.
+ * A VM is created from an agent, on the Agents page.
+ */
 export function VmRoute() {
   const { vms, error, refresh } = useVms();
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
-  const [creating, setCreating] = useState(false);
-  const { options, error: optionsError } = useVmFormOptions(creating);
+  // The VM whose Update credentials dialog is open, by id.
+  const [replacing, setReplacing] = useState<string | null>(null);
+  const replaced = vms?.find((vm) => vm.id === replacing);
 
-  const create = async (req: CreateVmRequest) => {
-    await createVm(req);
-    refresh();
+  // Forget a VM that left the list, so its return cannot bring back the dialog.
+  useEffect(() => {
+    if (replacing && !replaced) setReplacing(null);
+  }, [replacing, replaced]);
+
+  const recreate = async (vm: Vm, creds: VmCredentials) => {
+    try {
+      await recreateVm(vm.id, creds);
+    } finally {
+      refresh();
+    }
   };
 
   /** Runs `work` on a VM with its buttons disabled, then refreshes the list. */
@@ -55,7 +69,9 @@ export function VmRoute() {
   };
 
   const onAction = (vm: Vm, action: VmAction, autoStopHours?: number) =>
-    run(vm, action, () => RUN[action](vm.id, autoStopHours));
+    action === "credentials"
+      ? setReplacing(vm.id)
+      : run(vm, action, () => RUN[action](vm.id, autoStopHours));
   const onSetAutoStop = (vm: Vm, hours: number) =>
     run(vm, "set the auto-stop of", () => setAutoStop(vm.id, hours));
 
@@ -68,17 +84,18 @@ export function VmRoute() {
         busyIds={busyIds}
         onAction={onAction}
         onSetAutoStop={onSetAutoStop}
-        onNew={() => setCreating(true)}
         onRetry={refresh}
       />
-      <NewVmDialog
-        open={creating}
-        onOpenChange={setCreating}
-        options={options}
-        optionsError={optionsError}
-        vmNames={vms?.map((vm) => vm.name) ?? []}
-        onSubmit={create}
-      />
+      {replaced ? (
+        <UpdateCredentialsDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setReplacing(null);
+          }}
+          vm={replaced}
+          onSubmit={(creds) => recreate(replaced, creds)}
+        />
+      ) : null}
     </>
   );
 }

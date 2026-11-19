@@ -6,9 +6,9 @@ import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mswServer } from "../../../test/setup";
 import { signInForVmApi } from "../../../test/vm-api";
-import { AGENTS, INSTANCE_TYPES, makeVm } from "../../../test/vm-fixtures";
+import { makeVm } from "../../../test/vm-fixtures";
 import { MatrixClientPeg } from "../../client/peg";
-import type { CreateVmRequest, Vm } from "../../model/types";
+import type { Vm } from "../../model/types";
 import { VmRoute } from "./vm-page";
 import { VmView } from "./vm-view";
 
@@ -29,7 +29,7 @@ const oscar = makeVm({
   state: "pending",
   setup: "pending",
   public_ip: null,
-  agent_id: null,
+  agents: [],
 });
 const papa = makeVm({
   id: "i-0123456789abcdef3",
@@ -42,20 +42,18 @@ const tango = makeVm({
   instance_type: "c6a.large",
   sev_snp: true,
   setup: "expired",
-  agent_id: "@tango.echo:example.org",
+  agents: [
+    { id: "0a1b2c3d4e5f60718293a4b5c6d7e8f9", name: "echo", agent_id: "@tango.echo:example.org" },
+  ],
 });
 
 const AFTER_ACTION = { start: "pending", stop: "stopping", reboot: "running" } as const;
 
-/**
- * A fake control plane behind the browser API. `calls` records what reached
- * it, in order, and `created` holds the bodies of the creates.
- */
+/** A fake control plane behind the browser API. `calls` records what reached it, in order. */
 function serve(initial: Vm[]) {
   const cp = {
     vms: initial,
     calls: [] as string[],
-    created: [] as CreateVmRequest[],
     started: [] as unknown[],
     autoStops: [] as { id: string; body: unknown }[],
   };
@@ -63,29 +61,6 @@ function serve(initial: Vm[]) {
     http.get(`${API}/vms`, () => {
       cp.calls.push("GET /vms");
       return HttpResponse.json(cp.vms);
-    }),
-    http.get(`${API}/instance-types`, () => {
-      cp.calls.push("GET /instance-types");
-      return HttpResponse.json(INSTANCE_TYPES);
-    }),
-    http.get(`${API}/agents`, () => {
-      cp.calls.push("GET /agents");
-      return HttpResponse.json(AGENTS);
-    }),
-    http.post(`${API}/vms`, async ({ request }) => {
-      const body = (await request.json()) as CreateVmRequest;
-      cp.calls.push("POST /vms");
-      cp.created.push(body);
-      const vm = makeVm({
-        id: "i-0123456789abcdef9",
-        name: body.name,
-        state: "pending",
-        setup: "pending",
-        public_ip: null,
-        agent_id: `@${body.name}.${body.agent.name}:example.org`,
-      });
-      cp.vms = [...cp.vms, vm];
-      return HttpResponse.json(vm, { status: 201 });
     }),
     http.post(`${API}/vms/:id/:verb`, async ({ params, request }) => {
       const verb = params.verb as keyof typeof AFTER_ACTION;
@@ -138,7 +113,7 @@ afterEach(() => {
 });
 
 describe("<VmRoute>", () => {
-  it("lists name, agent, type, state, setup, IP, and launch date", async () => {
+  it("lists name, agents, type, state, setup, IP, and launch date", async () => {
     serve([lima, oscar]);
     renderPage();
     expect(screen.getByText("Loading VMs…")).toBeInTheDocument();
@@ -146,10 +121,10 @@ describe("<VmRoute>", () => {
     await screen.findByRole("rowheader", { name: "lima" });
     expect(
       screen.getAllByRole("columnheader").map((h) => h.textContent),
-    ).toEqual(["Name", "Agent", "Owner", "Type", "State", "IP", "Launched", "Actions"]);
+    ).toEqual(["Name", "Agents", "Owner", "Type", "State", "IP", "Launched", "Actions"]);
 
     const running = within(rowOf("lima"));
-    expect(running.getByText("@lima.echo:example.org")).toBeInTheDocument();
+    expect(running.getByText("echo")).toBeInTheDocument();
     expect(running.getByText("t3a.medium")).toBeInTheDocument();
     expect(running.getByText("running")).toBeInTheDocument();
     expect(running.getByText("Setup delivered")).toBeInTheDocument();
@@ -161,7 +136,43 @@ describe("<VmRoute>", () => {
     const starting = within(rowOf("oscar"));
     expect(starting.getByText("pending")).toBeInTheDocument();
     expect(starting.getByText("Setup pending")).toBeInTheDocument();
-    expect(starting.getAllByText("None")).toHaveLength(2); // no agent, no IP
+    expect(starting.getByText("No agents")).toBeInTheDocument();
+    expect(starting.getByText("None")).toBeInTheDocument(); // no IP
+  });
+
+  it("has no New VM button", async () => {
+    serve([lima]);
+    renderPage();
+    await screen.findByRole("rowheader", { name: "lima" });
+    expect(screen.queryByRole("button", { name: /new vm/i })).toBeNull();
+  });
+
+  it("lists the agents of each VM by name", async () => {
+    serve([
+      makeVm({
+        agents: [
+          { id: "5f0c2d7a9b3e4c1d8a6f0e2b4c6d8a0f", name: "echo", agent_id: "@lima.echo:example.org" },
+          { id: "6a1d3e8b0c4f5d2e9b7a1f3c5e7d9b1a", name: "reviewer", agent_id: "@lima.reviewer:example.org" },
+        ],
+      }),
+    ]);
+    renderPage();
+    await screen.findByRole("rowheader", { name: "lima" });
+
+    const agents = within(within(rowOf("lima")).getByRole("list")).getAllByRole("listitem");
+    expect(agents.map((a) => a.textContent)).toEqual(["echo", "reviewer"]);
+    expect(agents.map((a) => a.getAttribute("title"))).toEqual([
+      "@lima.echo:example.org",
+      "@lima.reviewer:example.org",
+    ]);
+  });
+
+  it("shows No agents for a VM without agents", async () => {
+    serve([oscar]);
+    renderPage();
+    await screen.findByRole("rowheader", { name: "oscar" });
+    expect(within(rowOf("oscar")).getByText("No agents")).toBeInTheDocument();
+    expect(within(rowOf("oscar")).queryByRole("list")).toBeNull();
   });
 
   it("marks only SEV-SNP types as Confidential, and flags an expired setup", async () => {
@@ -177,10 +188,10 @@ describe("<VmRoute>", () => {
   });
 
   it.each([
-    ["kilo", "stopped", ["Start", "Delete"]],
-    ["lima", "running", ["Stop", "Reboot", "Delete"]],
-    ["oscar", "pending", ["Delete"]],
-    ["papa", "stopping", ["Delete"]],
+    ["kilo", "stopped", ["Start", "Update credentials", "Delete"]],
+    ["lima", "running", ["Stop", "Reboot", "Update credentials", "Delete"]],
+    ["oscar", "pending", ["Update credentials", "Delete"]],
+    ["papa", "stopping", ["Update credentials", "Delete"]],
   ])("offers actions by state: %s is %s", async (name, _state, buttons) => {
     serve([kilo, lima, oscar, papa]);
     renderPage();
@@ -199,7 +210,37 @@ describe("<VmRoute>", () => {
       expect(within(rowOf("lima")).getByText("stopping")).toBeInTheDocument(),
     );
     expect(cp.calls).toEqual(["GET /vms", `POST ${lima.id}/stop`, "GET /vms"]);
-    expect(buttonsIn(rowOf("lima"))).toEqual(["Delete"]);
+    expect(buttonsIn(rowOf("lima"))).toEqual(["Update credentials", "Delete"]);
+  });
+
+  it("replaces a VM with new credentials", async () => {
+    const cp = serve([lima]);
+    let sent: unknown;
+    mswServer.use(
+      http.post(`${API}/vms/:id/recreate`, async ({ params, request }) => {
+        sent = await request.json();
+        cp.calls.push(`POST ${params.id}/recreate`);
+        const fresh = makeVm({ id: "i-0123456789abcdef8", state: "pending", setup: "pending" });
+        cp.vms = [{ ...lima, state: "shutting-down", agents: [] }, fresh];
+        return HttpResponse.json(fresh, { status: 201 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Update credentials lima" }));
+    const dialog = await screen.findByRole("dialog", { name: "Update the credentials of lima" });
+    expect(cp.calls).toEqual(["GET /vms"]);
+    await user.type(within(dialog).getByLabelText("Haven API key"), "hk-2");
+    await user.type(within(dialog).getByLabelText("GitHub token"), "gh-2");
+    await user.click(within(dialog).getByRole("button", { name: "Replace VM" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(sent).toStrictEqual({ haven_api_key: "hk-2", github_token: "gh-2" });
+    await waitFor(() =>
+      expect(cp.calls).toEqual(["GET /vms", `POST ${lima.id}/recreate`, "GET /vms"]),
+    );
+    expect(await screen.findByText("shutting-down")).toBeInTheDocument();
   });
 
   describe("Start dialog", () => {
@@ -374,106 +415,14 @@ describe("<VmRoute>", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("shows the empty state when there are no VMs", async () => {
+  it("an empty list points to the Agents page", async () => {
     serve([]);
     renderPage();
     expect(await screen.findByText("No VMs yet")).toBeInTheDocument();
+    expect(
+      screen.getByText("Create one from an agent on the Agents page."),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("table")).toBeNull();
-  });
-
-  describe("New VM dialog", () => {
-    type User = ReturnType<typeof userEvent.setup>;
-
-    /** Opens the dialog. Its options load after it opens. */
-    async function openDialog(user: User) {
-      await user.click(await screen.findByRole("button", { name: "New VM" }));
-      return screen.findByRole("dialog", { name: "New VM" });
-    }
-    const fill = async (user: User, dialog: HTMLElement) => {
-      await user.type(within(dialog).getByLabelText(/^vm name/i), "kilo");
-      await user.type(within(dialog).getByLabelText(/^agent name/i), "sierra");
-      await user.type(within(dialog).getByLabelText(/haven api key/i), "hk-1");
-    };
-
-    it("creates the VM, closes, and refreshes the list", async () => {
-      const cp = serve([lima]);
-      const user = userEvent.setup();
-      renderPage();
-
-      const dialog = await openDialog(user);
-      await within(dialog).findByLabelText("Instance type");
-      await fill(user, dialog);
-      await user.click(within(dialog).getByRole("button", { name: "Create VM" }));
-
-      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-      expect(await screen.findByRole("rowheader", { name: "kilo" })).toBeInTheDocument();
-      expect(cp.created).toStrictEqual([
-        {
-          name: "kilo",
-          instance_type: "t3a.medium",
-          auto_stop_hours: 12,
-          agent: { mode: "new", name: "sierra" },
-          haven_api_key: "hk-1",
-        },
-      ]);
-      expect(cp.calls.slice(-2)).toEqual(["POST /vms", "GET /vms"]);
-    });
-
-    it("loads the instance types and agents each time it opens", async () => {
-      const cp = serve([lima]);
-      const user = userEvent.setup();
-      renderPage();
-
-      const dialog = await openDialog(user);
-      await within(dialog).findByLabelText("Instance type");
-      await user.keyboard("{Escape}");
-      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-      await within(await openDialog(user)).findByLabelText("Instance type");
-
-      expect(cp.calls.filter((c) => c === "GET /agents")).toHaveLength(2);
-      expect(cp.calls.filter((c) => c === "GET /instance-types")).toHaveLength(2);
-    });
-
-    it("shows a failed create inline with its step, and stays open", async () => {
-      serve([lima]);
-      mswServer.use(
-        http.post(`${API}/vms`, () =>
-          HttpResponse.json(
-            { error: "could not register the agent", step: "register_appservice" },
-            { status: 502 },
-          ),
-        ),
-      );
-      const user = userEvent.setup();
-      renderPage();
-
-      const dialog = await openDialog(user);
-      await within(dialog).findByLabelText("Instance type");
-      await fill(user, dialog);
-      await user.click(within(dialog).getByRole("button", { name: "Create VM" }));
-
-      const alert = await within(dialog).findByRole("alert");
-      expect(alert).toHaveTextContent("could not register the agent");
-      expect(alert).toHaveTextContent("register_appservice");
-      expect(screen.getByRole("dialog", { name: "New VM" })).toBeInTheDocument();
-    });
-
-    it("shows why the options did not load", async () => {
-      serve([lima]);
-      mswServer.use(
-        http.get(`${API}/instance-types`, () =>
-          HttpResponse.json({ error: "control plane unreachable" }, { status: 502 }),
-        ),
-      );
-      const user = userEvent.setup();
-      renderPage();
-
-      const dialog = await openDialog(user);
-      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-        "control plane unreachable",
-      );
-      expect(within(dialog).getByRole("button", { name: "Create VM" })).toBeDisabled();
-    });
   });
 });
 
@@ -531,20 +480,9 @@ describe("<VmView>", () => {
     render(view({ vms: [makeVm({ launched_at: "yesterday" })] }));
     expect(screen.getByText("yesterday")).toBeInTheDocument();
   });
-
-  it("offers New VM only when it can open the dialog", async () => {
-    const onNew = vi.fn();
-    const user = userEvent.setup();
-    const { rerender } = render(view());
-    expect(screen.queryByRole("button", { name: "New VM" })).toBeNull();
-
-    rerender(view({ onNew }));
-    await user.click(screen.getByRole("button", { name: "New VM" }));
-    expect(onNew).toHaveBeenCalledTimes(1);
-  });
 });
 
-describe("auto-stop, owner, and names", () => {
+describe("auto-stop and owner", () => {
   const juliet = makeVm({
     id: "i-0123456789abcdef5",
     name: "juliet",
@@ -608,37 +546,5 @@ describe("auto-stop, owner, and names", () => {
     await user.click(within(dialog).getByRole("button", { name: "Start" }));
     await waitFor(() => expect(cp.calls).toContain(`POST ${juliet.id}/start`));
     expect(cp.started).toEqual([null]);
-  });
-
-  it("refuses a VM name or an agent name that exists", async () => {
-    serve([lima]);
-    const user = userEvent.setup();
-    renderPage();
-    await user.click(await screen.findByRole("button", { name: "New VM" }));
-    const dialog = await screen.findByRole("dialog", { name: "New VM" });
-    await user.type(within(dialog).getByLabelText("VM name"), "lima");
-    await user.type(within(dialog).getByLabelText("Agent name"), "echo");
-    await user.type(within(dialog).getByLabelText(/Haven API key/i), "hk-1");
-
-    expect(within(dialog).getByText("A VM named lima exists.")).toBeInTheDocument();
-    expect(
-      within(dialog).getByText("An agent named echo exists. Pick it under Existing agent if it is free."),
-    ).toBeInTheDocument();
-    expect(within(dialog).getByLabelText("VM name")).toHaveAttribute("aria-invalid", "true");
-    expect(within(dialog).getByRole("button", { name: "Create VM" })).toBeDisabled();
-
-    await user.clear(within(dialog).getByLabelText("VM name"));
-    await user.type(within(dialog).getByLabelText("VM name"), "mike");
-    await user.clear(within(dialog).getByLabelText("Agent name"));
-    await user.type(within(dialog).getByLabelText("Agent name"), "foxtrot");
-    expect(within(dialog).queryByRole("alert")).toBeNull();
-    expect(within(dialog).getByRole("button", { name: "Create VM" })).toBeEnabled();
-
-    // The agent of the typed VM name is a retry of its own admission: no error.
-    await user.clear(within(dialog).getByLabelText("VM name"));
-    await user.type(within(dialog).getByLabelText("VM name"), "nova");
-    await user.clear(within(dialog).getByLabelText("Agent name"));
-    await user.type(within(dialog).getByLabelText("Agent name"), "echo");
-    expect(within(dialog).queryByRole("alert")).toBeNull();
   });
 });

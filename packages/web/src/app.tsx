@@ -14,6 +14,7 @@ import { MatrixClientPeg } from "./client/peg";
 import { AuthCallback } from "./components/auth/auth-callback";
 import { Login } from "./components/auth/login";
 import { Register } from "./components/auth/register";
+import { AgentsRoute } from "./components/structures/agents-page";
 import { SearchPageRoute } from "./components/structures/search-page";
 import { LobbyRoute } from "./components/structures/lobby";
 import { InboxRoute } from "./components/structures/inbox/inbox-view";
@@ -141,6 +142,7 @@ function AppRoutes({ config }: { config: AppConfig }) {
         <Route path="invites" element={<InvitesPage />} />
         <Route path="inbox" element={<InboxRoute />} />
         <Route path="vm" element={<VmRoute />} />
+        <Route path="agents" element={<AgentsRoute />} />
       </Route>
       <Route
         path="/login"

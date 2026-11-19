@@ -5,7 +5,7 @@ import { App } from "./app";
 import { MatrixClientPeg } from "./client/peg";
 import { setGlobalSearchEnabled } from "./client/feature-flags";
 import { mswServer, relaxUnhandled, stubStartClient } from "../test/setup";
-import { makeVm } from "../test/vm-fixtures";
+import { makeAgent, makeVm } from "../test/vm-fixtures";
 
 const HS = "https://h.example";
 
@@ -112,6 +112,32 @@ describe("<App />", () => {
     render(<App config={{ homeserverUrl: HS }} initialRoute="/vm" />);
     expect(await screen.findByRole("rowheader", { name: "lima" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "VMs" })).toBeInTheDocument();
+  });
+
+  it("serves the Agents page at /agents", async () => {
+    localStorage.setItem(
+      "zoon:session",
+      JSON.stringify({
+        homeserverUrl: HS,
+        accessToken: "tok",
+        userId: "@alice:h.example",
+        deviceId: "DEV1",
+      }),
+    );
+    mswServer.use(
+      http.post(`${HS}/_matrix/client/v3/user/:userId/openid/request_token`, () =>
+        HttpResponse.json({
+          access_token: "openid-tok",
+          token_type: "Bearer",
+          matrix_server_name: "h.example",
+          expires_in: 3600,
+        }),
+      ),
+      http.get("/_fabrium/v1/agents", () => HttpResponse.json({ agents: [makeAgent()], vms: [] })),
+    );
+    render(<App config={{ homeserverUrl: HS }} initialRoute="/agents" />);
+    expect(await screen.findByRole("rowheader", { name: /^echo/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Agents" })).toBeInTheDocument();
   });
 
   it("does not route /search when global search is off", async () => {

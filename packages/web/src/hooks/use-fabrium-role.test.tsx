@@ -4,30 +4,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mswServer } from "../../test/setup";
 import { signInForVmApi } from "../../test/vm-api";
 import { MatrixClientPeg } from "../client/peg";
-import { useVmAccess } from "./use-vm-access";
+import { useFabriumRole } from "./use-fabrium-role";
 
 const ACCESS = "/_fabrium/v1/access";
 
 afterEach(() => MatrixClientPeg.reset());
 
-describe("useVmAccess", () => {
-  it("is false until the API answers 200, then true", async () => {
+describe("useFabriumRole", () => {
+  it("gives the role of /access", async () => {
     signInForVmApi();
     mswServer.use(
       http.get(ACCESS, () =>
-        HttpResponse.json({ user_id: "@ann:example.org", role: "admin" }),
+        HttpResponse.json({ user_id: "@ann:example.org", role: "agents-manager" }),
       ),
     );
-    const { result } = renderHook(() => useVmAccess());
-    expect(result.current).toBe(false);
-    await waitFor(() => expect(result.current).toBe(true));
+    const { result } = renderHook(() => useFabriumRole());
+    expect(result.current).toBeNull();
+    await waitFor(() => expect(result.current).toBe("agents-manager"));
   });
 
   describe("with a fake clock", () => {
     type Reply = () => Response | Promise<Response>;
 
     const granted: Reply = () =>
-      new Response(JSON.stringify({ user_id: "@ann:example.org", role: "admin" }));
+      new Response(JSON.stringify({ user_id: "@ann:example.org", role: "vm-creator" }));
     const status =
       (code: number): Reply =>
       () =>
@@ -67,32 +67,32 @@ describe("useVmAccess", () => {
       ["a 403", status(403)],
       ["a 404", status(404)],
       ["a 200 that is not JSON", () => new Response("<!doctype html><html></html>")],
-    ])("stays false, without retrying or re-checking on focus, after %s", async (_, reply) => {
+    ])("stays null, without retrying or re-checking on focus, after %s", async (_, reply) => {
       signInForVmApi();
       const fetchMock = serve(reply);
-      const { result } = renderHook(() => useVmAccess());
+      const { result } = renderHook(() => useFabriumRole());
 
       await tick(LONG);
       await focus();
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(result.current).toBe(false);
+      expect(result.current).toBeNull();
     });
 
     it.each([
       ["a 502", status(502)],
       ["a network error", offline],
-    ])("retries after %s and turns true once the API answers", async (_, failure) => {
+    ])("tries again after %s and gives the role once the API answers", async (_, failure) => {
       signInForVmApi();
       const fetchMock = serve(failure, granted);
-      const { result } = renderHook(() => useVmAccess());
+      const { result } = renderHook(() => useFabriumRole());
 
       await tick(0);
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(result.current).toBe(false);
+      expect(result.current).toBeNull();
 
       await tick(LONG);
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(result.current).toBe(true);
+      expect(result.current).toBe("vm-creator");
 
       // Done: neither time nor focus asks again.
       await tick(LONG);
@@ -100,48 +100,48 @@ describe("useVmAccess", () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
-    it("retries after a failed OpenID token request", async () => {
+    it("tries again after a failed OpenID token request", async () => {
       const { getOpenIdToken } = signInForVmApi();
       getOpenIdToken.mockRejectedValueOnce(new Error("openid unavailable"));
       const fetchMock = serve(granted);
-      const { result } = renderHook(() => useVmAccess());
+      const { result } = renderHook(() => useFabriumRole());
 
       await tick(0);
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(result.current).toBe(false);
+      expect(result.current).toBeNull();
 
       await tick(LONG);
-      expect(result.current).toBe(true);
+      expect(result.current).toBe("vm-creator");
     });
 
     it("stops retrying after a few tries, then checks again on focus", async () => {
       signInForVmApi();
       const fetchMock = serve(status(502));
-      const { result } = renderHook(() => useVmAccess());
+      const { result } = renderHook(() => useFabriumRole());
 
       await tick(LONG);
       const tries = fetchMock.mock.calls.length;
       expect(tries).toBeGreaterThan(1);
       await tick(LONG);
       expect(fetchMock).toHaveBeenCalledTimes(tries);
-      expect(result.current).toBe(false);
+      expect(result.current).toBeNull();
 
       fetchMock.mockImplementation(async () => granted());
       await focus();
       expect(fetchMock).toHaveBeenCalledTimes(tries + 1);
-      expect(result.current).toBe(true);
+      expect(result.current).toBe("vm-creator");
     });
 
     it("checks at once on focus during a wait, and drops that retry", async () => {
       signInForVmApi();
       const fetchMock = serve(status(502), granted);
-      const { result } = renderHook(() => useVmAccess());
+      const { result } = renderHook(() => useFabriumRole());
       await tick(0);
-      expect(result.current).toBe(false);
+      expect(result.current).toBeNull();
 
       await focus();
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(result.current).toBe(true);
+      expect(result.current).toBe("vm-creator");
       await tick(LONG);
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
@@ -149,7 +149,7 @@ describe("useVmAccess", () => {
     it("clears its timer and its focus listener on unmount", async () => {
       signInForVmApi();
       const fetchMock = serve(status(502));
-      const { unmount } = renderHook(() => useVmAccess());
+      const { unmount } = renderHook(() => useFabriumRole());
       await tick(0);
       unmount();
 

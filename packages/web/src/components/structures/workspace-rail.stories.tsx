@@ -7,7 +7,7 @@ import { WorkspaceRail } from "./workspace-rail";
 const ME = "@me:h.example";
 const ACME = "!acme:h.example";
 
-/** Two top-level workspaces, so the rail has buttons below Home and VM. */
+/** Two top-level workspaces, so the rail has buttons below Home, VM, and Agents. */
 function seed() {
   const client = makeFakeClient({ userId: ME });
   const rooms = new Map<string, Room>();
@@ -49,12 +49,28 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** A member sees no VM button. Home is current. */
+/** A member without a Fabrium role sees neither VM nor Agents. Home is current. */
 export const Workspaces: Story = {};
 
-/** An admin or owner sees VM below Home. Home is still current. */
+/** A VM creator, an admin, or an owner sees VM and Agents below Home. Home is still current. */
 export const WithVmButton: Story = {
-  args: { vm: { active: false, onSelect: () => {} } },
+  args: {
+    vm: { active: false, onSelect: () => {} },
+    agents: { active: false, onSelect: () => {} },
+  },
+};
+
+/** An agents manager sees Agents below Home, and no VM. */
+export const AgentsOnly: Story = {
+  args: { agents: { active: false, onSelect: () => {} } },
+};
+
+/** The Agents page is open. Only Agents is current. */
+export const AgentsPageOpen: Story = {
+  args: {
+    vm: { active: false, onSelect: () => {} },
+    agents: { active: true, onSelect: () => {} },
+  },
 };
 
 /** The VM page is open. Only VM is current, over the Home scope. */

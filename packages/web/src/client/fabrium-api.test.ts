@@ -7,13 +7,16 @@ import type { CreateVmRequest } from "../model/types";
 import {
   FabriumApiError,
   createVm,
+  deleteAgent,
   deleteVm,
   getAccess,
   isNoAccess,
   listVms,
   rebootVm,
+  recreateVm,
   startVm,
   stopVm,
+  updateAgent,
 } from "./fabrium-api";
 import { MatrixClientPeg } from "./peg";
 
@@ -117,8 +120,8 @@ describe("token", () => {
 
 describe("errors", () => {
   const body: CreateVmRequest = {
+    agent: "5f0c2d7a9b3e4c1d8a6f0e2b4c6d8a0f",
     name: "lima",
-    agent: { mode: "existing", name: "lima" },
     haven_api_key: "hk-1",
   };
 
@@ -204,14 +207,10 @@ describe("routes", () => {
   it("create posts the body as JSON", async () => {
     signInForVmApi();
     const body: CreateVmRequest = {
+      agent: "5f0c2d7a9b3e4c1d8a6f0e2b4c6d8a0f",
       name: "lima",
       instance_type: "t3a.medium",
-      agent: {
-        mode: "new",
-        name: "echo",
-        persona: "Reviewer",
-        project: "Fabrium",
-      },
+      auto_stop_hours: 12,
       haven_api_key: "hk-1",
       github_token: "gh-1",
     };
@@ -286,6 +285,55 @@ describe("routes", () => {
     );
     await expect(deleteVm(vm.id)).resolves.toBeUndefined();
     expect(method).toBe("DELETE");
+  });
+
+  it("deleteAgent adds ?vm=1 only when asked", async () => {
+    signInForVmApi();
+    const hits: string[] = [];
+    mswServer.use(
+      http.delete(`${API}/agents/:id`, ({ request }) => {
+        const url = new URL(request.url);
+        hits.push(`${url.pathname}${url.search}`);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    await expect(deleteAgent("abc", false)).resolves.toBeUndefined();
+    await expect(deleteAgent("abc", true)).resolves.toBeUndefined();
+    expect(hits).toEqual([`${API}/agents/abc`, `${API}/agents/abc?vm=1`]);
+  });
+
+  it("updateAgent sends a PUT with the body as given", async () => {
+    signInForVmApi();
+    let hit = "";
+    let sent: unknown;
+    mswServer.use(
+      http.put(`${API}/agents/:id`, async ({ params, request }) => {
+        hit = `${request.method} ${params.id}`;
+        sent = await request.json();
+        return HttpResponse.json({ id: params.id });
+      }),
+    );
+    await updateAgent("abc", { tag: "" });
+    expect(hit).toBe("PUT abc");
+    expect(sent).toStrictEqual({ tag: "" });
+  });
+
+  it("recreateVm posts the credentials to /vms/<id>/recreate", async () => {
+    signInForVmApi();
+    let hit = "";
+    let sent: unknown;
+    mswServer.use(
+      http.post(`${API}/vms/:id/recreate`, async ({ params, request }) => {
+        hit = `${request.method} ${params.id}`;
+        sent = await request.json();
+        return HttpResponse.json({ ...vm, state: "pending" }, { status: 201 });
+      }),
+    );
+    await expect(
+      recreateVm(vm.id, { haven_api_key: "hk-1", github_token: "gh-1" }),
+    ).resolves.toMatchObject({ state: "pending" });
+    expect(hit).toBe(`POST ${vm.id}`);
+    expect(sent).toStrictEqual({ haven_api_key: "hk-1", github_token: "gh-1" });
   });
 
   it("keep a VM id inside its own path segment", async () => {

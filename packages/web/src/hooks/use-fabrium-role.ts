@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { FabriumApiError, getAccess } from "../client/fabrium-api";
+import type { FabriumRole } from "../model/types";
 
 /** The wait before each retry of a failed check. When they run out, only focus asks again. */
 const RETRY_MS = [2_000, 5_000, 15_000, 30_000];
@@ -12,11 +13,12 @@ const RETRY_MS = [2_000, 5_000, 15_000, 30_000];
 const isTransient = (e: unknown) => !(e instanceof FabriumApiError) || e.status >= 500;
 
 /**
- * True once the API says this user can manage VMs; a final "no" (403, 404, no API) keeps it false.
- * A transient failure is retried a few times, then on each window focus, so no reload is needed.
+ * The role of the user from `GET /access`; `null` until it answers, and after a final
+ * "no" (403, 404, no API). A transient failure is retried a few times, then on each
+ * window focus, so no reload is needed.
  */
-export function useVmAccess(): boolean {
-  const [allowed, setAllowed] = useState(false);
+export function useFabriumRole(): FabriumRole | null {
+  const [role, setRole] = useState<FabriumRole | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -29,8 +31,8 @@ export function useVmAccess(): boolean {
       clearTimeout(timer);
       failed = false;
       getAccess().then(
-        () => {
-          if (alive) setAllowed(true);
+        (access) => {
+          if (alive) setRole(access.role);
         },
         (e) => {
           if (!alive || !isTransient(e)) return;
@@ -52,5 +54,5 @@ export function useVmAccess(): boolean {
     };
   }, []);
 
-  return allowed;
+  return role;
 }
