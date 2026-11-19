@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ChevronDownIcon, PlusIcon } from "@/components/icons";
 import { Alert } from "@/components/ui/alert";
 import { Command, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -62,6 +62,14 @@ export function ProjectSelector({
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  // The dialog around the field, if any. The list is portaled into it: the scroll lock of a modal
+  // dialog cancels the wheel over anything outside its content.
+  const [dialog, setDialog] = useState<HTMLElement | null>(null);
+  const triggerRef = useCallback(
+    (el: HTMLButtonElement | null) =>
+      setDialog(el?.closest<HTMLElement>('[role="dialog"]') ?? null),
+    [],
+  );
   // The names seen, so a project that was deleted keeps its name on the trigger.
   const names = useRef(new Map<string, string>());
   for (const p of projects ?? []) names.current.set(p.id, p.name);
@@ -120,6 +128,7 @@ export function ProjectSelector({
       <Popover open={open} onOpenChange={setList}>
         <PopoverTrigger asChild>
           <button
+            ref={triggerRef}
             id={id}
             type="button"
             role="combobox"
@@ -138,6 +147,9 @@ export function ProjectSelector({
           </button>
         </PopoverTrigger>
         <PopoverContent
+          container={dialog}
+          // Inside a dialog the list flips to stay within it: the dialog clips what overflows it.
+          collisionBoundary={dialog}
           align="start"
           aria-label="Project"
           className="w-(--radix-popover-trigger-width) min-w-64 p-0"

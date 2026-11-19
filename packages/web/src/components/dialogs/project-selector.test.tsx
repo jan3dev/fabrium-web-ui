@@ -229,6 +229,35 @@ describe("<ProjectSelector>", () => {
     expect(trigger()).toBeDisabled();
   });
 
+  it("renders the list inside the dialog, where the scroll lock of the dialog lets the wheel through", async () => {
+    const { user } = setup();
+    await user.click(trigger());
+    const dialog = screen.getByRole("dialog", { name: "Edit agent" });
+    expect(dialog).toContainElement(screen.getByRole("listbox"));
+    expect(dialog).toContainElement(search());
+  });
+
+  it("works outside a dialog", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ProjectSelector
+        id="project"
+        projects={PROJECTS}
+        loadError={null}
+        value={null}
+        onChange={onChange}
+        canCreate={false}
+        onCreate={vi.fn()}
+      />,
+    );
+    await user.click(trigger());
+    expect(screen.queryByRole("dialog", { name: "Edit agent" })).toBeNull();
+    await user.click(screen.getByRole("option", { name: "Payments" }));
+    expect(onChange).toHaveBeenCalledWith(PAYMENTS.id);
+    await waitFor(() => expect(trigger()).toHaveFocus());
+  });
+
   it("ties the hint to the trigger", () => {
     setup({ hint: "This agent is in a project, so its VM must be in a project too." });
     expect(trigger()).toHaveAccessibleDescription(
