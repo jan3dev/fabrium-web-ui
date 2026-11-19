@@ -9,6 +9,7 @@ import {
   CAN_NOTHING,
   INSTANCE_AGENT,
   INSTANCE_TYPES,
+  MARKETING,
   PAYMENTS,
   PROFILE,
   PROJECTS,
@@ -460,6 +461,103 @@ describe("<AgentsRoute>", () => {
     expect(projectField(dialog)).toHaveTextContent("Marketing");
     expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
     expect(within(dialog).getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("shows the owner of a personal agent and Project for a project agent", async () => {
+    serve([makeAgent(), PROJECT_AGENT]);
+    renderPage();
+    await screen.findByRole("rowheader", { name: /^echo/ });
+    const ownerCell = (name: string) => within(rowOf(name)).getAllByRole("cell")[0];
+    expect(ownerCell("echo")).toHaveTextContent("@ann:example.org");
+    expect(ownerCell("triage")).toHaveTextContent(/^Project$/);
+  });
+
+  it("shows the name of the project in the Project column", async () => {
+    serve([makeAgent(), PROJECT_AGENT]);
+    renderPage();
+    await screen.findByRole("rowheader", { name: /^triage/ });
+    const projectCell = (name: string) => within(rowOf(name)).getAllByRole("cell")[2];
+    expect(projectCell("triage")).toHaveTextContent(/^Payments$/);
+    expect(projectCell("echo")).toHaveTextContent(/^$/);
+  });
+
+  it("shows Manage projects only with can.manage", async () => {
+    serve([makeAgent()]);
+    projects.list = { projects: PROJECTS, can: { manage: false } };
+    renderPage();
+    await screen.findByRole("rowheader", { name: /^echo/ });
+    await waitFor(() => expect(projects.gets).toBe(1));
+    expect(screen.queryByRole("button", { name: "Manage projects" })).toBeNull();
+
+    MatrixClientPeg.reset();
+    projects.list = { projects: PROJECTS, can: { manage: true } };
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Manage projects" })).toBeInTheDocument();
+  });
+
+  it("refreshes the projects and the agents after a rename", async () => {
+    const api = serve([makeAgent()]);
+    mswServer.use(
+      http.put(`${API}/projects/:id`, async ({ params, request }) => {
+        api.calls.push(`PUT /projects/${params.id} ${await request.text()}`);
+        projects.list = {
+          projects: [MARKETING, { ...PAYMENTS, name: "Billing" }],
+          can: { manage: true },
+        };
+        return HttpResponse.json({ ...PAYMENTS, name: "Billing" });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Manage projects" }));
+    const dialog = await screen.findByRole("dialog", { name: "Manage projects" });
+    await user.click(await within(dialog).findByRole("button", { name: "Rename Payments" }));
+    const input = within(dialog).getByRole("textbox", { name: "Name of Payments" });
+    await user.clear(input);
+    await user.type(input, "Billing{Enter}");
+
+    expect(await within(dialog).findByRole("button", { name: "Rename Billing" })).toBeInTheDocument();
+    const gets = projects.gets;
+    expect(api.calls).toEqual([
+      "GET /agents",
+      `PUT /projects/${PAYMENTS.id} {"name":"Billing"}`,
+      "GET /agents",
+    ]);
+    expect(gets).toBeGreaterThanOrEqual(3); // the page, the dialog, and the rename
+  });
+
+  it("refreshes the projects after a stale delete, and the button turns off", async () => {
+    const api = serve([makeAgent()]);
+    mswServer.use(
+      http.delete(`${API}/projects/:id`, ({ params }) => {
+        api.calls.push(`DELETE /projects/${params.id} (409)`);
+        // An agent entered Marketing after the list was loaded.
+        projects.list = {
+          projects: [{ ...MARKETING, in_use: true }, PAYMENTS],
+          can: { manage: true },
+        };
+        return HttpResponse.json({ error: "project in use" }, { status: 409 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Manage projects" }));
+    const dialog = await screen.findByRole("dialog", { name: "Manage projects" });
+    await user.click(await within(dialog).findByRole("button", { name: "Delete Marketing" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Something belongs to this project. Move it out first.",
+    );
+    await waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "Delete Marketing" })).toBeDisabled(),
+    );
+    expect(api.calls).toEqual([
+      "GET /agents",
+      `DELETE /projects/${MARKETING.id} (409)`,
+      "GET /agents",
+    ]);
   });
 
   it("shows the empty state", async () => {

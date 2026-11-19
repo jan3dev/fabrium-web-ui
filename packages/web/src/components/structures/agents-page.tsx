@@ -4,7 +4,9 @@ import {
   createProject,
   createVm,
   deleteAgent,
+  deleteProject,
   isNoAccess,
+  renameProject,
   updateAgent,
 } from "../../client/fabrium-api";
 import { useAgents } from "../../hooks/use-agents";
@@ -15,12 +17,13 @@ import type { AgentInput, CreateVmRequest } from "../../model/types";
 import { AgentDialog } from "../dialogs/agent-dialog";
 import { CreateVmDialog } from "../dialogs/create-vm-dialog";
 import { DeleteAgentDialog } from "../dialogs/delete-agent-dialog";
+import { ManageProjectsDialog } from "../dialogs/manage-projects-dialog";
 import { type AgentAction, AgentsView } from "./agents-view";
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** The dialog that is open: New agent, or an action on one agent, by id. */
-type Open = { kind: "new" } | { kind: AgentAction; id: string };
+/** The dialog that is open: New agent, Manage projects, or an action on one agent, by id. */
+type Open = { kind: "new" } | { kind: "manage" } | { kind: AgentAction; id: string };
 
 /** The /agents route: the agent list, its row actions, and their dialogs. */
 export function AgentsRoute() {
@@ -29,15 +32,14 @@ export function AgentsRoute() {
   const projects = useProjects(true);
   const [open, setOpen] = useState<Open | null>(null);
   // Read from the current list, so a refresh reaches an open dialog.
-  const target =
-    open && open.kind !== "new" ? list?.agents.find((a) => a.id === open.id) : undefined;
+  const target = open && "id" in open ? list?.agents.find((a) => a.id === open.id) : undefined;
   const editing = open?.kind === "new" || (open?.kind === "edit" && !!target);
   const { models, error: modelsError } = useModels(editing);
   const { types, error: typesError } = useInstanceTypes(open?.kind === "create-vm" && !!target);
 
   // An agent that left the list takes its dialog with it.
   useEffect(() => {
-    if (open && open.kind !== "new" && !target) setOpen(null);
+    if (open && "id" in open && !target) setOpen(null);
   }, [open, target]);
 
   const close = (next: boolean) => {
@@ -78,6 +80,15 @@ export function AgentsRoute() {
       refresh();
     }
   };
+  // After a failure too: a 409 means the list is stale.
+  const changeProject = async (work: () => Promise<unknown>) => {
+    try {
+      await work();
+    } finally {
+      await projects.refresh();
+      refresh();
+    }
+  };
   const remove = async (withVm: boolean) => {
     if (!target) return;
     try {
@@ -96,6 +107,16 @@ export function AgentsRoute() {
         onNew={() => show({ kind: "new" })}
         onAction={(agent, kind) => show({ kind, id: agent.id })}
         onRetry={refresh}
+        canManageProjects={projects.list?.can.manage ?? false}
+        onManageProjects={() => show({ kind: "manage" })}
+      />
+      <ManageProjectsDialog
+        open={open?.kind === "manage"}
+        onOpenChange={close}
+        projects={projects.list?.projects ?? null}
+        error={projects.error}
+        onRename={(id, name) => changeProject(() => renameProject(id, name))}
+        onDelete={(id) => changeProject(() => deleteProject(id))}
       />
       <AgentDialog
         open={editing}
