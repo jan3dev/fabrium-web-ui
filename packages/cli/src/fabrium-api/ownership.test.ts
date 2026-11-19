@@ -168,6 +168,30 @@ describe('the vm-creator role', () => {
       }
     })
 
+    it('a delete decides inside the write queue, after a change of the owner', async () => {
+      // A list that the owner route changes. The change ends only when the test lets it.
+      const list = [OWN, OTHER, OLD, HUB]
+      api.controlPlane.on('GET', '/v1/vms', () => jsonResponse(200, list))
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      api.controlPlane.on('PUT', `/v1/vms/${HUB.id}/owner`, async () => {
+        await gate
+        list[3] = { ...HUB, project_id: null }
+        return jsonResponse(200, list[3])
+      })
+      api.controlPlane.on('DELETE', `/v1/vms/${HUB.id}`, new Response(null, { status: 202 }))
+      // An admin takes hub out of its project: it becomes a personal VM of @dan.
+      const out = api.request('PUT', `/vms/${HUB.id}/owner`, { json: { project_id: '' } })
+      await vi.waitFor(() => expect(writes().map((r) => r.path)).toContain(`/v1/vms/${HUB.id}/owner`))
+      const deleted = api.request('DELETE', `/vms/${HUB.id}`, { token: cara })
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      release()
+      expect((await out).status).toBe(200)
+      const res = await deleted
+      expect([res.status, await res.text()]).toEqual([404, JSON.stringify({ error: 'not found' })])
+      expect(writes().map((r) => r.method)).toEqual(['PUT'])
+    })
+
     it('a failed project list is 502 and nothing is written', async () => {
       api.controlPlane.on('GET', '/v1/projects', jsonResponse(500, { error: 'database is locked' }))
       for (const [method, action, json] of Object.values(routes) as (readonly [string, string, unknown?])[]) {

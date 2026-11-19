@@ -247,11 +247,15 @@ export function fabriumApi(deps: FabriumApiDeps): {
     return queue(() => changeVmOwner(agents, caller, c.req.param('id'), raw))
   })
 
+  // In the queue, with a fresh list: an owner change that lands first decides who manages the VM.
   app.delete('/vms/:id', async (c) => {
     const id = c.req.param('id')
-    const failure = await checkManages(c.get('caller'), id)
-    if (failure) return failure
-    return relay(await controlPlane.request('DELETE', vmPath(id)))
+    const caller = c.get('caller')
+    return queue(async () => {
+      const failure = await checkManages(caller, id)
+      if (failure) return failure
+      return relay(await controlPlane.request('DELETE', vmPath(id)))
+    })
   })
 
   app.put('/vms/:id/auto-stop', async (c) => {
