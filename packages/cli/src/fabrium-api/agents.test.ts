@@ -2,7 +2,8 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRecord } from './agent-records.js'
-import { ADMIN, MEMBER, createTestApi, fakeAgentStore, jsonResponse } from './test-api.js'
+import type { Project } from './project-records.js'
+import { ADMIN, MEMBER, createTestApi, fakeAgentStore, fakeProjectStore, jsonResponse } from './test-api.js'
 
 // The world of the policy tests (policy.test.ts), with Matrix behind it.
 const ANN = ADMIN // admin
@@ -16,6 +17,7 @@ const CUSCO = { id: 'i-0c0c0c0c0c0c0c0c0', name: 'cusco', state: 'running', crea
 
 let api: ReturnType<typeof createTestApi>
 let store: { records: AgentRecord[] }
+let projects: Project[]
 let vms: Record<string, unknown>[]
 const tokens: Record<string, string> = {}
 
@@ -30,6 +32,7 @@ async function place(id: string, name: string, vm: string | null, owner: string,
     model: 'glm-5-3',
     tag: null,
     project: null,
+    project_id: null,
     vm,
     rooms: vm === null ? [] : ['#general:example.org'],
     ...over,
@@ -43,7 +46,8 @@ beforeEach(async () => {
     pollIntervalMs: 5,
     instanceAgents: [{ name: 's-meow', userId: '@s-meow:example.org' }],
   })
-  store = fakeAgentStore(api.controlPlane)
+  projects = []
+  store = fakeAgentStore(api.controlPlane, projects)
   vms = [LIMA, CUSCO]
   api.controlPlane.on('GET', '/v1/vms', () => jsonResponse(200, vms))
   api.controlPlane.on('DELETE', /^\/v1\/vms\/[^/]+$/, () => new Response(null, { status: 202 }))
@@ -94,8 +98,10 @@ describe('GET /agents', () => {
       description: 'You are an expert software engineer who does code reviews.',
       model: 'glm-5-3',
       tag: 'Reviewer',
-      project: 'Payments',
-      vm: { name: 'lima', id: 'i-0123456789abcdef0', state: 'running', owner: LUIS },
+      // The text label of phase 1 is not shown.
+      project_id: null,
+      project: null,
+      vm: { name: 'lima', id: 'i-0123456789abcdef0', state: 'running', owner: LUIS, project_id: null },
       source: 'control-plane',
       can: {
         edit: true,
@@ -120,7 +126,13 @@ describe('GET /agents', () => {
 
   it('a live VM without a creator has a VM owner of null', async () => {
     vms = [{ ...LIMA, creator: null }, CUSCO]
-    expect((await viewOf(ANN, 'a1'))?.vm).toEqual({ name: 'lima', id: LIMA.id, state: 'running', owner: null })
+    expect((await viewOf(ANN, 'a1'))?.vm).toEqual({
+      name: 'lima',
+      id: LIMA.id,
+      state: 'running',
+      owner: null,
+      project_id: null,
+    })
   })
 
   it('lists what the caller sees, by name, with the instance agents last', async () => {
@@ -142,10 +154,19 @@ describe('GET /agents', () => {
       description: null,
       model: null,
       tag: null,
+      project_id: null,
       project: null,
       vm: null,
       source: 'instance',
-      can: { edit: false, set_owner: false, assign: false, create_vm: false, delete: false, delete_needs_vm: false },
+      can: {
+        edit: false,
+        set_owner: false,
+        set_project: false,
+        assign: false,
+        create_vm: false,
+        delete: false,
+        delete_needs_vm: false,
+      },
     })
   })
 
@@ -156,7 +177,7 @@ describe('GET /agents', () => {
     [BOB, ['cusco']],
     [VERA, ['cusco']],
   ])('vms has the live VMs that %s can use', async (user, names) => {
-    expect((await list(user)).vms).toEqual(names.map((name) => ({ name, state: 'running' })))
+    expect((await list(user)).vms).toEqual(names.map((name) => ({ name, state: 'running', project_id: null })))
   })
 
   it('lists the people, for every role', async () => {
@@ -567,6 +588,120 @@ describe('DELETE /agents/:id', () => {
     expect(res.status).toBe(204)
     expect(recordOf('a2')).toBeUndefined()
     expect(JSON.stringify(warn.mock.calls)).toContain('the roster of lima was not rebuilt')
+  })
+})
+
+// The fixture of the project writes: hub is a project VM of PR1, @gone left the workspace.
+const PR1 = '1'.repeat(32)
+const PR2 = '2'.repeat(32)
+const UNKNOWN = 'f'.repeat(32)
+const GONE = '@gone:example.org'
+const HUB = {
+  id: 'i-0b0b0b0b0b0b0b0b0',
+  name: 'hub',
+  state: 'running',
+  creator: LUIS,
+  launched_at: '2026-11-18T19:00:00Z',
+  project_id: PR1,
+}
+const project = (id: string, name: string): Project => ({
+  id,
+  name,
+  created_at: '2026-11-19T19:00:00Z',
+  updated_at: '2026-11-19T19:00:00Z',
+})
+
+describe('with projects', () => {
+  beforeEach(async () => {
+    projects.push(project(PR1, 'Payments'), project(PR2, 'Billing'))
+    fakeProjectStore(api.controlPlane, projects, { records: store.records, vms })
+    vms.push(HUB)
+    api.fake.joinSpace(GONE, 40)
+    api.fake.setMember(api.fake.spaceId, GONE, 'leave')
+    // A project profile, a project agent on hub whose stored owner left, and a personal agent on hub.
+    await place('q1', 'planner', null, ANA, { project_id: PR1 })
+    await place('q2', 'auditor', 'hub', GONE, { project_id: PR1 })
+    await place('q3', 'notes', 'hub', VERA)
+  })
+
+  describe('GET /agents', () => {
+    it('gives a project agent every field of the contract example', async () => {
+      expect(await viewOf(ANA, 'q2')).toEqual({
+        id: 'q2',
+        name: 'auditor',
+        agent_id: '@hub.auditor:example.org',
+        owner: GONE,
+        description: '',
+        model: 'glm-5-3',
+        tag: null,
+        project_id: PR1,
+        project: 'Payments',
+        vm: { name: 'hub', id: HUB.id, state: 'running', owner: LUIS, project_id: PR1 },
+        source: 'control-plane',
+        can: {
+          edit: true,
+          set_owner: false,
+          set_project: false,
+          assign: false,
+          create_vm: false,
+          delete: true,
+          delete_needs_vm: false,
+        },
+      })
+    })
+
+    it('a personal agent has project_id null, project null, vm.project_id null', async () => {
+      expect(await viewOf(VERA, 'q3')).toMatchObject({
+        project_id: null,
+        project: null,
+        vm: { name: 'hub', project_id: PR1 },
+      })
+      expect(await viewOf(ANA, 'a1')).toMatchObject({ project_id: null, project: null, vm: { project_id: null } })
+    })
+
+    it('the text label of phase 1 is not shown', async () => {
+      await place('q4', 'scribe', null, ANA, { project: 'Old' })
+      expect(await viewOf(ANA, 'q4')).toMatchObject({ project_id: null, project: null })
+    })
+
+    it('a project_id that no project has gives project null', async () => {
+      await place('q4', 'scribe', null, ANA, { project_id: UNKNOWN })
+      expect(await viewOf(ANA, 'q4')).toMatchObject({ project_id: UNKNOWN, project: null })
+    })
+
+    it('an agent whose VM is gone has vm {name} only', async () => {
+      await place('q4', 'scribe', 'quito', ANA, { project_id: PR1 })
+      expect((await viewOf(ANA, 'q4'))?.vm).toEqual({ name: 'quito' })
+    })
+
+    it('an instance agent has project_id null and every can false', async () => {
+      expect((await list(ANN)).agents.at(-1)).toMatchObject({
+        source: 'instance',
+        project_id: null,
+        project: null,
+        can: { set_project: false, edit: false },
+      })
+    })
+
+    it('vms has project_id for each live VM that the caller can use', async () => {
+      expect((await list(ANA)).vms).toEqual([
+        { name: 'hub', state: 'running', project_id: PR1 },
+        { name: 'lima', state: 'running', project_id: null },
+      ])
+    })
+
+    it('can.set_project follows the policy', async () => {
+      const setProject = async (user: string, id: string) =>
+        ((await viewOf(user, id)) as unknown as { can: { set_project: boolean } }).can.set_project
+      expect(await setProject(ANA, 'a1')).toBe(true)
+      expect(await setProject(LUIS, 'a1')).toBe(false)
+      expect(await setProject(ANA, 'q1')).toBe(false)
+      expect(await setProject(ANN, 'q1')).toBe(true)
+    })
+
+    it('still gives people', async () => {
+      expect((await list(BOB)).people.map((p) => p.user_id)).toEqual([ANA, ANN, BOB, LUIS, VERA])
+    })
   })
 })
 

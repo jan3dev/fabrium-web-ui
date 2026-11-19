@@ -98,6 +98,7 @@ export async function rebuildRoster(
 const NO_CAN = {
   edit: false,
   set_owner: false,
+  set_project: false,
   assign: false,
   create_vm: false,
   delete: false,
@@ -106,7 +107,11 @@ const NO_CAN = {
 
 const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
-function view(ctx: AgentContext, world: World, r: AgentRecord) {
+/** The name of the project, or null when there is none or no project has the ID. */
+const projectName = (projects: readonly Project[], id: string | null | undefined): string | null =>
+  id == null ? null : (projects.find((p) => p.id === id)?.name ?? null)
+
+function view(ctx: AgentContext, world: World & { projects: readonly Project[] }, r: AgentRecord) {
   const live = r.vm === null ? undefined : world.live.get(r.vm)
   return {
     id: r.id,
@@ -116,12 +121,20 @@ function view(ctx: AgentContext, world: World, r: AgentRecord) {
     description: r.description,
     model: r.model,
     tag: r.tag,
-    project: r.project,
+    project_id: r.project_id,
+    // The text label of phase 1 is not shown.
+    project: projectName(world.projects, r.project_id),
     vm:
       r.vm === null
         ? null
         : live
-          ? { name: r.vm, id: live.id, state: live.state, owner: live.creator ?? null }
+          ? {
+              name: r.vm,
+              id: live.id,
+              state: live.state,
+              owner: live.creator ?? null,
+              project_id: live.project_id ?? null,
+            }
           : { name: r.vm },
     source: 'control-plane',
     can: can(world, r),
@@ -136,6 +149,7 @@ const instanceView = (a: { name: string; userId: string }) => ({
   description: null,
   model: null,
   tag: null,
+  project_id: null,
   project: null,
   vm: null,
   source: 'instance',
@@ -241,7 +255,7 @@ export function agentRoutes(app: Hono<Env>, ctx: AgentContext): void {
     const vms = [...world.live.values()]
       .filter((vm) => canUse(world, vm))
       .sort((a, b) => order(a.name, b.name))
-      .map((vm) => ({ name: vm.name, state: vm.state }))
+      .map((vm) => ({ name: vm.name, state: vm.state, project_id: vm.project_id ?? null }))
     return c.json({ agents: [...agents, ...instance], vms, people: await listPeople(ctx) })
   })
 
