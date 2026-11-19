@@ -100,12 +100,30 @@ function renderPage() {
 
 const rowOf = (name: string) =>
   screen.getByRole("rowheader", { name }).closest("tr") as HTMLElement;
-/** The action buttons of a row, without the Set of its auto-stop control. */
-const buttonsIn = (row: HTMLElement) =>
-  within(row)
-    .getAllByRole("button")
-    .map((b) => b.textContent)
-    .filter((text) => text !== "Set");
+
+type User = ReturnType<typeof userEvent.setup>;
+
+/** Opens the actions menu of a VM, once no action of it is in flight. */
+async function openMenu(user: User, vmName: string) {
+  const trigger = await screen.findByRole("button", { name: `Actions for ${vmName}` });
+  await waitFor(() => expect(trigger).toBeEnabled());
+  await user.click(trigger);
+}
+
+/** Chooses an action in the menu of a VM. */
+async function chooseAction(user: User, vmName: string, label: string) {
+  await openMenu(user, vmName);
+  await user.click(await screen.findByRole("menuitem", { name: label }));
+}
+
+/** The labels of the actions in the menu of a VM. Closes the menu again. */
+async function actionsOf(user: User, vmName: string) {
+  await openMenu(user, vmName);
+  const labels = (await screen.findAllByRole("menuitem")).map((item) => item.textContent);
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  return labels;
+}
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -192,11 +210,11 @@ describe("<VmRoute>", () => {
     ["lima", "running", ["Stop", "Reboot", "Update credentials", "Delete"]],
     ["oscar", "pending", ["Update credentials", "Delete"]],
     ["papa", "stopping", ["Update credentials", "Delete"]],
-  ])("offers actions by state: %s is %s", async (name, _state, buttons) => {
+  ])("offers actions by state: %s is %s", async (name, _state, labels) => {
     serve([kilo, lima, oscar, papa]);
+    const user = userEvent.setup();
     renderPage();
-    await screen.findByRole("rowheader", { name });
-    expect(buttonsIn(rowOf(name))).toEqual(buttons);
+    expect(await actionsOf(user, name)).toEqual(labels);
   });
 
   it("runs an action, then shows the new state", async () => {
@@ -204,13 +222,22 @@ describe("<VmRoute>", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Stop lima" }));
+    await chooseAction(user, "lima", "Stop");
 
     await waitFor(() =>
       expect(within(rowOf("lima")).getByText("stopping")).toBeInTheDocument(),
     );
     expect(cp.calls).toEqual(["GET /vms", `POST ${lima.id}/stop`, "GET /vms"]);
-    expect(buttonsIn(rowOf("lima"))).toEqual(["Update credentials", "Delete"]);
+    expect(await actionsOf(user, "lima")).toEqual(["Update credentials", "Delete"]);
+  });
+
+  it("has no per-action buttons in the row", async () => {
+    serve([lima]);
+    renderPage();
+    await screen.findByRole("rowheader", { name: "lima" });
+    expect(
+      within(rowOf("lima")).queryByRole("button", { name: /^(Stop|Reboot|Delete) lima$/ }),
+    ).toBeNull();
   });
 
   it("replaces a VM with new credentials", async () => {
@@ -228,7 +255,7 @@ describe("<VmRoute>", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Update credentials lima" }));
+    await chooseAction(user, "lima", "Update credentials");
     const dialog = await screen.findByRole("dialog", { name: "Update the credentials of lima" });
     expect(cp.calls).toEqual(["GET /vms"]);
     await user.type(within(dialog).getByLabelText("Haven API key"), "hk-2");
@@ -253,7 +280,7 @@ describe("<VmRoute>", () => {
       const user = userEvent.setup();
       renderPage();
 
-      await user.click(await screen.findByRole("button", { name: "Start kilo" }));
+      await chooseAction(user, "kilo", "Start");
       const dialog = await startDialog();
       expect(hoursIn(dialog)).toHaveValue(12);
       expect(cp.calls).toEqual(["GET /vms"]);
@@ -274,7 +301,7 @@ describe("<VmRoute>", () => {
       const user = userEvent.setup();
       renderPage();
 
-      await user.click(await screen.findByRole("button", { name: "Start kilo" }));
+      await chooseAction(user, "kilo", "Start");
       expect(hoursIn(await startDialog())).toHaveValue(36);
     });
 
@@ -283,7 +310,7 @@ describe("<VmRoute>", () => {
       const user = userEvent.setup();
       renderPage();
 
-      await user.click(await screen.findByRole("button", { name: "Start kilo" }));
+      await chooseAction(user, "kilo", "Start");
       const dialog = await startDialog();
       await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
@@ -296,7 +323,7 @@ describe("<VmRoute>", () => {
       const user = userEvent.setup();
       renderPage();
 
-      await user.click(await screen.findByRole("button", { name: "Start kilo" }));
+      await chooseAction(user, "kilo", "Start");
       const dialog = await startDialog();
       await user.clear(hoursIn(dialog));
       await user.type(hoursIn(dialog), "169");
@@ -304,7 +331,7 @@ describe("<VmRoute>", () => {
     });
   });
 
-  it("disables the buttons of a VM while its action runs", async () => {
+  it("disables the actions of a VM with an action in flight", async () => {
     serve([lima]);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
@@ -317,15 +344,16 @@ describe("<VmRoute>", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Reboot lima" }));
+    await chooseAction(user, "lima", "Reboot");
+    const trigger = screen.getByRole("button", { name: "Actions for lima" });
+    await waitFor(() => expect(trigger).toBeDisabled());
+    // The auto-stop control waits too.
     for (const button of within(rowOf("lima")).getAllByRole("button")) {
       expect(button).toBeDisabled();
     }
 
     release();
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Reboot lima" })).toBeEnabled(),
-    );
+    await waitFor(() => expect(trigger).toBeEnabled());
   });
 
   it("asks before deleting a VM", async () => {
@@ -333,7 +361,7 @@ describe("<VmRoute>", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Delete lima" }));
+    await chooseAction(user, "lima", "Delete");
     const dialog = await screen.findByRole("alertdialog", { name: "Delete lima?" });
     expect(cp.calls).toEqual(["GET /vms"]);
 
@@ -341,7 +369,7 @@ describe("<VmRoute>", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(cp.calls).toEqual(["GET /vms"]);
 
-    await user.click(screen.getByRole("button", { name: "Delete lima" }));
+    await chooseAction(user, "lima", "Delete");
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Delete",
@@ -363,7 +391,7 @@ describe("<VmRoute>", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "Stop lima" }));
+    await chooseAction(user, "lima", "Stop");
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
@@ -371,7 +399,7 @@ describe("<VmRoute>", () => {
       ),
     );
     await waitFor(() => expect(cp.calls).toEqual(["GET /vms", "GET /vms"]));
-    expect(screen.getByRole("button", { name: "Stop lima" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Actions for lima" })).toBeEnabled();
   });
 
   it.each([403, 404])("shows the no-access state on %i", async (status) => {
@@ -444,7 +472,7 @@ describe("<VmView>", () => {
     const onAction = vi.fn();
     const user = userEvent.setup();
     const { rerender } = render(view({ onAction }));
-    await user.click(screen.getByRole("button", { name: "Delete lima" }));
+    await chooseAction(user, "lima", "Delete");
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
 
     rerender(view({ vms: [], onAction }));
@@ -456,18 +484,23 @@ describe("<VmView>", () => {
     expect(onAction).not.toHaveBeenCalled();
   });
 
-  it("disables only the buttons of a VM with an action in flight", () => {
+  it("disables only the menu of a VM with an action in flight", () => {
     render(view({ vms: [lima, kilo], busyIds: new Set([lima.id]) }));
-    for (const button of within(rowOf("lima")).getAllByRole("button")) {
-      expect(button).toBeDisabled();
-    }
-    // Set stays disabled until the hours change.
-    const actions = within(rowOf("kilo"))
-      .getAllByRole("button")
-      .filter((b) => b.textContent !== "Set");
-    for (const button of actions) {
-      expect(button).toBeEnabled();
-    }
+    expect(screen.getByRole("button", { name: "Actions for lima" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Actions for kilo" })).toBeEnabled();
+  });
+
+  it("returns the focus to the trigger after Cancel in the delete dialog", async () => {
+    const user = userEvent.setup();
+    render(view({ vms: [lima, kilo] }));
+    await chooseAction(user, "lima", "Delete");
+    const dialog = await screen.findByRole("alertdialog", { name: "Delete lima?" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Actions for lima" })).toHaveFocus(),
+    );
   });
 
   it("keeps the list and shows an error when a refresh fails", () => {
@@ -540,7 +573,7 @@ describe("auto-stop and owner", () => {
     expect(within(rowOf("juliet")).getByText("Auto-stop 8 hs")).toBeInTheDocument();
     expect(screen.queryByLabelText("Auto-stop hours of juliet")).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "Start juliet" }));
+    await chooseAction(user, "juliet", "Start");
     const dialog = await screen.findByRole("dialog", { name: "Start juliet?" });
     expect(within(dialog).queryByLabelText(/auto-stop after/i)).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: "Start" }));

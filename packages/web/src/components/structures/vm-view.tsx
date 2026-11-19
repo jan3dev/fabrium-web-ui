@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useEffect, useId, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { ShieldCheckIcon } from "@/components/icons";
 import { Alert } from "@/components/ui/alert";
 import {
@@ -19,25 +19,9 @@ import { cn } from "@/lib/utils";
 import type { Vm, VmState } from "../../model/types";
 import { initialAutoStopHours, parseAutoStopHours } from "../dialogs/auto-stop-field";
 import { StartVmDialog } from "../dialogs/start-vm-dialog";
+import { type VmAction, VmActionsMenu } from "./vm-actions-menu";
 
-export type VmAction = "start" | "stop" | "reboot" | "credentials" | "delete";
-
-const LABEL: Record<VmAction, string> = {
-  start: "Start",
-  stop: "Stop",
-  reboot: "Reboot",
-  credentials: "Update credentials",
-  delete: "Delete",
-};
-
-// Update credentials and Delete are always offered. The other actions depend on the EC2 state.
-const ACTIONS: Record<VmState, VmAction[]> = {
-  stopped: ["start", "credentials", "delete"],
-  running: ["stop", "reboot", "credentials", "delete"],
-  pending: ["credentials", "delete"],
-  stopping: ["credentials", "delete"],
-  "shutting-down": ["credentials", "delete"],
-};
+export type { VmAction } from "./vm-actions-menu";
 
 export const STATE_TONE: Record<VmState, "success" | "neutral" | "warning"> = {
   running: "success",
@@ -82,6 +66,8 @@ export function VmView({
   // The VM whose delete confirmation is open, by id.
   const [deleting, setDeleting] = useState<string | null>(null);
   const doomed = vms?.find((vm) => vm.id === deleting);
+  // The menu trigger that opened the delete confirmation: the focus returns to it.
+  const deleteTrigger = useRef<HTMLElement | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
   const startable = vms?.find((vm) => vm.id === starting) ?? null;
 
@@ -122,7 +108,10 @@ export function VmView({
               busyIds={busyIds}
               onAction={onAction}
               onSetAutoStop={onSetAutoStop}
-              onConfirmDelete={setDeleting}
+              onConfirmDelete={(id, trigger) => {
+                deleteTrigger.current = trigger;
+                setDeleting(id);
+              }}
               onConfirmStart={setStarting}
             />
           </>
@@ -142,7 +131,15 @@ export function VmView({
           if (!open) setDeleting(null);
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent
+          // The menu item that opened the dialog is gone: without this, the focus lands on body.
+          onCloseAutoFocus={(e) => {
+            const trigger = deleteTrigger.current;
+            if (!trigger) return;
+            e.preventDefault();
+            trigger.focus();
+          }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {doomed?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -215,7 +212,7 @@ function VmTable({
   busyIds: ReadonlySet<string>;
   onAction: (vm: Vm, action: VmAction) => void;
   onSetAutoStop: (vm: Vm, hours: number) => void;
-  onConfirmDelete: (id: string) => void;
+  onConfirmDelete: (id: string, trigger: HTMLElement | null) => void;
   onConfirmStart: (id: string) => void;
 }) {
   return (
@@ -245,7 +242,7 @@ function VmTable({
               busy={busyIds.has(vm.id)}
               onAction={onAction}
               onSetAutoStop={(hours) => onSetAutoStop(vm, hours)}
-              onConfirmDelete={() => onConfirmDelete(vm.id)}
+              onConfirmDelete={(trigger) => onConfirmDelete(vm.id, trigger)}
               onConfirmStart={() => onConfirmStart(vm.id)}
             />
           ))}
@@ -278,10 +275,11 @@ function VmRow({
   busy: boolean;
   onAction: (vm: Vm, action: VmAction) => void;
   onSetAutoStop: (hours: number) => void;
-  onConfirmDelete: () => void;
+  onConfirmDelete: (trigger: HTMLElement | null) => void;
   onConfirmStart: () => void;
 }) {
   const expired = vm.setup === "expired";
+  const actions = useRef<HTMLTableCellElement>(null);
   return (
     <tr className="border-t border-surface-border-primary align-top first:border-t-0">
       <th
@@ -335,29 +333,21 @@ function VmRow({
       <td className="px-4 py-3 text-body2 text-text-secondary">
         <time dateTime={vm.launched_at}>{launchedLabel(vm.launched_at)}</time>
       </td>
-      <td className="px-4 py-3">
+      <td ref={actions} className="px-4 py-3">
         <div className="flex flex-wrap items-center justify-end gap-3">
           <AutoStopControl vm={vm} busy={busy} onSet={onSetAutoStop} />
-          <div className="flex gap-1.5">
-            {(ACTIONS[vm.state] ?? ["credentials", "delete"]).map((action) => (
-              <Button
-                key={action}
-                type="button"
-                size="xs"
-                variant={action === "delete" ? "utility" : "secondary"}
-                tone={action === "delete" ? "danger" : "default"}
-                disabled={busy}
-                aria-label={`${LABEL[action]} ${vm.name}`}
-                onClick={() => {
-                  if (action === "delete") onConfirmDelete();
-                  else if (action === "start") onConfirmStart();
-                  else onAction(vm, action);
-                }}
-              >
-                {LABEL[action]}
-              </Button>
-            ))}
-          </div>
+          <VmActionsMenu
+            vm={vm}
+            busy={busy}
+            onSelect={(action) => {
+              if (action === "delete")
+                onConfirmDelete(
+                  actions.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]') ?? null,
+                );
+              else if (action === "start") onConfirmStart();
+              else onAction(vm, action);
+            }}
+          />
         </div>
       </td>
     </tr>
