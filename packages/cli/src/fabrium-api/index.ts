@@ -17,7 +17,7 @@ import { fetchProjects } from './project-records.js'
 import { projectRoutes } from './projects.js'
 import { createQueue } from './queue.js'
 import { createRoster } from './roster.js'
-import { relayVm, vmView, type VmDecorator } from './vm-projects.js'
+import { changeVmOwner, relayVm, vmView, type VmDecorator } from './vm-projects.js'
 import { fetchVms } from './vms.js'
 
 export interface FabriumApiDeps extends FabriumApiConfig {
@@ -235,6 +235,12 @@ export function fabriumApi(deps: FabriumApiDeps): {
       return relayVm(await controlPlane.request('POST', vmPath(id, `/${action}`)), decorate)
     })
   }
+
+  app.put('/vms/:id/owner', async (c) => {
+    const raw = await jsonBody(c)
+    const caller = c.get('caller')
+    return queue(() => changeVmOwner(agents, caller, c.req.param('id'), raw))
+  })
 
   app.delete('/vms/:id', async (c) => {
     const id = c.req.param('id')

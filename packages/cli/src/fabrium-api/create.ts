@@ -1,14 +1,22 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { changeRecord } from './agent-records.js'
-import { loadWorld, rebuildRoster, step, type AgentContext } from './agents.js'
+import {
+  checkProject,
+  loadWorld,
+  needsProjectVm,
+  parseProjectId,
+  rebuildRoster,
+  step,
+  type AgentContext,
+} from './agents.js'
 import type { Caller } from './auth.js'
 import { MARKER, VM_NAME_RE, readBundleEnv } from './bundle.js'
 import { describeFailure, relay } from './control-plane.js'
 import { ApiError } from './errors.js'
 import { buildPayload, isStrictUserId, secretProblem } from './payload.js'
-import { sees } from './policy.js'
-import { relayVm, type VmDecorator } from './vm-projects.js'
+import { hasProjectAgent, isProject, sees } from './policy.js'
+import { relayVm, vmView, type VmDecorator } from './vm-projects.js'
 import type { Vm } from './vms.js'
 
 /** The body of `POST /vms` (contracts section 2). */
@@ -21,6 +29,8 @@ export interface CreateRequest {
   autoStopHours?: number
   havenApiKey: string
   githubToken?: string
+  /** The project of a project VM. Absent: a personal VM of the caller. */
+  projectId?: string
 }
 
 // A control character would split a line of the secrets file (secretProblem words the line break).
@@ -85,6 +95,8 @@ export function parseCreateRequest(raw: unknown): CreateRequest {
     instanceType: body.instance_type ?? undefined,
     autoStopHours: parseAutoStopHours(body.auto_stop_hours),
     ...parseCredentials(body),
+    // null and "" make a personal VM. The control plane reads "" in a POST as an unknown project.
+    projectId: parseProjectId(body.project_id) || undefined,
   }
 }
 
@@ -104,6 +116,7 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
     const world = await loadWorld(deps, caller)
     const agent = world.records.find((r) => r.id === req.agent)
     if (!agent || !sees(world, agent)) throw new ApiError(404, { error: 'agent not found' })
+    if (req.projectId !== undefined) checkProject(world, req.projectId)
     if (agent.vm !== null && world.live.has(agent.vm)) throw new ApiError(409, { error: 'the agent has a vm' })
     if (agent.vm !== null && agent.vm !== req.name) throw bad('name must be the vm of the agent')
     if (agent.vm === null) {
@@ -113,6 +126,10 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
       if (foreign || world.live.has(req.name) || world.records.some((r) => r.vm === req.name)) {
         throw new ApiError(409, { error: 'name in use' })
       }
+    }
+    // The rule of the project VM: a personal VM for no project agent of the name.
+    if (req.projectId === undefined && (isProject(agent) || hasProjectAgent(world.records, req.name))) {
+      throw needsProjectVm()
     }
     // Safe to repeat. An agent with a VM name joins the rooms of its record, not today's FABRIUM_VM_ROOMS.
     const admitted = await deps.admission.admit({
@@ -148,6 +165,7 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
       ...(req.autoStopHours === undefined ? {} : { auto_stop_hours: req.autoStopHours }),
       // Unconditional: a caller ID outside the strict grammar still owns the VM. The control plane checks it.
       creator: caller.userId,
+      ...(req.projectId === undefined ? {} : { project_id: req.projectId }),
       bootstrap: payload,
     })
     if (!upstream.ok) return relay(upstream)
@@ -164,7 +182,8 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
           'the control plane answered, but the answer could not be read. The VM may exist: check the VM list',
       })
     }
-    return new Response(JSON.stringify({ ...vm, agent_id: admitted.agentId }), {
+    // The project of the answer: a project deleted during the launch gives a personal VM.
+    return new Response(JSON.stringify({ ...vmView(caller, world.projects, vm as Vm), agent_id: admitted.agentId }), {
       status: upstream.status,
       headers: { 'content-type': 'application/json' },
     })

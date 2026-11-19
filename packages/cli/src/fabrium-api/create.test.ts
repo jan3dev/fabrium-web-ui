@@ -6,6 +6,7 @@ import type { AgentRecord } from './agent-records.js'
 import { ensureVmBundle } from './bundle.js'
 import { parseCreateRequest } from './create.js'
 import type { ApiError } from './errors.js'
+import type { Project } from './project-records.js'
 import { ADMIN, COMMIT, createTestApi, fakeAgentStore, jsonResponse, stalledResponse } from './test-api.js'
 
 const LUIS = '@luis:example.org' // vm-creator
@@ -35,6 +36,7 @@ const body = (over: Record<string, unknown> = {}) => ({
 
 let api: ReturnType<typeof createTestApi>
 let store: { records: AgentRecord[] }
+let projects: Project[]
 let vms: Record<string, unknown>[]
 let logSpies: { mock: { calls: unknown[][] } }[]
 beforeEach(() => {
@@ -44,7 +46,8 @@ beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {}),
   ]
 })
-const record = (id: string, name: string, vm: string | null, owner: string) =>
+const PR1 = '1'.repeat(32)
+const record = (id: string, name: string, vm: string | null, owner: string, projectId: string | null = null) =>
   store.records.push({
     id,
     name,
@@ -53,15 +56,22 @@ const record = (id: string, name: string, vm: string | null, owner: string) =>
     model: 'glm-5-3',
     tag: null,
     project: null,
+    project_id: projectId,
     vm,
     rooms: vm === null ? [] : ['#general:example.org'],
   })
 function setup(overrides: Parameters<typeof createTestApi>[0] = {}) {
   api = createTestApi({ whoamiTimeoutMs: 100, pollIntervalMs: 5, ...overrides })
-  store = fakeAgentStore(api.controlPlane)
+  projects = [{ id: PR1, name: 'Payments', created_at: '2026-11-19T19:00:00Z', updated_at: '2026-11-19T19:00:00Z' }]
+  store = fakeAgentStore(api.controlPlane, projects)
   vms = []
   api.controlPlane.on('GET', '/v1/vms', () => jsonResponse(200, vms))
-  api.controlPlane.on('POST', '/v1/vms', jsonResponse(201, VM))
+  api.controlPlane.on('GET', '/v1/projects', () => jsonResponse(200, projects))
+  // The new VM has the creator and the project of the request.
+  api.controlPlane.on('POST', '/v1/vms', (req) => {
+    const sent = req.body as { creator: string; project_id?: string }
+    return jsonResponse(201, { ...VM, creator: sent.creator, project_id: sent.project_id ?? null })
+  })
   for (const [user, level] of [[LUIS, 70], [VERA, 70], [ANA, 40]] as const) api.fake.joinSpace(user, level)
   record('p1', 'draft', null, ANA)
   record('p2', 'helper', null, VERA)
@@ -139,6 +149,7 @@ describe('validation', () => {
     ['auto_stop_hours of 169', { auto_stop_hours: 169 }],
     ['auto_stop_hours of 1.5', { auto_stop_hours: 1.5 }],
     ['auto_stop_hours as a string', { auto_stop_hours: '12' }],
+    ['a project_id that is not a string', { project_id: 5 }],
   ])('answers 400 for %s, without a secret in the message', async (_name, over) => {
     setup()
     const res = await create(body(over))
@@ -232,7 +243,14 @@ describe('a VM for an agent', () => {
     setup()
     const res = await create(body(), as(LUIS))
     expect(res.status).toBe(201)
-    expect(await res.json()).toEqual({ ...VM, agent_id: '@lima.draft:example.org' })
+    expect(await res.json()).toEqual({
+      ...VM,
+      creator: LUIS,
+      project_id: null,
+      project: null,
+      can: { set_project: true },
+      agent_id: '@lima.draft:example.org',
+    })
     expect(recordOf('p1')).toMatchObject({ vm: 'lima', rooms: ['#general:example.org'] })
     expect(rosterNames('lima')).toEqual(['draft'])
 
@@ -460,6 +478,94 @@ describe('a VM for an agent', () => {
     )
     const res = await create(body())
     expect([res.status, await res.text()]).toEqual([413, 'Payload Too Large'])
+  })
+})
+
+describe('a VM in a project', () => {
+  const needsProjectVm = [409, { error: 'a project agent needs a project vm' }]
+
+  it('creates a project VM', async () => {
+    setup()
+    const res = await create(body({ project_id: PR1 }), as(LUIS))
+    expect(res.status).toBe(201)
+    expect(upstreamCreate()).toMatchObject({ name: 'lima', creator: LUIS, project_id: PR1 })
+    expect(await res.json()).toMatchObject({
+      project_id: PR1,
+      project: 'Payments',
+      can: { set_project: false },
+      agent_id: '@lima.draft:example.org',
+    })
+  })
+
+  it('relays the project of the answer: a project deleted during the launch gives a personal VM', async () => {
+    setup()
+    api.controlPlane.on('POST', '/v1/vms', jsonResponse(201, { ...VM, creator: LUIS, project_id: null }))
+    const res = await create(body({ project_id: PR1 }), as(LUIS))
+    expect(res.status).toBe(201)
+    expect(await res.json()).toMatchObject({ project_id: null, project: null, can: { set_project: true } })
+  })
+
+  it('an unknown project_id is 400 before admit', async () => {
+    setup()
+    const res = await create(body({ project_id: 'f'.repeat(32) }), as(LUIS))
+    expect([res.status, await res.json()]).toEqual([400, { error: 'unknown project' }])
+    expect(api.fake.messages).toEqual([])
+    expect(existsSync(join(api.workstationsDir, 'lima'))).toBe(false)
+    expect(posts()).toEqual([])
+  })
+
+  it('null and "" create a personal VM, a number is 400', async () => {
+    for (const projectId of [null, '']) {
+      setup()
+      const res = await create(body({ project_id: projectId }), as(LUIS))
+      expect(res.status).toBe(201)
+      // The control plane reads "" in a POST as an unknown project: zooid leaves the field out.
+      expect(upstreamCreate()).not.toHaveProperty('project_id')
+    }
+    setup()
+    const res = await create(body({ project_id: 5 }), as(LUIS))
+    expect([res.status, await res.json()]).toEqual([400, { error: 'project_id must be a string' }])
+  })
+
+  it('a project profile cannot get a personal VM', async () => {
+    setup()
+    record('q1', 'planner', null, ANA, PR1)
+    const res = await create(body({ agent: 'q1' }), as(LUIS))
+    expect([res.status, await res.json()]).toEqual(needsProjectVm)
+    expect(api.fake.messages).toEqual([])
+    expect(posts()).toEqual([])
+  })
+
+  it('a personal agent cannot get a personal VM name that a project agent holds', async () => {
+    setup()
+    // Two records with vm quito, and no live VM.
+    record('a4', 'watcher', 'quito', ANA)
+    record('a5', 'planner', 'quito', ANA, PR1)
+    const res = await create(body({ agent: 'a4', name: 'quito' }), as(LUIS))
+    expect([res.status, await res.json()]).toEqual(needsProjectVm)
+    expect(posts()).toEqual([])
+  })
+
+  it('a project VM for a project agent works', async () => {
+    setup()
+    record('q1', 'planner', null, ANA, PR1)
+    const res = await create(body({ agent: 'q1', project_id: PR1 }), as(LUIS))
+    expect(res.status).toBe(201)
+    expect(recordOf('q1')).toMatchObject({ vm: 'lima', project_id: PR1 })
+  })
+
+  it('an agent with a vm and no live VM that entered a project gets 409 from Create VM without a project', async () => {
+    setup()
+    await api.admit('quito', 'watcher')
+    record('a4', 'watcher', 'quito', ANA)
+    const entered = await api.request('PUT', '/agents/a4', { token: as(ANA), json: { project_id: PR1 } })
+    expect(entered.status).toBe(200)
+    const before = api.fake.messages.length
+    const res = await create(body({ agent: 'a4', name: 'quito' }), as(LUIS))
+    expect([res.status, await res.json()]).toEqual(needsProjectVm)
+    expect(api.fake.messages).toHaveLength(before)
+    expect(upstreamCreate()).toBeUndefined()
+    expect((await create(body({ agent: 'a4', name: 'quito', project_id: PR1 }), as(LUIS))).status).toBe(201)
   })
 })
 

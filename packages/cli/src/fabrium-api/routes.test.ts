@@ -64,6 +64,7 @@ describe('access', () => {
       ['POST', '/vms/i-0a/reboot'],
       ['PUT', '/vms/i-0a/auto-stop', { auto_stop_hours: 3 }],
       ['POST', '/vms/i-0a/recreate', { haven_api_key: 'hk-1' }],
+      ['PUT', '/vms/i-0a/owner', { owner: '@ann:example.org' }],
     ] as [string, string, unknown?][]) {
       const res = await api.request(method, path, { token, json })
       expect(res.status, `${method} ${path}`).toBe(403)
