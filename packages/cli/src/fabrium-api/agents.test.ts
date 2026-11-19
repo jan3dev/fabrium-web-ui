@@ -73,6 +73,7 @@ const list = async (user: string) =>
   (await (await as(user, 'GET', '/agents')).json()) as {
     agents: { id: string; name: string; vm: unknown; agent_id: string | null }[]
     vms: unknown[]
+    people: { user_id: string; name: string }[]
   }
 const viewOf = async (user: string, id: string) => (await list(user)).agents.find((a) => a.id === id)
 const writes = () => api.controlPlane.requests.filter((r) => r.method !== 'GET')
@@ -148,6 +149,34 @@ describe('GET /agents', () => {
     [VERA, ['cusco']],
   ])('vms has the live VMs that %s can use', async (user, names) => {
     expect((await list(user)).vms).toEqual(names.map((name) => ({ name, state: 'running' })))
+  })
+
+  it('lists the people, for every role', async () => {
+    for (const user of [ANN, LUIS, VERA, ANA, BOB]) {
+      expect((await list(user)).people, user).toEqual([
+        { user_id: ANA, name: 'ana' },
+        { user_id: ANN, name: 'ann' },
+        { user_id: BOB, name: 'bob' },
+        { user_id: LUIS, name: 'luis' },
+        { user_id: VERA, name: 'vera' },
+      ])
+    }
+  })
+
+  it('the people list has no agent, no VM sender, no bot, and no member who left', async () => {
+    api.fake.joinSpace('@s-meow:example.org')
+    api.fake.joinSpace('@gone:example.org')
+    api.fake.setMember(api.fake.spaceId, '@gone:example.org', 'leave')
+    const ids = (await list(LUIS)).people.map((p) => p.user_id)
+    for (const id of [
+      '@lima:example.org',
+      '@lima.reviewer:example.org',
+      '@s-meow:example.org',
+      '@zooid:example.org',
+      '@gone:example.org',
+    ]) {
+      expect(ids).not.toContain(id)
+    }
   })
 
   it('passes a control plane failure on as 502', async () => {
@@ -321,6 +350,26 @@ describe('PUT /agents/:id', () => {
         { error: 'owner must be a member of the workspace' },
       ])
     }
+    expect(writes()).toEqual([])
+  })
+
+  it('refuses an owner who is an agent', async () => {
+    api.fake.joinSpace('@s-meow:example.org')
+    for (const owner of ['@lima:example.org', '@lima.reviewer:example.org', '@s-meow:example.org', '@zooid:example.org']) {
+      const res = await as(LUIS, 'PUT', '/agents/a1', { owner })
+      expect([res.status, await res.json()], owner).toEqual([400, { error: 'owner must be a person' }])
+    }
+    expect(writes()).toEqual([])
+  })
+
+  it('answers 502 on GET /agents and on an owner write when the homeserver fails', async () => {
+    const down = [502, { error: 'homeserver unreachable' }]
+    api.fake.failOnce('GET', /\/state$/, 500)
+    const listed = await as(LUIS, 'GET', '/agents')
+    expect([listed.status, await listed.json()]).toEqual(down)
+    api.fake.failOnce('GET', /\/state$/, 500)
+    const changed = await as(LUIS, 'PUT', '/agents/a1', { owner: BOB })
+    expect([changed.status, await changed.json()]).toEqual(down)
     expect(writes()).toEqual([])
   })
 

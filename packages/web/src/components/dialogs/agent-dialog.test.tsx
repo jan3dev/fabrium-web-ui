@@ -201,9 +201,15 @@ describe("<AgentDialog>", () => {
     expect(screen.queryByLabelText("Owner")).toBeNull();
   });
 
-  it("keeps an owner who is not a member of the space as an option", () => {
+  it("keeps an owner who is no longer a person as an option", () => {
     setup({ agent: makeAgent({ owner: "@gone:example.org" }) });
-    expect(screen.getByLabelText("Owner")).toHaveValue("@gone:example.org");
+    const owner = screen.getByLabelText("Owner");
+    expect(owner).toHaveValue("@gone:example.org");
+    expect(within(owner).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "@gone:example.org",
+      "Ann (@ann:example.org)",
+      "Luis (@luis:example.org)",
+    ]);
   });
 
   it("shows the restart note only for an agent with a live VM", () => {

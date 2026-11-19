@@ -31,7 +31,7 @@ interface AgentDialogProps {
   /** `null` while the list loads or when it failed. */
   models: ModelList | null;
   modelsError: string | null;
-  /** The joined members of the workforce space: the owners to choose from. */
+  /** The people of the workspace, from `GET /agents`: the owners to choose from. */
   members: { userId: string; name: string }[];
   /** Creates or changes the agent. Rejects with the reason it failed. */
   onSubmit: (input: AgentInput) => Promise<void>;

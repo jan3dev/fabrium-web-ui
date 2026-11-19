@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   createAgent,
   createVm,
@@ -9,8 +9,6 @@ import {
 import { useAgents } from "../../hooks/use-agents";
 import { useInstanceTypes } from "../../hooks/use-instance-types";
 import { useModels } from "../../hooks/use-models";
-import { useSpaceMembers } from "../../hooks/use-space-members";
-import { WorkforceSpaceContext } from "../../hooks/use-workforce";
 import type { AgentInput, CreateVmRequest } from "../../model/types";
 import { AgentDialog } from "../dialogs/agent-dialog";
 import { CreateVmDialog } from "../dialogs/create-vm-dialog";
@@ -32,7 +30,6 @@ export function AgentsRoute() {
   const editing = open?.kind === "new" || (open?.kind === "edit" && !!target);
   const { models, error: modelsError } = useModels(editing);
   const { types, error: typesError } = useInstanceTypes(open?.kind === "create-vm" && !!target);
-  const members = useSpaceMembers(useContext(WorkforceSpaceContext));
 
   // An agent that left the list takes its dialog with it.
   useEffect(() => {
@@ -81,7 +78,7 @@ export function AgentsRoute() {
         vms={list?.vms ?? []}
         models={models}
         modelsError={modelsError}
-        members={members.map((m) => ({ userId: m.userId, name: m.name }))}
+        members={(list?.people ?? []).map((p) => ({ userId: p.user_id, name: p.name }))}
         onSubmit={save}
       />
       {target ? (
