@@ -9,6 +9,7 @@ import type { Vm } from './vms.js'
 export interface Can {
   edit: boolean
   set_owner: boolean
+  set_project: boolean
   assign: boolean
   create_vm: boolean
   delete: boolean
@@ -35,31 +36,65 @@ export function liveVms(vms: Vm[]): Map<string, Vm> {
   return live
 }
 
+/** A project agent or VM. An absent `project_id` is personal. */
+export const isProject = (x: { project_id?: string | null }): boolean => x.project_id != null
+
+/** Personal: its owner. Project: every role. And an admin. A project agent's stored owner gives no right. */
+export function managesAgent(caller: Caller, agent: AgentRecord): boolean {
+  return isAdmin(caller.role) || isProject(agent) || agent.owner === caller.userId
+}
+
+/** Personal: its creator. Project: a vm-creator. And an admin. */
+export function managesVm(caller: Caller, vm: Vm): boolean {
+  if (isAdmin(caller.role)) return true
+  return isProject(vm) ? managesVms(caller.role) : vm.creator != null && vm.creator === caller.userId
+}
+
+/** Personal agent: its owner or an admin. Project agent: an admin. */
+export function agentCanSetProject(caller: Caller, agent: AgentRecord): boolean {
+  return isAdmin(caller.role) || (!isProject(agent) && agent.owner === caller.userId)
+}
+
+/** Personal VM: its creator or an admin. Project VM: an admin. */
+export function vmCanSetProject(caller: Caller, vm: Vm): boolean {
+  return isAdmin(caller.role) || (!isProject(vm) && vm.creator != null && vm.creator === caller.userId)
+}
+
+/** The rule of the project VM, over the state after the request: a project agent on a live personal VM. */
+export function breaksProjectVmRule(projectAfter: boolean, vmAfter: Vm | undefined): boolean {
+  return projectAfter && vmAfter !== undefined && !isProject(vmAfter)
+}
+
+/** True when a record whose `vm` is `vmName` is a project agent. */
+export function hasProjectAgent(records: readonly AgentRecord[], vmName: string): boolean {
+  return records.some((r) => r.vm === vmName && isProject(r))
+}
+
 const liveVmOf = (world: World, agent: AgentRecord): Vm | undefined =>
   agent.vm === null ? undefined : world.live.get(agent.vm)
 
 export function sees(world: World, agent: AgentRecord): boolean {
-  const { userId, role } = world.caller
-  if (isAdmin(role) || agent.owner === userId) return true
-  if (role !== 'vm-creator') return false
+  const { caller } = world
+  if (managesAgent(caller, agent)) return true
+  if (caller.role !== 'vm-creator') return false
   const vm = liveVmOf(world, agent)
-  return vm === undefined || vm.creator === userId
+  return vm === undefined || managesVm(caller, vm)
 }
 
 export function can(world: World, agent: AgentRecord): Can {
-  const { userId, role } = world.caller
-  const admin = isAdmin(role)
+  const { caller } = world
+  const admin = isAdmin(caller.role)
   const vm = liveVmOf(world, agent)
-  // The VM owner is the creator of the live VM. Without a live VM, or without a creator, there is none.
-  const vmOwner = vm !== undefined && vm.creator === userId
-  const edit = admin || vmOwner || agent.owner === userId
+  const managesLiveVm = vm !== undefined && managesVm(caller, vm)
+  const edit = managesAgent(caller, agent) || managesLiveVm
   const last = vm !== undefined && !world.records.some((r) => r.id !== agent.id && r.vm === agent.vm)
   return {
     edit,
-    set_owner: admin || vmOwner,
+    set_owner: !isProject(agent) && (admin || managesLiveVm),
+    set_project: agentCanSetProject(caller, agent),
     assign: edit && agent.vm === null,
-    create_vm: vm === undefined && managesVms(role),
-    delete: last ? admin || vmOwner : edit,
+    create_vm: vm === undefined && managesVms(caller.role),
+    delete: last ? managesLiveVm : edit,
     delete_needs_vm: last,
   }
 }
@@ -68,8 +103,9 @@ export function can(world: World, agent: AgentRecord): Can {
 export function canUse(world: World, vm: Vm): boolean {
   const { userId, role } = world.caller
   return (
+    isProject(vm) ||
     isAdmin(role) ||
     vm.creator === userId ||
-    world.records.some((r) => r.vm === vm.name && r.owner === userId)
+    world.records.some((r) => r.vm === vm.name && !isProject(r) && r.owner === userId)
   )
 }
