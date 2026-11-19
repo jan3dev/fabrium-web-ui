@@ -126,7 +126,7 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
       )
       records = records.map((r) => (r.id === record.id ? record : r))
     }
-    await rebuildRoster(deps, req.name, records)
+    await rebuildRoster(deps, req.name, records, world.projects)
 
     // The greeting is a courtesy: a caller ID outside the strict grammar skips it instead of failing.
     const creator = isStrictUserId(caller.userId) ? caller.userId : undefined

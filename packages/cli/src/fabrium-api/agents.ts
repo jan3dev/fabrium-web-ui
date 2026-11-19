@@ -16,6 +16,7 @@ import type { MatrixConn } from './matrix.js'
 import type { Models } from './models.js'
 import { checkPerson, listPeople } from './people.js'
 import { can, canUse, liveVms, sees, type World } from './policy.js'
+import { fetchProjects, type Project } from './project-records.js'
 import type { createRoster } from './roster.js'
 import { fetchVms, type Vm } from './vms.js'
 
@@ -54,12 +55,19 @@ const bad = (error: string) => new ApiError(400, { error })
 const forbidden = () => new ApiError(403, { error: 'forbidden' })
 const notMember = () => new ApiError(400, { error: 'owner must be a member of the workspace' })
 
-/** The VM list and every record of the tenant. A failure of the VM list passes on as it is, as on `GET /vms`. */
-export async function loadWorld(ctx: AgentContext, caller: Caller): Promise<World & { vms: Vm[] }> {
+/**
+ * The VM list, every record, and every project of the tenant. A failure of the VM list passes on as it is, as on
+ * `GET /vms`.
+ */
+export async function loadWorld(
+  ctx: AgentContext,
+  caller: Caller,
+): Promise<World & { vms: Vm[]; projects: Project[] }> {
   const listed = await fetchVms(ctx.controlPlane)
   if ('failure' in listed) throw new HTTPException(502, { res: listed.failure })
   const records = await fetchRecords(ctx.controlPlane)
-  return { caller, records, live: liveVms(listed.vms), vms: listed.vms }
+  const projects = await fetchProjects(ctx.controlPlane)
+  return { caller, records, live: liveVms(listed.vms), vms: listed.vms, projects }
 }
 
 /** A refusal passes on as it is. Any other failure is a 502 that names the step (contracts section 3). */
@@ -73,9 +81,14 @@ export async function step<T>(name: string, work: () => Promise<T>): Promise<T> 
 }
 
 /** A roster failure does not fail the request: the next write to the VM, or the next start, rebuilds it. */
-export async function rebuildRoster(ctx: AgentContext, vm: string, records: AgentRecord[]): Promise<void> {
+export async function rebuildRoster(
+  ctx: AgentContext,
+  vm: string,
+  records: AgentRecord[],
+  projects: readonly Project[],
+): Promise<void> {
   try {
-    await ctx.roster.rebuild(vm, records)
+    await ctx.roster.rebuild(vm, records, projects)
   } catch (err) {
     const reason = err instanceof ApiError ? `status ${err.status}` : describeFailure(err)
     console.warn(`[fabrium] the roster of ${vm} was not rebuilt: ${reason}`)
@@ -257,7 +270,7 @@ export function agentRoutes(app: Hono<Env>, ctx: AgentContext): void {
         record = await step('record', () => createRecord(ctx.controlPlane, { ...body, vm, rooms }))
       }
       const records = [...world.records, record]
-      if (record.vm !== null) await rebuildRoster(ctx, record.vm, records)
+      if (record.vm !== null) await rebuildRoster(ctx, record.vm, records, world.projects)
       return c.json(view(ctx, { ...world, records }, record), 201)
     })
   })
@@ -291,7 +304,7 @@ export function agentRoutes(app: Hono<Env>, ctx: AgentContext): void {
         record = await changeRecord(ctx.controlPlane, agent.id, change)
       }
       const records = world.records.map((r) => (r.id === record.id ? record : r))
-      if (record.vm !== null) await rebuildRoster(ctx, record.vm, records)
+      if (record.vm !== null) await rebuildRoster(ctx, record.vm, records, world.projects)
       return c.json(view(ctx, { ...world, records }, record))
     })
   })
@@ -319,7 +332,7 @@ export function agentRoutes(app: Hono<Env>, ctx: AgentContext): void {
       }
       await step('record', () => removeRecord(ctx.controlPlane, agent.id))
       if (agent.vm !== null) {
-        await rebuildRoster(ctx, agent.vm, world.records.filter((r) => r.id !== agent.id))
+        await rebuildRoster(ctx, agent.vm, world.records.filter((r) => r.id !== agent.id), world.projects)
       }
       return c.body(null, 204)
     })

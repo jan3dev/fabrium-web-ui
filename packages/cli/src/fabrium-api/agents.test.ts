@@ -97,7 +97,15 @@ describe('GET /agents', () => {
       project: 'Payments',
       vm: { name: 'lima', id: 'i-0123456789abcdef0', state: 'running', owner: LUIS },
       source: 'control-plane',
-      can: { edit: true, set_owner: false, assign: false, create_vm: false, delete: true, delete_needs_vm: false },
+      can: {
+        edit: true,
+        set_owner: false,
+        set_project: true,
+        assign: false,
+        create_vm: false,
+        delete: true,
+        delete_needs_vm: false,
+      },
     })
   })
 
@@ -191,6 +199,21 @@ describe('GET /agents', () => {
       { error: 'control plane sent an invalid response' },
     ])
   })
+})
+
+it('a project list failure on any agent route is a 502', async () => {
+  api.controlPlane.on('GET', '/v1/projects', jsonResponse(500, { error: 'database is locked' }))
+  const invalid = [502, { error: 'control plane sent an invalid response' }]
+  for (const [method, path, json] of [
+    ['GET', '/agents'],
+    ['POST', '/agents', { name: 'scout', model: 'glm-5-3' }],
+    ['PUT', '/agents/a1', { description: 'x' }],
+    ['DELETE', '/agents/p1'],
+  ] as const) {
+    const res = await as(ANA, method, path, json)
+    expect([res.status, await res.json()], `${method} ${path}`).toEqual(invalid)
+  }
+  expect(writes()).toEqual([])
 })
 
 describe('POST /agents', () => {

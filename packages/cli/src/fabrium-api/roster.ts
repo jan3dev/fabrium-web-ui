@@ -7,6 +7,7 @@ import type { MatrixClient } from '@zooid/transport-matrix'
 import type { AgentRecord } from './agent-records.js'
 import { listBundleNames, withServer } from './bundle.js'
 import { stateEvent, type MatrixConn } from './matrix.js'
+import type { Project } from './project-records.js'
 
 export interface RosterDeps {
   conn: MatrixConn
@@ -21,11 +22,11 @@ export interface RosterDeps {
 
 export function createRoster(deps: RosterDeps): {
   /** Builds the event of section 3 from the records whose vm is `vm`, and sends it only when it differs. */
-  rebuild(vm: string, records: AgentRecord[]): Promise<void>
+  rebuild(vm: string, records: AgentRecord[], projects: readonly Project[]): Promise<void>
   /** Every VM name with a bundle or a record. One failure does not stop the others. */
-  rebuildAll(records: AgentRecord[]): Promise<void>
+  rebuildAll(records: AgentRecord[], projects: readonly Project[]): Promise<void>
 } {
-  async function rebuild(vm: string, records: AgentRecord[]): Promise<void> {
+  async function rebuild(vm: string, records: AgentRecord[], projects: readonly Project[]): Promise<void> {
     const spaceId = deps.getSpaceRoomId()
     if (!spaceId) throw new Error('the workforce space is not ready')
     const mine = records
@@ -40,12 +41,14 @@ export function createRoster(deps: RosterDeps): {
         const roomId = alias.startsWith('!') ? alias : await deps.client.resolveAlias(alias)
         if (roomId) rooms.push(roomId)
       }
+      // The name of the project. The text label of phase 1 never goes in.
+      const project = r.project_id === null ? undefined : projects.find((p) => p.id === r.project_id)?.name
       agents.push({
         user_id: `@${vm}.${r.name}:${deps.serverName}`,
         name: r.name,
         rooms,
         ...(r.tag ? { persona: r.tag } : {}),
-        ...(r.project ? { project: r.project } : {}),
+        ...(project === undefined ? {} : { project }),
       })
     }
     const content = { version: 1, agents }
@@ -62,12 +65,12 @@ export function createRoster(deps: RosterDeps): {
 
   return {
     rebuild,
-    async rebuildAll(records) {
+    async rebuildAll(records, projects) {
       const names = new Set(await listBundleNames(deps.workstationsDir))
       for (const r of records) if (r.vm !== null) names.add(r.vm)
       for (const vm of [...names].sort()) {
         try {
-          await rebuild(vm, records)
+          await rebuild(vm, records, projects)
         } catch (err) {
           // Our own messages: a status, a room, or an event type. Never a token.
           console.warn(`[fabrium] the roster of ${vm} was not rebuilt: ${(err as Error).message}`)

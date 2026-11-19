@@ -13,6 +13,7 @@ import type { MatrixConn } from './matrix.js'
 import { createModels } from './models.js'
 import { FULL_COMMIT_RE } from './payload.js'
 import { liveVms } from './policy.js'
+import { fetchProjects } from './project-records.js'
 import { createQueue } from './queue.js'
 import { createRoster } from './roster.js'
 import { fetchVms } from './vms.js'
@@ -240,7 +241,8 @@ export function fabriumApi(deps: FabriumApiDeps): {
   return {
     app,
     // In the queue, so no write lands mid-rebuild; a failed read throws rather than empty every roster.
-    rebuildRosters: () => queue(async () => roster.rebuildAll(await fetchRecords(controlPlane))),
+    rebuildRosters: () =>
+      queue(async () => roster.rebuildAll(await fetchRecords(controlPlane), await fetchProjects(controlPlane))),
   }
 }
 
