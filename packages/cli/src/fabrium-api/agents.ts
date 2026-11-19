@@ -20,7 +20,7 @@ import { fetchProjects, type Project } from './project-records.js'
 import type { createRoster } from './roster.js'
 import { fetchVms, type Vm } from './vms.js'
 
-type Env = { Variables: { caller: Caller } }
+export type Env = { Variables: { caller: Caller } }
 
 export interface AgentContext {
   controlPlane: ControlPlane

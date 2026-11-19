@@ -14,6 +14,7 @@ import { createModels } from './models.js'
 import { FULL_COMMIT_RE } from './payload.js'
 import { liveVms } from './policy.js'
 import { fetchProjects } from './project-records.js'
+import { projectRoutes } from './projects.js'
 import { createQueue } from './queue.js'
 import { createRoster } from './roster.js'
 import { fetchVms } from './vms.js'
@@ -140,6 +141,7 @@ export function fabriumApi(deps: FabriumApiDeps): {
     havenModel: deps.havenModel,
   }
   agentRoutes(app, agents)
+  projectRoutes(app, agents)
 
   /** The commit that a new VM checks out. Without a full one, no VM can be made. */
   function zooidCommit(): string {
