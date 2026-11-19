@@ -716,7 +716,7 @@ in the rooms.
 #### Replace a VM
 
 **Update credentials** on the VM page sends a new Haven key and GitHub token. The control plane deletes the VM
-and creates it again with the same name, instance type, auto-stop hours, and creator. The bundle stays, so the
+and creates it again with the same name, instance type, auto-stop hours, creator, and project. The bundle stays, so the
 agents keep their Matrix IDs. The files on the VM are lost, every agent of the VM stops until the new VM is
 ready, and the new VM sends no first message.
 
@@ -748,7 +748,8 @@ read `senders`. A change of the tag changes no file and restarts nothing.
 
 When the request fails, the answer is not a list of agents, or the list is empty, it keeps every file. It skips an
 agent whose name breaks `^[a-z][a-z0-9-]{0,31}$`, whose room is not a `#alias` or a `!id` without spaces,
-quotes, commas, or backslashes, or whose `senders` value breaks the rule of the contracts. When it skips every
+quotes, commas, or backslashes, or whose `senders` value is not a list of 1 to 20 Matrix user IDs of printable
+ASCII, each at most 255 bytes. When it skips every
 agent, it keeps every file. When it skips every agent and one of them has a `senders` value, it also stops
 `fabrium-agent`, because the earlier files can have no filter or the filter of an earlier owner. The next run with a
 list to apply starts it again.
