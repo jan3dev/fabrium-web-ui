@@ -117,10 +117,10 @@ apply_list() {
   count=$(jq length "$work/list.json") || die "cannot read the list"
   # zooid refuses a zooid.yaml without agents: an empty list keeps the files, as no list does.
   if [ "$count" -eq 0 ]; then
-    # An agent skipped for its senders: the files of an earlier run can have no filter, or the
-    # filter of an earlier owner, so no agent goes on with them until a list applies (contracts, section 5).
-    if jq -e "${RULE_ARGS[@]}" "$RULES"'any(.agents[]; name_ok and rooms_ok and (senders_ok | not))' \
-      "$work/answer.json" >/dev/null; then
+    # An agent with a senders value (a list, or one that breaks the rule), skipped for any reason:
+    # the files of an earlier run can have no filter, or the filter of an earlier owner, so no
+    # agent goes on with them until a list applies (contracts, section 5).
+    if jq -e 'any(.agents[]; .senders != null)' "$work/answer.json" >/dev/null; then
       if [ "$dry_run" -eq 0 ]; then
         { mkdir -p "$WORKFORCE" && : >"$STOP_MARK"; } || die "cannot write $STOP_MARK"
       fi

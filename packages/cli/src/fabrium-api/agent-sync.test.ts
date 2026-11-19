@@ -408,10 +408,24 @@ describe('fabrium-agent-sync', () => {
       expect(snapshot()).toEqual(before)
     })
 
-    it('keeps the phase 1 behavior when every agent is skipped for a name or a room only', async () => {
+    // A valid list, but a room that breaks the rule: the earlier file without a filter must not stay live.
+    it('stops the service when every agent is skipped and one of them has a valid senders list', async () => {
+      reply = list({ ...reviewer, senders: null })
+      await sync()
+      const before = read('zooid.yaml')
+      reply = list({ ...reviewer, senders: ana, rooms: ['general'] })
+      const { code, out } = await sync()
+      expect([code, lines(out)]).toEqual([
+        0,
+        ['skip: reviewer: a room breaks the rule of the contracts', 'stop: fabrium-agent'],
+      ])
+      expect(read('zooid.yaml')).toBe(before)
+    })
+
+    it('keeps the phase 1 behavior when every agent is skipped and none has senders', async () => {
       await sync()
       const before = snapshot()
-      reply = list({ ...reviewer, name: 'Bad', senders: '@ana:example.org' }, { ...tester, rooms: ['general'] })
+      reply = list({ ...reviewer, name: 'Bad' }, { ...tester, rooms: ['general'], senders: null })
       const { code, out } = await sync()
       expect([code, lines(out)]).toEqual([
         0,
