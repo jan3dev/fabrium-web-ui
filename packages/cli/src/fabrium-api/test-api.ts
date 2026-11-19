@@ -168,7 +168,8 @@ export function fakeProjectStore(
     const refused = refuse(req.body)
     if (refused) return refused
     const at = now()
-    const made = { id: randomBytes(16).toString('hex'), name: (req.body as { name: string }).name, created_at: at, updated_at: at }
+    const name = (req.body as { name: string }).name
+    const made = { id: randomBytes(16).toString('hex'), name, created_at: at, updated_at: at }
     projects.push(made)
     return jsonResponse(201, made)
   })

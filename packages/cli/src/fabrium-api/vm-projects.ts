@@ -23,7 +23,10 @@ export function vmView(caller: Caller, projects: readonly Project[], vm: Vm): Re
   }
 }
 
-/** A successful JSON object with a string `id` is decorated. Any other body, and a body-less 202, pass on as they are. */
+/**
+ * A successful JSON object with a string `id` is decorated. Any other body, and a body-less 202, pass on as they
+ * are.
+ */
 export async function relayVm(upstream: Response, decorate: VmDecorator): Promise<Response> {
   const res = await relay(upstream)
   if (!res.ok) return res
