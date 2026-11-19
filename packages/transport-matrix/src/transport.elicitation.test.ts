@@ -17,7 +17,7 @@ const schema = {
 
 type Asker = (name: string, req: unknown, signal: AbortSignal) => Promise<ElicitationResponse>
 
-function setup(o: { members?: string[]; failPublish?: number; workstation?: string } = {}) {
+function setup(o: { members?: string[]; failPublish?: number; workstation?: string; senders?: string[] } = {}) {
   let release!: () => void
   const turnGate = new Promise<void>((r) => (release = r))
   const reg = {
@@ -67,7 +67,10 @@ function setup(o: { members?: string[]; failPublish?: number; workstation?: stri
     approvals: approvals as never,
     client: client as never,
     bindings: [
-      { name: 'architect', userId: AGENT, rooms: [{ alias: ROOM }], trigger: 'mention' as const },
+      {
+        name: 'architect', userId: AGENT, rooms: [{ alias: ROOM }], trigger: 'mention' as const,
+        ...(o.senders ? { senders: o.senders } : {}),
+      },
       { name: 'coder', userId: CODER, rooms: [{ alias: ROOM }], trigger: 'mention' as const },
     ],
     hsToken: 'hs',
@@ -480,5 +483,50 @@ describe('response races', () => {
     expect(sent(s, 'dev.zooid.elicitation_resolved')).toHaveLength(1)
     expect(sent(s, 'dev.zooid.elicitation_rejected')).toHaveLength(1)
     s.finishTurn()
+  })
+})
+
+// The personal agent `architect` answers only ALICE; BOB is a joined member of the room.
+describe('senders', () => {
+  it('a non-owner answer to a personal agent question is ignored and the owner still settles it', async () => {
+    const s = setup({ senders: [ALICE] })
+    await startTurn(s)
+    const { response } = ask(s)
+    await settle()
+    const id = requestIdOf(s)
+    await respond(s, { requestId: id, sender: BOB, content: { env: 'staging' } }).p
+    await settle()
+    expect(s.elicitations.get(id)?.state).toBe('pending')
+    expect(sent(s, 'dev.zooid.elicitation_rejected')).toHaveLength(0)
+    expect(sent(s, 'dev.zooid.elicitation_resolved')).toHaveLength(0)
+    await respond(s, { requestId: id, sender: ALICE, content: { env: 'prod' } }).p
+    await expect(response).resolves.toEqual({ action: 'accept', content: { env: 'prod' } })
+    await settle()
+    expect(sent(s, 'dev.zooid.elicitation_resolved')[0]).toMatchObject({ content: { responded_by: ALICE } })
+  })
+
+  it('an agent without senders still takes the answer of any joined member', async () => {
+    const s = setup()
+    await startTurn(s)
+    const { response } = ask(s)
+    await settle()
+    await respond(s, { requestId: requestIdOf(s), sender: BOB, content: { env: 'prod' } }).p
+    await expect(response).resolves.toEqual({ action: 'accept', content: { env: 'prod' } })
+  })
+
+  it('a non-owner /clear leaves the open question of a personal agent', async () => {
+    const s = setup({ senders: [ALICE] })
+    await startTurn(s)
+    ask(s)
+    await settle()
+    const id = requestIdOf(s)
+    await post(s, [{
+      type: 'dev.zooid.session_reset', event_id: '$clear', room_id: ROOM, sender: BOB,
+      content: { 'm.relates_to': { rel_type: 'm.thread', event_id: '$root' } },
+    }])
+    await settle()
+    expect(s.elicitations.get(id)?.state).toBe('pending')
+    expect(s.reg.cancelSession).not.toHaveBeenCalled()
+    expect(s.reg.endSession).not.toHaveBeenCalledWith('architect', '$root')
   })
 })

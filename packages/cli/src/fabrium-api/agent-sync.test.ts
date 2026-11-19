@@ -18,6 +18,7 @@ interface Agent {
   description: string
   model: string
   rooms: string[]
+  senders?: unknown
 }
 
 const reviewer: Agent = {
@@ -309,6 +310,224 @@ describe('fabrium-agent-sync', () => {
     for (const dir of [root, zooid(), workforce(), workforce('agents/reviewer'), process.cwd()]) {
       expect(existsSync(join(dir, 'pwned')), dir).toBe(false)
     }
+  })
+
+  describe('senders', () => {
+    const ana = ['@ana:example.org']
+    const yaml = () => JSON.parse(read('zooid.yaml'))
+
+    it('writes senders in the matrix block of an agent that has a list', async () => {
+      reply = list({ ...reviewer, senders: ana }, tester)
+      expect((await sync()).code).toBe(0)
+      expect(yaml().agents.reviewer.matrix).toEqual({
+        display_name: 'reviewer',
+        rooms: ['#general:example.org'],
+        trigger: 'mention',
+        senders: ana,
+      })
+      expect(yaml().agents.tester.matrix).not.toHaveProperty('senders')
+    })
+
+    it('writes no senders for null, and for an absent field', async () => {
+      reply = list({ ...reviewer, senders: null }, tester)
+      expect((await sync()).code).toBe(0)
+      expect(yaml().agents.reviewer.matrix).not.toHaveProperty('senders')
+      expect(yaml().agents.tester.matrix).not.toHaveProperty('senders')
+    })
+
+    it('a second run with senders changes nothing', async () => {
+      reply = list({ ...reviewer, senders: ana }, tester)
+      await sync()
+      expect(lines((await sync()).out)).toEqual(['no change'])
+    })
+
+    it('a changed list rewrites zooid.yaml and restarts', async () => {
+      reply = list({ ...reviewer, senders: ana }, tester)
+      await sync()
+      reply = list({ ...reviewer, senders: ['@bo:example.org'] }, tester)
+      expect(lines((await sync()).out)).toEqual([`write: ${workforce('zooid.yaml')}`, 'restart: fabrium-agent'])
+      expect(yaml().agents.reviewer.matrix.senders).toEqual(['@bo:example.org'])
+    })
+
+    it.each([
+      ['a string', '@ana:example.org'],
+      ['an empty list', []],
+      ['21 entries', Array.from({ length: 21 }, (_, i) => `@u${i}:example.org`)],
+      ['a non-string entry', [7]],
+      ['an entry without @', ['ana:example.org']],
+      ['an entry without a server', ['@ana']],
+      ['an entry with a space', ['@a na:example.org']],
+      ['an entry with a line break', ['@ana:example.org\n@bo:example.org']],
+      ['an entry that ends with a line break', ['@ana:example.org\n']],
+      ['an entry over 255 bytes', [`@${'a'.repeat(250)}:example.org`]],
+      // Printable ASCII only (contracts, section 5): zooid core applies the same pattern.
+      ['an entry with U+FEFF', ['@a\uFEFFb:example.org']],
+      ['an entry with U+0085', ['@a\u0085b:example.org']],
+      ['an entry with a non-ASCII letter', ['@ané:example.org']],
+      ['an object', { owner: '@ana:example.org' }],
+      ['a number', 7],
+    ])('skips an agent whose senders is %s', async (_case, senders) => {
+      reply = list({ ...reviewer, senders }, tester)
+      const { code, out } = await sync()
+      expect(code).toBe(0)
+      expect(lines(out).filter((l) => l.startsWith('skip:'))).toEqual([
+        'skip: reviewer: senders breaks the rule of the contracts',
+      ])
+      expect(Object.keys(yaml().agents)).toEqual(['tester'])
+    })
+
+    it('accepts 20 entries, and a server with a port', async () => {
+      const many = [...Array.from({ length: 19 }, (_, i) => `@u${i}:example.org`), '@ana:example.org:8448']
+      reply = list({ ...reviewer, senders: many })
+      expect((await sync()).code).toBe(0)
+      expect(yaml().agents.reviewer.matrix.senders).toEqual(many)
+    })
+
+    const stopped = ['skip: reviewer: senders breaks the rule of the contracts', 'stop: fabrium-agent']
+
+    // The files of the earlier run have no filter: they must not stay live.
+    it('stops the service when every agent is skipped for its senders, after a file without a filter', async () => {
+      reply = list({ ...reviewer, senders: null })
+      await sync()
+      const before = read('zooid.yaml')
+      reply = list({ ...reviewer, senders: '@ana:example.org' })
+      const { code, out } = await sync()
+      expect([code, lines(out)]).toEqual([0, stopped])
+      expect(read('zooid.yaml')).toBe(before)
+      expect((await sync(['--require'])).code).toBe(1)
+    })
+
+    // The files of the earlier run have the filter of an earlier owner.
+    it('stops the service when the filter of the files is the one of an earlier owner', async () => {
+      reply = list({ ...reviewer, senders: ana }, tester)
+      await sync()
+      const before = snapshot()
+      reply = list({ ...reviewer, senders: ['@bo:example.org', 7] })
+      const { code, out } = await sync()
+      expect([code, lines(out)]).toEqual([0, stopped])
+      expect(snapshot()).toEqual(before)
+    })
+
+    // A valid list, but a room that breaks the rule: the earlier file without a filter must not stay live.
+    it('stops the service when every agent is skipped and one of them has a valid senders list', async () => {
+      reply = list({ ...reviewer, senders: null })
+      await sync()
+      const before = read('zooid.yaml')
+      reply = list({ ...reviewer, senders: ana, rooms: ['general'] })
+      const { code, out } = await sync()
+      expect([code, lines(out)]).toEqual([
+        0,
+        ['skip: reviewer: a room breaks the rule of the contracts', 'stop: fabrium-agent'],
+      ])
+      expect(read('zooid.yaml')).toBe(before)
+    })
+
+    it('keeps the phase 1 behavior when every agent is skipped and none has senders', async () => {
+      await sync()
+      const before = snapshot()
+      reply = list({ ...reviewer, name: 'Bad' }, { ...tester, rooms: ['general'], senders: null })
+      const { code, out } = await sync()
+      expect([code, lines(out)]).toEqual([
+        0,
+        [
+          'skip: "Bad": the name breaks the rule ^[a-z][a-z0-9-]{0,31}$',
+          'skip: tester: a room breaks the rule of the contracts',
+        ],
+      ])
+      expect(snapshot()).toEqual(before)
+    })
+
+    it('the next run with a list starts the stopped service again, also without a change', async () => {
+      reply = list({ ...reviewer, senders: null })
+      await sync()
+      reply = list({ ...reviewer, senders: '@ana:example.org' })
+      await sync()
+      reply = list({ ...reviewer, senders: null })
+      expect(lines((await sync()).out)).toEqual(['start: fabrium-agent'])
+      expect(lines((await sync()).out)).toEqual(['no change'])
+    })
+
+    it('--dry-run prints the stop and remembers nothing', async () => {
+      reply = list({ ...reviewer, senders: null })
+      await sync()
+      reply = list({ ...reviewer, senders: '@ana:example.org' })
+      expect(lines((await sync(['--dry-run'])).out)).toEqual(stopped)
+      reply = list({ ...reviewer, senders: null })
+      expect(lines((await sync()).out)).toEqual(['no change'])
+    })
+
+    // A systemctl first on the PATH that logs its arguments, and fails while the file `fail` exists;
+    // and a unit file under the root, so the script calls it.
+    function fakeSystemctl() {
+      const bin = join(root, 'bin')
+      const log = join(root, 'systemctl-log')
+      const fail = join(root, 'fail')
+      mkdirSync(bin, { recursive: true })
+      writeFileSync(join(bin, 'systemctl'), `#!/bin/bash\nprintf '%s\\n' "$*" >>"${log}"\n[ ! -e "${fail}" ]\n`)
+      chmodSync(join(bin, 'systemctl'), 0o755)
+      const units = join(root, 'home/ubuntu/.config/systemd/user')
+      mkdirSync(units, { recursive: true })
+      writeFileSync(join(units, 'fabrium-agent.service'), '')
+      return {
+        env: { PATH: `${bin}:${process.env.PATH}` },
+        calls: () => (existsSync(log) ? lines(readFileSync(log, 'utf8')) : []),
+        fail: (on: boolean) => (on ? writeFileSync(fail, '') : rmSync(fail, { force: true })),
+      }
+    }
+
+    it('stops with systemctl stop, and starts with restart, since try-restart leaves a stopped unit stopped', async () => {
+      const sd = fakeSystemctl()
+      reply = list({ ...reviewer, senders: null })
+      await sync([], sd.env)
+      reply = list({ ...reviewer, senders: '@ana:example.org' })
+      expect(lines((await sync([], sd.env)).out)).toEqual(stopped)
+      reply = list({ ...reviewer, senders: null })
+      expect(lines((await sync([], sd.env)).out)).toEqual(['start: fabrium-agent'])
+      expect(sd.calls()).toEqual([
+        '--user try-restart fabrium-agent.service',
+        '--user stop fabrium-agent.service',
+        '--user restart fabrium-agent.service',
+      ])
+    })
+
+    it('a failed restart is tried again by the next run, also when that run changes no file', async () => {
+      const sd = fakeSystemctl()
+      await sync([], sd.env)
+      reply = list({ ...reviewer, senders: ana }, tester)
+      sd.fail(true)
+      expect((await sync([], sd.env)).code).toBe(1)
+      sd.fail(false)
+      const again = await sync([], sd.env)
+      expect([again.code, lines(again.out)]).toEqual([0, ['restart: fabrium-agent']])
+      expect(lines((await sync([], sd.env)).out)).toEqual(['no change'])
+      expect(sd.calls()).toEqual(Array(3).fill('--user try-restart fabrium-agent.service'))
+    })
+
+    it('a failed start after a stop is tried again by the next run', async () => {
+      const sd = fakeSystemctl()
+      reply = list({ ...reviewer, senders: null })
+      await sync([], sd.env)
+      reply = list({ ...reviewer, senders: '@ana:example.org' })
+      await sync([], sd.env)
+      reply = list({ ...reviewer, senders: null })
+      sd.fail(true)
+      expect((await sync([], sd.env)).code).toBe(1)
+      sd.fail(false)
+      expect(lines((await sync([], sd.env)).out)).toEqual(['start: fabrium-agent'])
+      expect(sd.calls().at(-1)).toBe('--user restart fabrium-agent.service')
+    })
+
+    it('writes a hostile senders entry byte for byte or skips it, and runs nothing', async () => {
+      const passes = '@a:b$(touch${IFS}pwned)`id`'
+      reply = list({ ...reviewer, senders: [passes] }, { ...tester, senders: ['@a:b$(touch pwned)'] })
+      const { code, out } = await sync()
+      expect(code).toBe(0)
+      expect(yaml().agents.reviewer.matrix.senders).toEqual([passes])
+      expect(lines(out)).toContain('skip: tester: senders breaks the rule of the contracts')
+      for (const dir of [root, zooid(), workforce(), workforce('agents/reviewer'), process.cwd()]) {
+        expect(existsSync(join(dir, 'pwned')), dir).toBe(false)
+      }
+    })
   })
 
   // The agent of the test turn of configure-agent.sh on these files: this runs the script's own block.

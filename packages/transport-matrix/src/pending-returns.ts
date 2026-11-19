@@ -146,20 +146,25 @@ export class PendingReturns {
    * end releases; with nothing running there is no turn end coming, so every
    * pending return in the thread releases now. Call before cancelling
    * sessions, or a turn that finishes first makes the thread look idle.
+   * A return bound for a caller that `allows` refuses is left as it is.
    */
-  interrupt(threadRoot: string): void {
+  interrupt(threadRoot: string, allows: (target: AgentBinding) => boolean = () => true): void {
     const suffix = `::${threadRoot}`
     const anyRunning = [...this.running.keys()].some((k) => k.endsWith(suffix))
     for (const [k, p] of [...this.pending]) {
-      if (p.threadRoot !== threadRoot) continue
+      if (p.threadRoot !== threadRoot || ![...p.targets.values()].every(allows)) continue
       if (!anyRunning) this.release(k)
       else if (this.running.has(k)) p.interrupted = true
     }
   }
 
-  /** `/clear`: a pre-reset return must never wake anyone later. */
-  dropThread(threadRoot: string): void {
-    for (const [k, p] of [...this.pending]) if (p.threadRoot === threadRoot) this.drop(k)
+  /**
+   * `/clear`: a pre-reset return must never wake anyone later. A return bound
+   * for a caller that `allows` refuses is kept: the reset is not its own.
+   */
+  dropThread(threadRoot: string, allows: (target: AgentBinding) => boolean = () => true): void {
+    for (const [k, p] of [...this.pending])
+      if (p.threadRoot === threadRoot && [...p.targets.values()].every(allows)) this.drop(k)
   }
 
   private arm(k: string): void {

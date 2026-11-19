@@ -25,6 +25,11 @@ export interface AgentBinding {
   workspaceDir?: string
   /** Path prefix as the agent sees it: '/workspace' for containers, = workspaceDir for local. */
   agentWorkspacePath?: string
+  /**
+   * Matrix user IDs this agent answers (`matrix.senders` of zooid.yaml).
+   * Absent: everybody. Never published in the roster. See `senderAllowed`.
+   */
+  senders?: string[]
 }
 
 export const MEDIA_MSGTYPES = new Set(['m.image', 'm.file', 'm.video', 'm.audio'])
@@ -94,6 +99,11 @@ export function route(
    * namespaces. `agents` holds only this daemon's bindings.
    */
   knownAgentIds?: Pick<ReadonlySet<string>, 'has'>,
+  /**
+   * The callee of the handoff that `callerUserId` has open in `threadRoot`,
+   * if any. Only an open call lets a return reach an agent with `senders`.
+   */
+  openCallee?: (callerUserId: string, threadRoot: string) => string | undefined,
 ): RouteMatch[] {
   if (event.type !== 'm.room.message') return []
   if (!event.content?.msgtype) return []
@@ -132,6 +142,8 @@ export function route(
   const handoff = readHandoff(event.content)
   for (const a of agents) {
     if (!a.rooms.some((r) => r.alias === event.room_id)) continue
+    const open = threadRoot && a.senders !== undefined ? openCallee?.(a.userId, threadRoot) : undefined
+    if (!senderAllowed(a, event, threadState, open)) continue
     if (task?.isRoot) {
       if (a.name === task.assignee) matches.push(a)
       continue
@@ -185,6 +197,28 @@ export function route(
     }
   }
   return matches
+}
+
+/**
+ * The one chat filter. True when `agent` may be started or steered by `event`.
+ * No `senders`: true. Else true when `event.sender` is in `senders` (byte for
+ * byte), or when the event is the return of the call that `agent` has open to
+ * the sender (`openCallee`, and the call edge of `isReturnRoute`). A stale
+ * edge does not count: whoever steers the callee later would reach `agent`.
+ * Any other `senders` value, `[]` too, refuses everybody. Every inbound path
+ * calls this function; none repeats the rule.
+ */
+export function senderAllowed(
+  agent: AgentBinding,
+  event: { sender?: string },
+  threadState?: ThreadState,
+  openCallee?: string,
+): boolean {
+  if (agent.senders === undefined) return true
+  const sender = event.sender
+  if (sender === undefined) return false
+  if (Array.isArray(agent.senders) && agent.senders.includes(sender)) return true
+  return sender === openCallee && isReturnRoute(event, agent, threadState)
 }
 
 /**
