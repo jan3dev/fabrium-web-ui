@@ -294,6 +294,8 @@ export function agentRoutes(app: Hono<Env>, ctx: AgentContext): void {
         if (breaksProjectVmRule(projectId !== undefined, vmKind(world, ctx.launches, vm))) throw needsProjectVm()
       }
       await checkModel(ctx, model)
+      // The caller is the stored owner, also of a project agent (contracts section 2, "Person").
+      await checkPerson(ctx, caller.userId)
       // The control plane refuses a label of "": a new agent leaves it out.
       const body = {
         ...fields,

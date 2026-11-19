@@ -712,6 +712,24 @@ describe('with projects', () => {
       }
     })
 
+    it('the caller must be a person, also for a project agent', async () => {
+      // A bot with a role, in the namespace of the VM name lima.
+      const bot = '@lima.bot:example.org'
+      api.fake.joinSpace(bot, 40)
+      for (const extra of [{}, { project_id: PR1 }, { project_id: PR1, vm: 'hub' }]) {
+        const res = await api.request('POST', '/agents', {
+          token: api.fake.openIdToken(bot),
+          json: { name: 'scout', model: 'glm-5-3', ...extra },
+        })
+        expect([res.status, await res.json()], JSON.stringify(extra)).toEqual([
+          400,
+          { error: 'owner must be a person' },
+        ])
+      }
+      expect(api.fake.userExists('@hub.scout:example.org')).toBe(false)
+      expect(writes()).toEqual([])
+    })
+
     it('sends project_id and never project', async () => {
       const res = await as(ANA, 'POST', '/agents', { name: 'scout', model: 'glm-5-3', project: 'Old', project_id: PR1 })
       expect(res.status).toBe(201)
@@ -897,6 +915,7 @@ describe('with projects', () => {
   })
 
   describe('DELETE /agents/:id with projects', () => {
+
     it('an agents-manager deletes a project agent that is not the last of its VM', async () => {
       expect((await as(ANA, 'DELETE', '/agents/q2')).status).toBe(204)
       expect(recordOf('q2')).toBeUndefined()

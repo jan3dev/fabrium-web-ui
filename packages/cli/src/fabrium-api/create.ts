@@ -15,6 +15,7 @@ import { MARKER, VM_NAME_RE, readBundleEnv } from './bundle.js'
 import { describeFailure, relay } from './control-plane.js'
 import { ApiError } from './errors.js'
 import { buildPayload, isStrictUserId, secretProblem } from './payload.js'
+import { checkPerson } from './people.js'
 import { hasProjectAgent, isProject, sees } from './policy.js'
 import { relayVm, vmView, type VmDecorator } from './vm-projects.js'
 import type { Vm } from './vms.js'
@@ -131,6 +132,8 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
     if (req.projectId === undefined && (isProject(agent) || hasProjectAgent(world.records, req.name))) {
       throw needsProjectVm()
     }
+    // The caller is the stored creator, also of a project VM (contracts section 2, "Person").
+    await checkPerson(deps, caller.userId)
     // Safe to repeat. An agent with a VM name joins the rooms of its record, not today's FABRIUM_VM_ROOMS.
     const admitted = await deps.admission.admit({
       workstation: req.name,

@@ -620,6 +620,22 @@ describe('a VM that is launching', () => {
   })
 })
 
+describe('the creator of a VM', () => {
+  it('must be a person, also for a project VM', async () => {
+    setup()
+    // A bot with a role, in the namespace of the VM name quito.
+    record('a4', 'watcher', 'quito', ANA)
+    const bot = '@quito.bot:example.org'
+    api.fake.joinSpace(bot, 70)
+    for (const json of [body(), body({ project_id: PR1 })]) {
+      const res = await create(json, api.fake.openIdToken(bot))
+      expect([res.status, await res.json()]).toEqual([400, { error: 'owner must be a person' }])
+    }
+    expect(api.fake.messages).toEqual([])
+    expect(posts()).toEqual([])
+  })
+})
+
 describe('a homeserver that does not answer', () => {
   it.each([
     ['a call of the central client', 'GET', /\/directory\/room\//, 'register_appservice'],
