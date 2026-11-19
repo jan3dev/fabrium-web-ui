@@ -91,8 +91,9 @@ it.each([
   // A creator of null.
   [ANN, 'dock', { project_id: '' }, 400, { error: 'owner must be a member of the workspace' }, null],
   [ANN, 'lima', { owner: BOB }, 200, { creator: BOB }, { creator: BOB }],
-  // The creator may not change the owner.
+  // The creator may not change the owner, also together with a project.
   [LUIS, 'lima', { owner: BOB }, 403, forbidden, null],
+  [LUIS, 'lima', { project_id: PR1, owner: BOB }, 403, forbidden, null],
   [ANN, 'hub', { owner: BOB }, 400, noOwner, null],
   [LUIS, 'hub', { owner: BOB }, 400, noOwner, null],
   [ANN, 'lima', { project_id: PR1, owner: BOB }, 400, noOwner, null],

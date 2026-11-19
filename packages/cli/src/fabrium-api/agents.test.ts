@@ -784,8 +784,9 @@ describe('with projects', () => {
     it.each([
       // caller, agent, body, status, answer, the body that the control plane got (null: no write)
       [ANA, 'p1', { project_id: PR1 }, 200, { project_id: PR1, project: 'Payments' }, { project_id: PR1 }],
-      // set_project is false for a non-owner.
+      // set_project is false for a non-owner, and the 403 comes before the 400 of an unknown project.
       [LUIS, 'p1', { project_id: PR1 }, 403, { error: 'forbidden' }, null],
+      [LUIS, 'p1', { project_id: UNKNOWN }, 403, { error: 'forbidden' }, null],
       // a1 is on the personal VM lima. The rule holds for an admin too.
       [ANA, 'a1', { project_id: PR1 }, 409, needsProjectVm, null],
       [ANN, 'a1', { project_id: PR1 }, 409, needsProjectVm, null],
@@ -794,6 +795,9 @@ describe('with projects', () => {
       [ANN, 'q2', { project_id: PR2 }, 200, { project_id: PR2, project: 'Billing' }, { project_id: PR2 }],
       // Only an admin moves.
       [ANA, 'q1', { project_id: PR2 }, 403, { error: 'forbidden' }, null],
+      [LUIS, 'q1', { project_id: PR2 }, 403, { error: 'forbidden' }, null],
+      // A personal agent of another member on a project VM: an agents-manager does not see it.
+      [ANA, 'q3', { description: 'x' }, 404, { error: 'not found' }, null],
       // The stored project_id is not a change (D1).
       [ANA, 'q1', { description: 'x', project_id: PR1 }, 200, { description: 'x' }, { description: 'x' }],
       [ANN, 'q1', { owner: BOB }, 400, noOwner, null],
@@ -915,6 +919,11 @@ describe('with projects', () => {
   })
 
   describe('DELETE /agents/:id with projects', () => {
+    it('an agents-manager gets 404 for a personal agent of another member on a project VM', async () => {
+      const res = await as(ANA, 'DELETE', '/agents/q3?vm=1')
+      expect([res.status, await res.json()]).toEqual([404, { error: 'not found' }])
+      expect(writes()).toEqual([])
+    })
 
     it('an agents-manager deletes a project agent that is not the last of its VM', async () => {
       expect((await as(ANA, 'DELETE', '/agents/q2')).status).toBe(204)
