@@ -3,18 +3,22 @@ import { MatrixClient } from '@zooid/transport-matrix'
 import { Hono } from 'hono'
 import { createAdmission } from './admission.js'
 import { fetchRecords } from './agent-records.js'
-import { agentRoutes, type AgentContext } from './agents.js'
+import { agentRoutes, needsProjectVm, type AgentContext } from './agents.js'
 import { isAdmin, managesVms, requireRole, type Caller } from './auth.js'
 import type { FabriumApiConfig } from './config.js'
 import { createControlPlane, relay } from './control-plane.js'
 import { createVm, parseAutoStopHours, parseCreateRequest, parseCredentials, recreateVm } from './create.js'
 import { ApiError, apiErrorHandler } from './errors.js'
+import { createLaunches } from './launches.js'
 import type { MatrixConn } from './matrix.js'
 import { createModels } from './models.js'
 import { FULL_COMMIT_RE } from './payload.js'
-import { liveVms } from './policy.js'
+import { breaksProjectVmRule, hasProjectAgent, liveVms, managesVm } from './policy.js'
+import { fetchProjects } from './project-records.js'
+import { projectRoutes } from './projects.js'
 import { createQueue } from './queue.js'
 import { createRoster } from './roster.js'
+import { changeVmOwner, relayVm, vmView, type VmDecorator } from './vm-projects.js'
 import { fetchVms } from './vms.js'
 
 export interface FabriumApiDeps extends FabriumApiConfig {
@@ -85,17 +89,24 @@ export function fabriumApi(deps: FabriumApiDeps): {
   })
 
   /**
-   * A vm-creator acts only on the VMs they created. Any other VM is a 404, as a VM of another tenant
-   * is. Returns the control plane failure to pass on, if the list fails.
+   * A vm-creator acts only on the VMs they manage: their own and every project VM. Any other VM is a 404, as a
+   * VM of another tenant is. An admin manages every VM, without a fetch. Returns the control plane failure to
+   * pass on, if the list fails.
    */
-  async function checkOwner(caller: Caller, id: string): Promise<Response | undefined> {
-    if (caller.role !== 'vm-creator') return undefined
+  async function checkManages(caller: Caller, id: string): Promise<Response | undefined> {
+    if (isAdmin(caller.role)) return undefined
     const result = await fetchVms(controlPlane)
     if ('failure' in result) return result.failure
-    if (!result.vms.some((vm) => vm.id === id && vm.creator === caller.userId)) {
+    if (!result.vms.some((vm) => vm.id === id && managesVm(caller, vm))) {
       throw new ApiError(404, { error: 'not found' })
     }
     return undefined
+  }
+
+  /** The VM view of an answer. Read before the write, so a failed project list is a 502 that changed nothing. */
+  async function decorator(caller: Caller): Promise<VmDecorator> {
+    const projects = await fetchProjects(controlPlane)
+    return (vm) => vmView(caller, projects, vm)
   }
 
   const vmPath = (id: string, action = '') => `/v1/vms/${encodeURIComponent(id)}${action}`
@@ -137,8 +148,10 @@ export function fabriumApi(deps: FabriumApiDeps): {
     serverName: deps.serverName,
     instanceAgents: deps.instanceAgents ?? [],
     havenModel: deps.havenModel,
+    launches: createLaunches(deps.now),
   }
   agentRoutes(app, agents)
+  projectRoutes(app, agents)
 
   /** The commit that a new VM checks out. Without a full one, no VM can be made. */
   function zooidCommit(): string {
@@ -162,21 +175,23 @@ export function fabriumApi(deps: FabriumApiDeps): {
 
   app.get('/vms', async (c) => {
     const caller = c.get('caller')
+    // The failure of the list passes on with its own status.
     const result = await fetchVms(controlPlane)
     if ('failure' in result) return result.failure
     const records = await fetchRecords(controlPlane)
+    const projects = await fetchProjects(controlPlane)
     const live = liveVms(result.vms)
-    const vms =
-      caller.role === 'vm-creator'
-        ? result.vms.filter((vm) => vm.creator === caller.userId)
-        : result.vms
     // During a replace two VMs have the name: the agents run on the live one.
     const agentsOf = (name: string) =>
       records
         .filter((r) => r.vm === name)
         .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
         .map((r) => ({ id: r.id, name: r.name, agent_id: `@${name}.${r.name}:${deps.serverName}` }))
-    return c.json(vms.map((vm) => ({ ...vm, agents: live.get(vm.name) === vm ? agentsOf(vm.name) : [] })))
+    return c.json(
+      result.vms
+        .filter((vm) => managesVm(caller, vm))
+        .map((vm) => ({ ...vmView(caller, projects, vm), agents: live.get(vm.name) === vm ? agentsOf(vm.name) : [] })),
+    )
   })
 
   app.get('/instance-types', async () => relay(await controlPlane.request('GET', '/v1/instance-types')))
@@ -195,10 +210,13 @@ export function fabriumApi(deps: FabriumApiDeps): {
     return queue(async () => {
       const result = await fetchVms(controlPlane)
       if ('failure' in result) return result.failure
-      // Only the VM owner or an admin. Any other VM is a 404, as for the other VM actions.
-      const vm = result.vms.find((v) => v.id === id && (isAdmin(caller.role) || v.creator === caller.userId))
+      // Only who manages the VM. Any other VM is a 404, as for the other VM actions.
+      const vm = result.vms.find((v) => v.id === id && managesVm(caller, v))
       if (!vm) throw new ApiError(404, { error: 'not found' })
-      return recreateVm({ ...agents, commit, workstationsDir }, vm, creds)
+      // The new VM keeps the project of this one: a personal VM may not hold a project agent.
+      const records = await fetchRecords(controlPlane)
+      if (breaksProjectVmRule(hasProjectAgent(records, vm.name), vm)) throw needsProjectVm()
+      return recreateVm({ ...agents, commit, workstationsDir }, vm, creds, await decorator(caller))
     })
   })
 
@@ -206,41 +224,55 @@ export function fabriumApi(deps: FabriumApiDeps): {
     const id = c.req.param('id')
     // The body is optional: without it the control plane keeps the current auto-stop value.
     const hours = parseAutoStopHours((await bodyObject(c.req.text()))?.auto_stop_hours)
-    const failure = await checkOwner(c.get('caller'), id)
+    const failure = await checkManages(c.get('caller'), id)
     if (failure) return failure
+    const decorate = await decorator(c.get('caller'))
     const body = hours === undefined ? undefined : { auto_stop_hours: hours }
-    return relay(await controlPlane.request('POST', vmPath(id, '/start'), body))
+    return relayVm(await controlPlane.request('POST', vmPath(id, '/start'), body), decorate)
   })
 
   for (const action of ['stop', 'reboot']) {
     app.post(`/vms/:id/${action}`, async (c) => {
       const id = c.req.param('id')
-      const failure = await checkOwner(c.get('caller'), id)
+      const failure = await checkManages(c.get('caller'), id)
       if (failure) return failure
-      return relay(await controlPlane.request('POST', vmPath(id, `/${action}`)))
+      const decorate = await decorator(c.get('caller'))
+      return relayVm(await controlPlane.request('POST', vmPath(id, `/${action}`)), decorate)
     })
   }
 
+  app.put('/vms/:id/owner', async (c) => {
+    const raw = await jsonBody(c)
+    const caller = c.get('caller')
+    return queue(() => changeVmOwner(agents, caller, c.req.param('id'), raw))
+  })
+
+  // In the queue, with a fresh list: an owner change that lands first decides who manages the VM.
   app.delete('/vms/:id', async (c) => {
     const id = c.req.param('id')
-    const failure = await checkOwner(c.get('caller'), id)
-    if (failure) return failure
-    return relay(await controlPlane.request('DELETE', vmPath(id)))
+    const caller = c.get('caller')
+    return queue(async () => {
+      const failure = await checkManages(caller, id)
+      if (failure) return failure
+      return relay(await controlPlane.request('DELETE', vmPath(id)))
+    })
   })
 
   app.put('/vms/:id/auto-stop', async (c) => {
     const id = c.req.param('id')
     const hours = parseAutoStopHours((await bodyObject(c.req.text()))?.auto_stop_hours)
     if (hours === undefined) throw new ApiError(400, { error: 'auto_stop_hours is required' })
-    const failure = await checkOwner(c.get('caller'), id)
+    const failure = await checkManages(c.get('caller'), id)
     if (failure) return failure
-    return relay(await controlPlane.request('PUT', vmPath(id, '/auto-stop'), { auto_stop_hours: hours }))
+    const decorate = await decorator(c.get('caller'))
+    return relayVm(await controlPlane.request('PUT', vmPath(id, '/auto-stop'), { auto_stop_hours: hours }), decorate)
   })
 
   return {
     app,
     // In the queue, so no write lands mid-rebuild; a failed read throws rather than empty every roster.
-    rebuildRosters: () => queue(async () => roster.rebuildAll(await fetchRecords(controlPlane))),
+    rebuildRosters: () =>
+      queue(async () => roster.rebuildAll(await fetchRecords(controlPlane), await fetchProjects(controlPlane))),
   }
 }
 
