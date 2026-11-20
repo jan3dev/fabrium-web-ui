@@ -48,6 +48,9 @@ export interface LoadZooidConfigOptions {
 
 const AGENT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/
 const MATRIX_USER_ID_RE = /^@[A-Za-z0-9._\-=/+]+:[A-Za-z0-9.\-]+$/
+// One entry of `matrix.senders`, printable ASCII only: the pattern of the contracts that the
+// sync script applies too, which allows a `:port`.
+const SENDER_ID_RE = /^@[\x21-\x39\x3b-\x7e]+:[\x21-\x7e]+$/
 const MATRIX_USER_LOCALPART_RE = /^@[a-z0-9._=/+\-]+$/
 const MATRIX_ROOM_IDENT_RE = /^[#!]/
 
@@ -710,6 +713,25 @@ function parseTransportBinding(
         `agents.${name}.matrix.trigger must be "mention" or "any" (got ${JSON.stringify(tr)})`,
       )
     }
+    // The entry rule is the one that fabrium-agent-sync applies, so a list that
+    // the script writes is a list that zooid starts with. Fail closed: any value
+    // but absent or a valid list stops the start, so it never runs unfiltered.
+    const senders = block.senders
+    if (
+      senders !== undefined &&
+      !(
+        Array.isArray(senders) &&
+        senders.length >= 1 &&
+        senders.length <= 20 &&
+        senders.every(
+          (s) => typeof s === 'string' && SENDER_ID_RE.test(s) && Buffer.byteLength(s) <= 255,
+        )
+      )
+    ) {
+      throw new Error(
+        `agents.${name}.matrix.senders must be a list of 1 to 20 Matrix user IDs (got ${JSON.stringify(senders)})`,
+      )
+    }
     const matrix: MatrixBinding = {
       transport: refName,
       user_id: userId,
@@ -717,6 +739,7 @@ function parseTransportBinding(
       trigger: tr,
     }
     if (displayName !== undefined) matrix.display_name = displayName
+    if (senders !== undefined) matrix.senders = [...(senders as string[])]
     return { matrix }
   }
   // kind === 'http'

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { createMatrixTransport, rebuildThreadState } from './transport.js'
+import { MAX_OPEN_TASKS_PER_ROOM } from './task-registry.js'
 
 function fakeRegistry() {
   let resolvePrompt: (() => void) | undefined
@@ -3102,4 +3103,314 @@ describe('inbound logging', () => {
       expect(await logged(body)).toContain(body)
     },
   )
+})
+
+// `personal` answers only OWNER; MEMBER is a joined member of the room; `project`
+// and `helper` have no senders.
+describe('senders', () => {
+  const ROOM = '!r:example.com'
+  const OWNER = '@ana:example.org'
+  const MEMBER = '@bo:example.org'
+  const PERSONAL = '@personal:example.com'
+  const PROJECT = '@project:example.com'
+  const bind = (name: string, userId: string) => ({
+    name,
+    userId,
+    rooms: [{ alias: ROOM }],
+    trigger: 'mention' as const,
+  })
+  const bindings = [
+    { ...bind('personal', PERSONAL), senders: [OWNER] },
+    bind('project', PROJECT),
+    bind('helper', '@helper:example.com'),
+  ]
+
+  function make(o: { media?: ReturnType<typeof fakeMedia>; hold?: boolean } = {}) {
+    const { reg, finishPrompt } = fakeRegistry()
+    // Turns end at once, unless `hold` keeps them running until finishPrompt(); a held
+    // return then waits for its turn.end or a long fallback.
+    if (!o.hold) reg.prompt.mockImplementation(async () => ({ stopReason: 'end_turn' as const }))
+    const approvals = fakeApprovals()
+    const client = fakeClient()
+    const transport = createMatrixTransport({
+      agents: reg as never,
+      approvals: approvals as never,
+      client: client as never,
+      bindings,
+      hsToken: 'hs-secret',
+      botUserId: '@zooid:example.com',
+      drainQuietMs: 0,
+      returnGraceMs: 60_000,
+      media: o.media as never,
+    })
+    return { transport, agents: reg, approvals, client, finishPrompt }
+  }
+  type T = ReturnType<typeof make>
+
+  let n = 0
+  const send = async (t: T, ev: Record<string, unknown>) => {
+    await postTxn(t.transport.app, { events: [{ room_id: ROOM, event_id: `$senders${++n}`, ...ev }] })
+    await settleTurn()
+  }
+  const inThread = (root: string) => ({ 'm.relates_to': { rel_type: 'm.thread', event_id: root } })
+  const message = (
+    sender: string,
+    o: { id?: string; root?: string; mentions?: string[]; handoff?: { caller: string; callee: string } } = {},
+  ) => ({
+    type: 'm.room.message',
+    sender,
+    ...(o.id ? { event_id: o.id } : {}),
+    content: {
+      msgtype: 'm.text',
+      body: 'x',
+      ...(o.mentions ? { 'm.mentions': { user_ids: o.mentions } } : {}),
+      ...(o.root ? inThread(o.root) : {}),
+      ...(o.handoff ? { 'dev.zooid.handoff': { version: 1, call_id: `call${++n}`, ...o.handoff } } : {}),
+    },
+  })
+  const caller = (agentName: string, root = '$root') => ({
+    agentName,
+    channelId: ROOM,
+    threadRoot: root,
+    sessionKey: root,
+  })
+  const turnsOf = (t: T, name: string) => t.agents.prompt.mock.calls.filter((c) => c[0] === name)
+  const returnsTo = (t: T, name: string) =>
+    turnsOf(t, name)
+      .map((c) => (c[1] as { content: Array<{ text?: string }> }).content[0]?.text ?? '')
+      .filter((text) => text.startsWith('[handoff return] from project'))
+
+  // The owner starts the personal agent, which hands off to the project agent
+  // with its tool; the call echoes back and the project agent runs.
+  async function personalCallsProject(t: T) {
+    await send(t, message(OWNER, { id: '$root', mentions: [PERSONAL] }))
+    const out = await t.transport.taskActions.handoff(caller('personal'), { agent: 'project', prompt: 'check' })
+    expect(out.status).toBe('started')
+    await send(t, message(PERSONAL, { id: '$h1', root: '$root', mentions: [PROJECT], handoff: { caller: PERSONAL, callee: PROJECT } }))
+    expect(t.agents.ensureSession).toHaveBeenCalledWith('project', '$root|$h1', ROOM, '$root')
+  }
+  // The project agent answers in the thread and ends its turn.
+  async function projectReturns(t: T) {
+    await send(t, message(PROJECT, { root: '$root' }))
+    await postTurnEnd(t.transport.app, { agent: 'project', root: '$root' })
+    await settleTurn()
+  }
+
+  it('a non-owner approval response for a personal agent session is ignored', async () => {
+    const t = make()
+    await send(t, message(OWNER, { id: '$root', mentions: [PERSONAL] }))
+    await send(t, message(MEMBER, { id: '$root2', mentions: [PROJECT] }))
+    const approve = (sender: string, session: string) =>
+      send(t, {
+        type: 'dev.zooid.approval_response',
+        sender,
+        content: { approval_id: 'a1', session_id: session, decision: 'allow' },
+      })
+    await approve(MEMBER, 'sess-$root')
+    expect(t.approvals.resolve).not.toHaveBeenCalled()
+    await approve(OWNER, 'sess-$root')
+    expect(t.approvals.resolve).toHaveBeenCalledTimes(1)
+    await approve(MEMBER, 'sess-$root2')
+    expect(t.approvals.resolve).toHaveBeenCalledTimes(2)
+  })
+
+  it('a non-owner interrupt does not cancel the session of a personal agent', async () => {
+    const t = make()
+    await send(t, message(OWNER, { id: '$root', mentions: [PERSONAL] }))
+    await send(t, message(MEMBER, { id: '$root2', mentions: [PROJECT] }))
+    const interrupt = (sender: string, content: Record<string, unknown>) =>
+      send(t, { type: 'dev.zooid.interrupt', sender, content })
+    await interrupt(MEMBER, inThread('$root'))
+    await interrupt(MEMBER, { session_id: 'sess-$root' })
+    expect(t.agents.cancelSession).not.toHaveBeenCalled()
+    await interrupt(OWNER, inThread('$root'))
+    expect(t.agents.cancelSession).toHaveBeenCalledWith('personal', 'sess-$root')
+    t.agents.cancelSession.mockClear()
+    await interrupt(OWNER, { session_id: 'sess-$root' })
+    expect(t.agents.cancelSession).toHaveBeenCalledWith('personal', 'sess-$root')
+    await interrupt(MEMBER, inThread('$root2'))
+    expect(t.agents.cancelSession).toHaveBeenCalledWith('project', 'sess-$root2')
+  })
+
+  it('a non-owner /clear does not end the session of a personal agent', async () => {
+    const t = make()
+    await send(t, message(OWNER, { id: '$root', mentions: [PERSONAL] }))
+    const clear = (sender: string) => send(t, { type: 'dev.zooid.session_reset', sender, content: inThread('$root') })
+    await clear(MEMBER)
+    expect(t.agents.endSession).not.toHaveBeenCalledWith('personal', '$root')
+    expect(t.agents.endSession).toHaveBeenCalledWith('project', '$root')
+    await clear(OWNER)
+    expect(t.agents.endSession).toHaveBeenCalledWith('personal', '$root')
+  })
+
+  it('a handoff to a personal agent is refused before it opens', async () => {
+    const t = make()
+    for (const agent of ['personal', PERSONAL]) {
+      const out = await t.transport.taskActions.handoff(caller('project'), { agent, prompt: 'hi' })
+      expect(out).toMatchObject({ status: 'refused', reason: expect.stringMatching(/^not_allowed:/) })
+    }
+    expect(t.client.sendMessage).not.toHaveBeenCalled()
+    const next = await t.transport.taskActions.handoff(caller('project'), { agent: 'helper', prompt: 'hi' })
+    expect(next.status).toBe('started')
+  })
+
+  it('a personal agent still gets the return of the agent it called', async () => {
+    const t = make()
+    await personalCallsProject(t)
+    await projectReturns(t)
+    expect(returnsTo(t, 'personal')).toEqual(['[handoff return] from project\n\nx'])
+  })
+
+  it('a member who steers the called agent later does not reach the personal agent', async () => {
+    const t = make()
+    await personalCallsProject(t)
+    await projectReturns(t)
+    t.agents.prompt.mockClear()
+    await send(t, message(MEMBER, { root: '$root', mentions: [PROJECT] }))
+    expect(turnsOf(t, 'project')).toHaveLength(1)
+    await projectReturns(t)
+    expect(turnsOf(t, 'personal')).toHaveLength(0)
+  })
+
+  it('a non-owner interrupt does not release the return that a personal agent waits for', async () => {
+    const t = make()
+    await personalCallsProject(t)
+    await send(t, { type: 'dev.zooid.interrupt', sender: MEMBER, content: inThread('$root') })
+    expect(returnsTo(t, 'personal')).toHaveLength(0)
+    await send(t, { type: 'dev.zooid.interrupt', sender: OWNER, content: inThread('$root') })
+    expect(returnsTo(t, 'personal')).toHaveLength(1)
+  })
+
+  it('a non-owner /clear does not drop the return that a personal agent waits for', async () => {
+    const t = make()
+    await personalCallsProject(t)
+    await send(t, { type: 'dev.zooid.session_reset', sender: MEMBER, content: inThread('$root') })
+    await projectReturns(t)
+    expect(returnsTo(t, 'personal')).toEqual(['[handoff return] from project\n\nx'])
+  })
+
+  it.each([
+    ['a member', MEMBER],
+    ['another agent', PROJECT],
+  ])('a call from %s to a personal agent writes no call edge', async (_label, sender) => {
+    const t = make()
+    await send(t, message(OWNER, { id: '$root', mentions: [PERSONAL] }))
+    await send(t, message(sender, { id: '$forged', root: '$root', mentions: [PERSONAL], handoff: { caller: sender, callee: PERSONAL } }))
+    expect(turnsOf(t, 'personal')).toHaveLength(1)
+    t.agents.ensureSession.mockClear()
+    await send(t, message(OWNER, { root: '$root', mentions: [PERSONAL] }))
+    // The owner's session in the thread, not a fresh arc that the call opened.
+    expect(t.agents.ensureSession).toHaveBeenCalledWith('personal', '$root', ROOM, '$root')
+  })
+
+  // The root of a member names the personal agent; a bare reply of the owner, while no agent
+  // has posted yet, follows the mentions of the root.
+  it('a root mention from a member does not make the personal agent follow the thread', async () => {
+    const t = make({ hold: true })
+    await send(t, message(MEMBER, { id: '$root', mentions: [PERSONAL, PROJECT] }))
+    await send(t, message(OWNER, { root: '$root' }))
+    t.finishPrompt()
+    for (let i = 0; i < 3; i++) await settleTurn()
+    const sessionsOf = (name: string) => t.agents.ensureSession.mock.calls.filter((c) => c[0] === name)
+    expect(sessionsOf('personal')).toHaveLength(0)
+    // An agent without senders follows the root mention as before.
+    expect(sessionsOf('project')).toHaveLength(2)
+  })
+
+  it('rebuildThreadState adds a root mention only for an agent that the sender reaches', async () => {
+    const rebuild = (sender: string) =>
+      rebuildThreadState(
+        {
+          fetchEvent: vi.fn(async () => ({
+            type: 'm.room.message',
+            sender,
+            content: { 'm.mentions': { user_ids: [PERSONAL, PROJECT] } },
+          })),
+          fetchThreadRelations: vi.fn(async () => ({ chunk: [] })),
+        } as never,
+        ROOM,
+        '$root',
+        bindings,
+      )
+    expect((await rebuild(MEMBER)).rootMentions).toEqual(['project'])
+    expect((await rebuild(OWNER)).rootMentions).toEqual(['personal', 'project'])
+  })
+
+  // The approval names its agent, so the filter does not depend on the session being known here.
+  it('a non-owner approval of a personal agent is ignored also when its session is unknown here', async () => {
+    const t = make()
+    t.approvals.listPending.mockReturnValue([{ approvalId: 'a1', agentName: 'personal', sessionId: 'sess-x' }] as never)
+    const approve = (sender: string) =>
+      send(t, {
+        type: 'dev.zooid.approval_response',
+        sender,
+        content: { approval_id: 'a1', session_id: 'sess-x', decision: 'allow' },
+      })
+    await approve(MEMBER)
+    expect(t.approvals.resolve).not.toHaveBeenCalled()
+    await approve(OWNER)
+    expect(t.approvals.resolve).toHaveBeenCalledWith('sess-x', 'a1', { decision: 'allow' })
+  })
+
+  it('an approval of an agent without senders is resolved by any member, session known or not', async () => {
+    const t = make()
+    t.approvals.listPending.mockReturnValue([{ approvalId: 'a1', agentName: 'project', sessionId: 'sess-x' }] as never)
+    await send(t, {
+      type: 'dev.zooid.approval_response',
+      sender: MEMBER,
+      content: { approval_id: 'a1', session_id: 'sess-x', decision: 'allow' },
+    })
+    t.approvals.listPending.mockReturnValue([])
+    await send(t, {
+      type: 'dev.zooid.approval_response',
+      sender: MEMBER,
+      content: { approval_id: 'a2', session_id: 'sess-y', decision: 'allow' },
+    })
+    expect(t.approvals.resolve).toHaveBeenCalledTimes(2)
+  })
+
+  it('rebuildThreadState writes no call edge for a refused call', async () => {
+    const client = {
+      fetchEvent: vi.fn(async () => ({
+        type: 'm.room.message',
+        sender: OWNER,
+        content: { 'm.mentions': { user_ids: [PERSONAL] } },
+      })),
+      fetchThreadRelations: vi.fn(async () => ({
+        chunk: [
+          {
+            type: 'm.room.message',
+            sender: MEMBER,
+            event_id: '$forged',
+            content: { 'dev.zooid.handoff': { version: 1, call_id: 'c1', caller: MEMBER, callee: PERSONAL } },
+          },
+        ],
+      })),
+    }
+    const state = await rebuildThreadState(client as never, ROOM, '$root', bindings)
+    expect(state.callers).toEqual({})
+    expect(state.handoffs).toEqual({})
+  })
+
+  it('a task for a personal agent is refused', async () => {
+    const t = make()
+    const tasks = Array.from({ length: MAX_OPEN_TASKS_PER_ROOM + 1 }, () => ({ agent: 'personal', prompt: 'x' }))
+    const out = await t.transport.taskActions.startTasks(caller('project'), { tasks })
+    // None reserved a slot: every one is refused, none answers at_capacity.
+    for (const r of out.results)
+      expect(r).toMatchObject({ status: 'refused', reason: expect.stringMatching(/^not_allowed:/) })
+    expect(t.client.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('the owner media is read, and the media of a non-owner is not', async () => {
+    const media = fakeMedia()
+    const t = make({ media })
+    await send(t, { ...imageEvent({ eventId: '$m1' }), sender: MEMBER })
+    await send(t, { ...imageEvent({ eventId: '$m2' }), sender: OWNER })
+    await send(t, message(OWNER, { id: '$root', mentions: [PERSONAL] }))
+    expect(turnsOf(t, 'personal')).toHaveLength(1)
+    const content = (turnsOf(t, 'personal')[0]![1] as { content: Array<{ type: string }> }).content
+    expect(content.filter((b) => b.type === 'image')).toHaveLength(1)
+    expect(media.download).toHaveBeenCalledOnce()
+  })
 })

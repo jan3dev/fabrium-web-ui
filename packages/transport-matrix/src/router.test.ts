@@ -3,8 +3,10 @@ import { HANDOFF_FIELD } from '@zooid/core'
 import {
   route,
   isMediaMsgtype,
+  senderAllowed,
   wouldCycleCallers,
   type AgentBinding,
+  type TaskThreadContext,
   type ThreadState,
 } from './router.js'
 
@@ -732,5 +734,180 @@ describe('explicit handoff ([[ZOD092]])', () => {
       states(),
     )
     expect(m.map((a) => a.name)).toEqual(['coding'])
+  })
+})
+
+describe('senders', () => {
+  const OWNER = '@ana:example.org'
+  const MEMBER = '@bo:example.org'
+  const PERSONAL = '@personal:example.com'
+  const PROJECT = '@project:example.com'
+  const ROOM = '!room1:example.com'
+  const base = (trigger: 'mention' | 'any' = 'mention'): AgentBinding => ({
+    name: 'personal',
+    userId: PERSONAL,
+    rooms: [{ alias: ROOM }],
+    trigger,
+  })
+  const personal: AgentBinding = { ...base(), senders: [OWNER] }
+  const project: AgentBinding = { name: 'project', userId: PROJECT, rooms: [{ alias: ROOM }], trigger: 'mention' }
+
+  const reply = (sender: string, extra: Record<string, unknown> = {}) => ({
+    type: 'm.room.message',
+    room_id: ROOM,
+    sender,
+    event_id: '$evt',
+    content: {
+      msgtype: 'm.text',
+      body: 'reply',
+      'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+      ...extra,
+    },
+  })
+  const state = (s: Partial<ThreadState> = {}): ThreadState => ({
+    participants: [],
+    rootMentions: [],
+    callers: {},
+    handoffs: {},
+    ...s,
+  })
+  const states = (s?: Partial<ThreadState>) => new Map([['$root', state(s)]])
+  const names = (m: AgentBinding[]) => m.map((a) => a.name)
+  const edit = (sender: string) => ({
+    type: 'm.room.message',
+    room_id: ROOM,
+    sender,
+    event_id: '$edit',
+    content: {
+      msgtype: 'm.text',
+      body: `* ${PERSONAL} hi`,
+      'm.new_content': { msgtype: 'm.text', body: `${PERSONAL} hi` },
+      'm.relates_to': { rel_type: 'm.replace', event_id: '$orig' },
+      'm.mentions': { user_ids: [PERSONAL] },
+    },
+  })
+
+  type Case = {
+    event: unknown
+    trigger?: 'mention' | 'any'
+    state?: Partial<ThreadState>
+    task?: TaskThreadContext
+  }
+  it.each<[string, string, Case, boolean, boolean]>([
+    ['mention', OWNER, { event: msg({ sender: OWNER, mentions: [PERSONAL] }) }, true, true],
+    ['mention', MEMBER, { event: msg({ sender: MEMBER, mentions: [PERSONAL] }) }, false, true],
+    ['trigger any', MEMBER, { event: msg({ sender: MEMBER }), trigger: 'any' }, false, true],
+    ['trigger any', OWNER, { event: msg({ sender: OWNER }), trigger: 'any' }, true, true],
+    ['thread follow-up (last poster)', MEMBER, { event: reply(MEMBER), state: { participants: ['personal'] } }, false, true],
+    ['thread follow-up (last poster)', OWNER, { event: reply(OWNER), state: { participants: ['personal'] } }, true, true],
+    ['thread follow-up (root mention)', MEMBER, { event: reply(MEMBER), state: { rootMentions: ['personal'] } }, false, true],
+    [
+      'task root',
+      MEMBER,
+      { event: msg({ sender: MEMBER, mentions: [PERSONAL] }), task: { assignee: 'personal', isRoot: true } },
+      false,
+      true,
+    ],
+    [
+      'task root',
+      OWNER,
+      { event: msg({ sender: OWNER, mentions: [PERSONAL] }), task: { assignee: 'personal', isRoot: true } },
+      true,
+      true,
+    ],
+    [
+      'task thread steering',
+      MEMBER,
+      { event: reply(MEMBER), state: { participants: ['personal'] }, task: { assignee: 'personal', isRoot: false } },
+      false,
+      true,
+    ],
+    [
+      'task thread steering',
+      OWNER,
+      { event: reply(OWNER), state: { participants: ['personal'] }, task: { assignee: 'personal', isRoot: false } },
+      true,
+      true,
+    ],
+    ['edit of a message', MEMBER, { event: edit(MEMBER) }, false, true],
+  ])('%s, sender %s', (_branch, _sender, c, withSenders, withoutSenders) => {
+    const agent = base(c.trigger)
+    const run = (a: AgentBinding) =>
+      route(c.event as never, [a], c.state ? states(c.state) : undefined, c.task).length === 1
+    expect(run({ ...agent, senders: [OWNER] })).toBe(withSenders)
+    expect(run(agent)).toBe(withoutSenders)
+  })
+
+  const call = reply(PROJECT, {
+    'm.mentions': { user_ids: [PERSONAL] },
+    [HANDOFF_FIELD]: { version: 1, call_id: 'c1', caller: PROJECT, callee: PERSONAL },
+  })
+
+  it('a structured call from another agent does not reach an agent with senders', () => {
+    expect(route(call, [personal, project], states())).toEqual([])
+    expect(names(route(call, [base(), project], states()))).toEqual(['personal'])
+  })
+
+  it('a task thread call from another agent does not reach an agent with senders', () => {
+    const task = { assignee: 'project', isRoot: false }
+    expect(route(call, [personal, project], states(), task)).toEqual([])
+    expect(names(route(call, [base(), project], states(), task))).toEqual(['personal'])
+  })
+
+  // The personal agent called the project agent, and that call is still open.
+  const called = { participants: ['personal'], callers: { [PROJECT]: PERSONAL } }
+  const openTo = (callee: string | undefined) => (caller: string, root: string) =>
+    caller === PERSONAL && root === '$root' ? callee : undefined
+
+  it('the return of an agent that this agent called passes', () => {
+    const m = route(reply(PROJECT), [personal, project], states(called), undefined, undefined, openTo(PROJECT))
+    expect(names(m)).toEqual(['personal'])
+    expect(senderAllowed(personal, reply(PROJECT), state(called), PROJECT)).toBe(true)
+  })
+
+  it('a return after the call closed does not pass', () => {
+    // The edge stays in the thread after the return; a member who mentions the
+    // project agent later must not reach the personal agent through it.
+    expect(route(reply(PROJECT), [personal, project], states(called))).toEqual([])
+    expect(route(reply(PROJECT), [personal, project], states(called), undefined, undefined, openTo(undefined))).toEqual([])
+    expect(
+      route(reply(PROJECT), [personal, project], states(called), undefined, undefined, openTo('@other:example.com')),
+    ).toEqual([])
+    // An agent without senders keeps the return as today.
+    expect(names(route(reply(PROJECT), [base(), project], states(called)))).toEqual(['personal'])
+  })
+
+  it('a return that another agent called does not pass', () => {
+    const other = { participants: ['personal'], callers: { [PROJECT]: '@other:example.com' } }
+    expect(route(reply(PROJECT), [personal, project], states(other), undefined, undefined, openTo(PROJECT))).toEqual([])
+    expect(senderAllowed(personal, reply(PROJECT), state(other), PROJECT)).toBe(false)
+  })
+
+  it('an agent with trigger any and senders gets no return (known gap: the sync script writes mention)', () => {
+    const anyPersonal = { ...base('any'), senders: [OWNER] }
+    expect(route(reply(PROJECT), [anyPersonal, project], states(called), undefined, undefined, openTo(PROJECT))).toEqual([])
+  })
+
+  it('matches sender IDs byte for byte', () => {
+    expect(senderAllowed(personal, { sender: '@Ana:example.org' })).toBe(false)
+    expect(route(msg({ sender: '@Ana:example.org', mentions: [PERSONAL] }), [personal])).toEqual([])
+  })
+
+  it('does not filter an agent without senders', () => {
+    expect(senderAllowed(project, { sender: MEMBER })).toBe(true)
+    expect(senderAllowed(project, {})).toBe(true)
+  })
+
+  it('refuses an event without a sender when senders is set', () => {
+    expect(senderAllowed(personal, {})).toBe(false)
+  })
+
+  it.each([
+    ['an empty list', []],
+    ['a string', OWNER],
+    ['null', null],
+    ['a list with a non-string', [7]],
+  ])('fails closed on senders that is %s', (_label, senders) => {
+    expect(senderAllowed({ ...base(), senders: senders as never }, { sender: OWNER })).toBe(false)
   })
 })
