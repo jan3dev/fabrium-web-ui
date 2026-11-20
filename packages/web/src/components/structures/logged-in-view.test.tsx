@@ -519,7 +519,7 @@ describe("<LoggedInView /> VM and Agents buttons", () => {
   it("marks only Agents current on the Agents page, and Home leaves the page", async () => {
     grantAccess("agents-manager");
     mswServer.use(
-      http.get("/_fabrium/v1/agents", () => HttpResponse.json({ agents: [], vms: [] })),
+      http.get("/_fabrium/v1/agents", () => HttpResponse.json({ agents: [], vms: [], people: [] })),
     );
     const user = userEvent.setup();
     render(<App config={{ homeserverUrl: HS }} />);

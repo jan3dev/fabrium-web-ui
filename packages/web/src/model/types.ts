@@ -172,10 +172,19 @@ export interface Agent {
   can: AgentCan;
 }
 
+/** A member of the workforce space who is not an agent: an owner to choose from. */
+export interface Person {
+  user_id: string;
+  /** The display name in the space, or the localpart. */
+  name: string;
+}
+
 export interface AgentList {
   agents: Agent[];
   /** The live VMs that the caller can assign an agent to. */
   vms: { name: string; state: VmState }[];
+  /** Every person, sorted by the daemon. */
+  people: Person[];
 }
 
 /** The body of a create or an edit. An edit sends only the fields that changed; "" clears tag and project. */

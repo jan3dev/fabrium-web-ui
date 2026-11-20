@@ -133,7 +133,7 @@ describe("<App />", () => {
           expires_in: 3600,
         }),
       ),
-      http.get("/_fabrium/v1/agents", () => HttpResponse.json({ agents: [makeAgent()], vms: [] })),
+      http.get("/_fabrium/v1/agents", () => HttpResponse.json({ agents: [makeAgent()], vms: [], people: [] })),
     );
     render(<App config={{ homeserverUrl: HS }} initialRoute="/agents" />);
     expect(await screen.findByRole("rowheader", { name: /^echo/ })).toBeInTheDocument();
