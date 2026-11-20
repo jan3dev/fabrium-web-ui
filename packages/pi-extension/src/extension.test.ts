@@ -171,6 +171,14 @@ describe('zooid_handoff on pi ([[ZOD094]])', () => {
     expect(calls.at(-1)).toMatchObject({ method: 'sendArtifact', params: { identifier: 'deck', read: true } })
   })
 
+  it('zooid_artifact takes `assets` and passes them to the daemon as-is', async () => {
+    const { tools, calls } = harness()
+    const artifact = tools.find((t) => t.name === 'zooid_artifact')!
+    expect(artifact.parameters.properties.assets).toEqual({ type: 'array', items: { type: 'string' } })
+    await artifact.execute('id', { identifier: 'deck', assets: ['logo.png'] }, undefined, undefined, ctx())
+    expect(calls.at(-1)).toMatchObject({ method: 'sendArtifact', params: { identifier: 'deck', assets: ['logo.png'] } })
+  })
+
   it('carries the MCP server instructions and the end-your-turn rule in promptGuidelines', () => {
     const { tools } = harness()
     const guidelines: string[] = handoff(tools).promptGuidelines

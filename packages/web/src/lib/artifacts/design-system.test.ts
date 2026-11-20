@@ -4,6 +4,7 @@ import {
   cssValue,
   designSystemSectionPage,
   designSystemSections,
+  fontFamilies,
   LIMITS,
   parseDesignSystem,
   type DesignSystem,
@@ -174,5 +175,18 @@ describe("addValueRef", () => {
       target: { kind: "text", text: "pill: 999px", where: "Corner radius" },
       note: "Add this value to the design system.",
     });
+  });
+});
+
+describe("fontFamilies", () => {
+  it("takes the family from a font shorthand, or the whole value without a size", () => {
+    expect(
+      fontFamilies([
+        { name: "h1", value: '600 32px/1.2 "Inter", sans-serif' },
+        { name: "body", value: "1rem Georgia, serif" },
+        { name: "mono", value: "ui-monospace, monospace" },
+        { name: "dup", value: '400 14px "Inter", sans-serif' },
+      ]),
+    ).toEqual(['"Inter", sans-serif', "Georgia, serif", "ui-monospace, monospace"]);
   });
 });

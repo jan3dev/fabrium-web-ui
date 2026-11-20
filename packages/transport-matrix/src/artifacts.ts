@@ -6,6 +6,7 @@ import {
   type ArtifactKind,
 } from "@zooid/core";
 import type { MatrixClient } from "./matrix-client.js";
+import { mimeFromFilename } from "./mime.js";
 
 /** One version of an artifact; the web client folds them by thread + identifier. */
 export const ARTIFACT_EVENT_TYPE = "dev.fabrium.artifact.version";
@@ -14,6 +15,37 @@ export const MAX_INLINE_ARTIFACT_BYTES = 48_000;
 export const MAX_ARTIFACT_BYTES = 512_000;
 /** Pages of thread relations searched for an artifact's latest version. */
 export const ARTIFACT_SEARCH_PAGES = 10;
+/** Assets per call and distinct `mxc://` URIs per version (spec §5.4). */
+export const MAX_ARTIFACT_ASSETS = 100;
+const IMAGE = 10_000_000;
+const VIDEO = 50_000_000;
+const FONT = 2_000_000;
+/** Asset files the preview can load, by extension: size cap (spec §5.4); the type comes from `mimeFromFilename`. */
+const ASSET_MAX: Record<string, number> = {
+  png: IMAGE,
+  jpg: IMAGE,
+  jpeg: IMAGE,
+  gif: IMAGE,
+  webp: IMAGE,
+  avif: IMAGE,
+  svg: IMAGE,
+  mp4: VIDEO,
+  webm: VIDEO,
+  woff2: FONT,
+  woff: FONT,
+  ttf: FONT,
+  otf: FONT,
+};
+
+/** Content type and size cap of an asset path, or a model-facing error. */
+export function assetType(path: string): { mime: string; max: number } {
+  const ext = /\.([A-Za-z0-9]+)$/.exec(path)?.[1]?.toLowerCase() ?? "";
+  const max = Object.hasOwn(ASSET_MAX, ext) ? ASSET_MAX[ext] : undefined;
+  if (!max) {
+    throw new Error(`invalid_asset: ${path}: use ${Object.keys(ASSET_MAX).join(", ")}.`);
+  }
+  return { mime: mimeFromFilename(path), max };
+}
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
 
@@ -39,14 +71,25 @@ export function validateArtifactInput(input: ArtifactInput): void {
   if (input.type !== undefined && !ARTIFACT_KINDS.includes(input.type)) {
     throw new Error(`invalid_type: one of ${ARTIFACT_KINDS.join(", ")}.`);
   }
-  if (input.read === true) {
-    const extra = (["type", "title", "language", "content", "edits"] as const).filter(
-      (key) => input[key] !== undefined,
+  // `read` and `assets` send nothing, so they take nothing else.
+  const mode = input.read === true ? "read" : input.assets !== undefined ? "assets" : undefined;
+  if (mode) {
+    const extra = (["type", "title", "language", "content", "edits", "assets"] as const).filter(
+      (key) => key !== mode && input[key] !== undefined,
     );
     if (extra.length > 0) {
       throw new Error(
-        `invalid_input: \`read\` takes only \`identifier\`; drop ${extra.map((k) => `\`${k}\``).join(", ")}, or drop \`read\` to send a version.`,
+        `invalid_input: \`${mode}\` takes only \`identifier\`; drop ${extra.map((k) => `\`${k}\``).join(", ")}, or drop \`${mode}\` to send a version.`,
       );
+    }
+    if (
+      mode === "assets" &&
+      (!Array.isArray(input.assets) ||
+        input.assets.length === 0 ||
+        input.assets.length > MAX_ARTIFACT_ASSETS ||
+        !input.assets.every((p) => typeof p === "string" && p !== ""))
+    ) {
+      throw new Error(`invalid_input: \`assets\` is a list of 1 to ${MAX_ARTIFACT_ASSETS} file paths.`);
     }
     return;
   }
@@ -70,6 +113,10 @@ export function validateArtifactInput(input: ArtifactInput): void {
  * needs a structure; the web reader re-checks the details. Throws for the model.
  */
 export function validateArtifactContent(type: ArtifactKind, content: string): void {
+  const assets = new Set(content.match(/mxc:\/\/[^\s"'()<>]+/g));
+  if (assets.size > MAX_ARTIFACT_ASSETS) {
+    throw new Error(`invalid_content: ${assets.size} mxc:// assets, the limit is ${MAX_ARTIFACT_ASSETS} per artifact.`);
+  }
   // Sections inside <template> (slide layouts) are not frames.
   if (
     (type === "slides" || type === "design") &&

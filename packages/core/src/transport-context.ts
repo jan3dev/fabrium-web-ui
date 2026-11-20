@@ -58,7 +58,8 @@ export interface ArtifactEdit {
  * one of `content` (the full new version) or `edits` (find/replace pairs
  * against the latest version with the same identifier, from any allowed
  * author) is set. `read: true` with only `identifier` sends nothing and
- * returns the latest version instead.
+ * returns the latest version instead. `assets` with only `identifier` sends
+ * nothing and uploads those workspace files, returning their `mxc://` URIs.
  */
 export interface ArtifactInput {
   identifier: string
@@ -68,17 +69,20 @@ export interface ArtifactInput {
   content?: string
   edits?: ArtifactEdit[]
   read?: boolean
+  assets?: string[]
 }
 
-/** A sent version; for `read`, the latest version and its content. */
+/** A sent version; for `read`, the latest version and its content; for `assets`, only `assets`. */
 export interface ArtifactResult {
-  event_id: string
+  event_id?: string
   identifier: string
   type?: ArtifactKind
   title?: string
   language?: string
   sender?: string
   content?: string
+  /** Each given asset path → its `mxc://` URI. */
+  assets?: Record<string, string>
 }
 
 export interface SendAttachmentInput {

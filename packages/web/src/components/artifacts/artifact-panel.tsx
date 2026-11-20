@@ -11,6 +11,7 @@ import {
   EyeIcon,
   FileDiffIcon,
   InfoIcon,
+  PanelRightIcon,
   PointerClickIcon,
   PrinterIcon,
   WarningIcon,
@@ -29,6 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import {
   useArtifactRoute,
@@ -36,7 +38,10 @@ import {
   useThreadArtifacts,
 } from "@/hooks/use-artifacts";
 import { useActor } from "@/hooks/use-actor";
+import { assetDataUrls, useArtifactAssets } from "@/hooks/use-artifact-assets";
 import { headAuthor, useArtifactDraft } from "@/hooks/use-artifact-draft";
+import { type EditorMode, useCanvasEditor } from "@/hooks/use-canvas-editor";
+import { useDebounce } from "@/hooks/use-debounce";
 import { useGuestIds } from "@/hooks/use-member-roles";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMyPowerLevel } from "@/hooks/use-my-power-level";
@@ -46,11 +51,15 @@ import {
   type ArtifactRefTarget,
   MAX_REFS,
 } from "@/lib/artifacts/refs";
+import { inlineAssets } from "@/lib/artifacts/assets";
+import { canStructure, editKeyOf, isCanvasKind, type KeyLike } from "@/lib/artifacts/canvas";
 import {
   addValueRef,
+  cssValue,
   designSystemSectionPage,
   designSystemSections,
   type DesignSystemSection,
+  fontFamilies,
   parseDesignSystem,
   sectionLabel,
   type TokenSection,
@@ -108,12 +117,15 @@ import {
 import { ArtifactPreview, type ArtifactPreviewHandle, PrintFrame } from "./artifact-preview";
 import { AnnotationForm } from "./artifact-refs";
 import { ArtifactTextView } from "./artifact-text-view";
+import { CanvasToolbar } from "./canvas-toolbar";
+import { FloatingToolbar } from "./floating-toolbar";
+import { LayersList } from "./layers-list";
 import { DesignSystemEditor } from "./design-system-editor";
 import { SpeakerNotesField } from "./speaker-notes-field";
 import { DesignSystemNav } from "./design-system-nav";
 import { LayoutPicker } from "./layout-picker";
 import { FrameControls, FrameRail, type PresentMode } from "./frame-rail";
-import { StyleInspector } from "./style-inspector";
+import { FrameProperties, type PaletteColor, StyleInspector } from "./style-inspector";
 
 type Tab = "preview" | "code" | "changes";
 
@@ -200,15 +212,6 @@ export function ArtifactPanel({
     current.kind !== "markdown" &&
     tab === "preview" &&
     (current.kind !== "design-system" || (section !== undefined && section !== "overview"));
-  const srcdoc = useMemo(
-    () =>
-      !framed || text === null
-        ? null
-        : system && section && section !== "overview"
-          ? buildArtifactSrcdoc("html", designSystemSectionPage(system, section), channel)
-          : buildArtifactSrcdoc(current.kind, text, channel),
-    [framed, current?.kind, text, channel, system, section],
-  );
   // Add slide: the layout picker for a new slide after `picker`, in the deck's design.
   const [picker, setPicker] = useState<number | null>(null);
   const layoutChoice = useMemo(() => {
@@ -249,6 +252,61 @@ export function ArtifactPanel({
   const frameIndex = Math.min(
     frameState.id === current?.identifier ? frameState.index : 0,
     Math.max(0, frames.length - 1),
+  );
+  const canvasKind = current && isCanvasKind(current.kind) ? current.kind : null;
+  // The design system the thread has, for the colour picker and fonts (spec §6.5).
+  const dsArtifact = useMemo(() => [...all].reverse().find((v) => v.kind === "design-system"), [all]);
+  const dsText = useArtifactText(canvasKind ? dsArtifact : undefined).text;
+  const tokens = useMemo(() => {
+    const ds = dsText === null ? null : parseDesignSystem(dsText);
+    return {
+      palette: (ds?.colors ?? []).flatMap((c): PaletteColor[] => (cssValue(c.value) ? [{ name: c.name, value: c.value }] : [])),
+      fonts: fontFamilies(ds?.typography ?? []),
+    };
+  }, [dsText]);
+  // Images, videos and fonts the document names, downloaded for the frame (spec §5.4).
+  const media = useArtifactAssets(canvasKind ? text : null);
+  const cardAssets = useMemo(() => media.assets.filter((a) => a.kind !== "video"), [media.assets]);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [dropping, setDropping] = useState(false);
+  const canvas = useCanvasEditor({
+    kind: current?.kind,
+    text,
+    active: framed && canvasKind !== null,
+    editable: mayEdit && onLatest,
+    frame: {
+      index: frameIndex,
+      unit: frameKind ? frameUnit(frameKind) : "page",
+      width: frames[frameIndex]?.width ?? 0,
+      height: frames[frameIndex]?.height ?? 0,
+    },
+    apply: edits.apply,
+    step: edits.step,
+    post: (type, detail) => preview.current?.post(type, detail),
+    me,
+  });
+  // The doc is edited in place, so its text is part of the key.
+  const canvasText = canvas.doc?.text;
+  const layers = useMemo(
+    () => (canvas.properties && canvas.doc ? canvas.doc.layers(frameIndex) : []),
+    [canvas.properties, canvas.doc, canvasText, frameIndex],
+  );
+  const srcdoc = useMemo(
+    () =>
+      !framed || text === null
+        ? null
+        : system && section && section !== "overview"
+          ? buildArtifactSrcdoc("html", designSystemSectionPage(system, section), channel)
+          : // The stamped copy while one is kept: canvas edits then reach the frame as patches, not a reload.
+            buildArtifactSrcdoc(current.kind, canvas.doc ? canvas.doc.stamped() : text, channel),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `text` only when no stamped copy is kept
+    [framed, current?.kind, canvas.doc ?? text, channel, system, section],
+  );
+  // The rail's cards: the plain source, settled, so a drag does not reload every card.
+  const railText = useDebounce(text, 400);
+  const railSrcdoc = useMemo(
+    () => (frameKind && railText !== null ? buildArtifactSrcdoc(frameKind, railText, channel) : null),
+    [frameKind, railText, channel],
   );
   const [zoom, setZoom] = useState<number | null>(null);
   const [grid, setGrid] = useState(false);
@@ -375,6 +433,27 @@ export function ArtifactPanel({
   const canAnnotate =
     tab !== "changes" && text !== null && !dsInvalid && !dsEmpty && !(framing && grid) && dsEditor === null;
   const deckNotes = frameKind === "slides" && frames.some((f) => f.notes);
+  // The canvas editor (spec §6.4): on by default for an editor of slides and design; for html
+  // (style and text only, D3) and for viewers (inspect) while Properties is open. On a phone,
+  // retype and delete only.
+  const canvasOn =
+    canvas.doc !== null && tab === "preview" && srcdoc !== null && !annotating && !presenting && !grid && (frameKind === null || framing);
+  const canvasMode: EditorMode = !canvasOn
+    ? "off"
+    : editable && frameKind && !isMobile
+      ? "full"
+      : editable && (frameKind || canvas.properties)
+        ? "style"
+        : canvas.properties
+          ? "inspect"
+          : "off";
+  // On a phone Properties is a sheet (spec §6.1).
+  const showProperties = canvasMode !== "off" && canvas.properties;
+  /** Canvas keys; on a phone only delete, undo and redo (direct editing is retype, delete and the slide menu). */
+  const canvasKey = (k: KeyLike) => {
+    const a = editKeyOf(k);
+    return (!isMobile || a === "delete" || a === "undo" || a === "redo") && canvas.onKey(k);
+  };
   // Marks: what arrived from someone else into this version; else, for a version nobody saved
   // into yet, what it changed against the one before (in its author's color, so a person's
   // edit never shows in the agent's). The user's own edits on top shift the frames: none then.
@@ -390,11 +469,12 @@ export function ArtifactPanel({
     ? {
         label: frameKind === "slides" ? "Slides" : "Screens",
         frames,
-        srcdoc: srcdoc!,
+        srcdoc: railSrcdoc ?? srcdoc!,
         channel,
         active: frameIndex,
         edit: frameEdit,
         changed: onLatest && edits.text !== null ? undefined : marks,
+        assets: cardAssets,
       }
     : null;
   presenterLink.current = {
@@ -642,14 +722,22 @@ export function ArtifactPanel({
     if (addRef(ref.target, ref.note)) toast("Added to your reply");
   }
 
-  function download() {
+  /** The text with its assets as `data:` URIs (spec §6.9): a file that needs no network. */
+  async function withAssets(source: string): Promise<string> {
+    if (media.named === 0) return source;
+    if (media.assets.length < media.named) toast.error("Some images, videos or fonts are not loaded and were left out.");
+    return inlineAssets(source, await assetDataUrls(media.assets));
+  }
+
+  async function download() {
     if (text === null || !current) return;
     const ext =
       current.kind === "code" && current.language
         ? current.language
         : EXTENSION[current.kind];
+    const body = await withAssets(text);
     downloadBlob(
-      new Blob([text], { type: "text/plain;charset=utf-8" }),
+      new Blob([body], { type: "text/plain;charset=utf-8" }),
       `${current.identifier}.${ext.replace(/[^a-z0-9]/gi, "") || "txt"}`,
     );
   }
@@ -681,13 +769,71 @@ export function ArtifactPanel({
 
   const nextTab = tabs.length > 1 ? tabs[(tabs.findIndex((t) => t.value === tab) + 1) % tabs.length] : undefined;
 
+  // Beside the canvas, or on a phone in a sheet under it (spec §6.1).
+  const propertiesPanel =
+    showProperties && canvas.doc ? (
+      <StyleInspector
+        title="Properties"
+        sheet={isMobile}
+        selector={canvas.primary?.name ?? null}
+        values={canvas.draft.values}
+        onChange={canvas.draft.change}
+        readOnly={canvasMode === "inspect"}
+        palette={tokens.palette}
+        fonts={tokens.fonts}
+        background={canvas.selection?.background}
+        box={
+          canvas.primary && canStructure(canvas.doc.kind)
+            ? { x: canvas.primary.x, y: canvas.primary.y, w: canvas.primary.w, h: canvas.primary.h, free: canvas.primary.free }
+            : undefined
+        }
+        onBox={canvas.setBox}
+        layers={
+          <LayersList
+            layers={layers}
+            selected={canvas.selection?.ids ?? []}
+            onSelect={canvas.select}
+          />
+        }
+        frame={
+          frameKind && frames[frameIndex] ? (
+            <FrameProperties
+              kind={frameKind}
+              name={frames[frameIndex].name}
+              width={frames[frameIndex].width}
+              height={frames[frameIndex].height}
+              transition={frames[frameIndex].transition}
+              background={canvas.draft.values["background-color"]}
+              palette={tokens.palette}
+              readOnly={canvasMode === "inspect"}
+              onName={(name) =>
+                edit((t) => renameFrame(t, frameKind, frameIndex, name), `Renamed ${frameUnit(frameKind)} ${frameIndex + 1}`)
+              }
+              onSize={(size) => resize(frameKind, frameIndex, size)}
+              onTransition={canvas.frameTransition}
+              onBackground={(v) => canvas.frameStyle({ "background-color": v })}
+            />
+          ) : null
+        }
+        note={canvasMode === "inspect" ? "You can inspect this artifact. Ask the agent to change it." : null}
+      />
+    ) : null;
+
   return (
     <PanelShell
       mobile={isMobile}
       title={current.title}
-      // Undo and redo of the user's edits, outside text fields (they keep their own).
+      // Undo and redo of the user's edits, outside text fields (they keep their own). Canvas
+      // keys while focus is on the stage; Cmd+\ toggles Properties anywhere in the panel.
       onKeyDown={(e) => {
+        if (canvasKind && framed && editKeyOf(e) === "properties") {
+          e.preventDefault();
+          canvas.setProperties(!canvas.properties);
+          return;
+        }
         if (editable && !isEditableKeyboardTarget(e.target) && edits.onKey(e)) e.preventDefault();
+        else if (canvasMode !== "off" && canvasMode !== "inspect" && stage.current?.contains(e.target as Node) && canvasKey(e))
+          e.preventDefault();
       }}
     >
       <Header
@@ -829,6 +975,16 @@ export function ArtifactPanel({
             ) : null}
             {presenting ? null : (
               <>
+                {canvasKind && framed ? (
+                  <IconButton
+                    size="small"
+                    icon={<PanelRightIcon />}
+                    label="Properties"
+                    aria-pressed={canvas.properties}
+                    tone={canvas.properties ? "brand" : "default"}
+                    onClick={() => canvas.setProperties(!canvas.properties)}
+                  />
+                ) : null}
                 <IconButton
                   size="small"
                   icon={<PointerClickIcon />}
@@ -853,7 +1009,7 @@ export function ArtifactPanel({
                   icon={<DownloadIcon />}
                   label="Download"
                   disabled={text === null}
-                  onClick={download}
+                  onClick={() => void download()}
                 />
                 {frameKind && frames.length > 0 ? (
                   <IconButton
@@ -861,14 +1017,22 @@ export function ArtifactPanel({
                     icon={<PrinterIcon />}
                     label="Export as PDF"
                     disabled={printDoc !== null}
-                    onClick={() => text !== null && setPrintDoc(buildArtifactSrcdoc(frameKind, text, channel, true))}
+                    onClick={() =>
+                      text !== null &&
+                      void withAssets(text).then((t) => setPrintDoc(buildArtifactSrcdoc(frameKind, t, channel, true)))
+                    }
                   />
                 ) : null}
               </>
             )}
           </div>
           {/* The Present target: fullscreen shows the stage alone. */}
-          <div ref={stage} tabIndex={-1} className="relative min-h-0 min-w-0 flex-1 bg-background focus:outline-none">
+          <div
+            ref={stage}
+            tabIndex={-1}
+            className="relative min-h-0 min-w-0 flex-1 bg-background focus:outline-none"
+            onDragEnter={(e) => canvasMode === "full" && e.dataTransfer.types.includes("Files") && setDropping(true)}
+          >
             {flash !== null && arrival?.head === flash && arrival.version === current.eventId ? (
               <div
                 aria-hidden
@@ -964,11 +1128,19 @@ export function ArtifactPanel({
                 frame={
                   frameKind
                     ? presenting
-                      ? { index: frameIndex, zoom: null, transition: frames[frameIndex]?.transition }
-                      : { index: frameIndex, zoom }
+                      ? { index: frameIndex, zoom: null, transition: frames[frameIndex]?.transition, present: true }
+                      : { index: frameIndex, zoom, canvas: frameKind === "design" }
                     : undefined
                 }
                 onKey={frameKey}
+                editor={{
+                  mode: canvasMode,
+                  onSelection: canvas.onSelection,
+                  onOps: canvas.onOps,
+                  onKey: (k) => void canvasKey(k),
+                }}
+                assets={media.assets}
+                onDragFiles={() => canvasMode === "full" && setDropping(true)}
               />
             ) : (
               <ArtifactTextView
@@ -980,6 +1152,64 @@ export function ArtifactPanel({
                 onPicked={setTarget}
               />
             )}
+            {(canvasMode === "full" || canvasMode === "style") &&
+            !canvas.properties &&
+            canvas.selection?.rect &&
+            canvas.selection.ids.length > 0 &&
+            !canvas.selection.editing ? (
+              <FloatingToolbar
+                rect={canvas.selection.rect}
+                values={canvas.draft.values}
+                onChange={isMobile ? undefined : canvas.draft.change}
+                onDuplicate={isMobile ? undefined : () => canvas.action("duplicate")}
+                onDelete={() => canvas.action("delete")}
+              />
+            ) : null}
+            {canvasMode === "full" ? (
+              <div className="@container pointer-events-none absolute inset-x-2 bottom-2 z-10 flex justify-center [&>*]:pointer-events-auto">
+                <CanvasToolbar
+                  selected={canvas.selection?.ids.length ?? 0}
+                  onInsert={canvas.insert}
+                  onAction={canvas.action}
+                  onUpload={(kind) => {
+                    if (!fileInput.current) return;
+                    fileInput.current.accept = kind === "image" ? "image/*" : "video/*";
+                    fileInput.current.click();
+                  }}
+                />
+                <input
+                  ref={fileInput}
+                  type="file"
+                  hidden
+                  data-testid="canvas-file"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) void canvas.addFile(file);
+                  }}
+                />
+              </div>
+            ) : null}
+            {/* Files dropped here never reach the frame: this target covers it while a drag is on. */}
+            {dropping && canvasMode === "full" ? (
+              <div
+                data-testid="canvas-drop"
+                className="absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-accent-brand bg-accent-brand-transparent"
+                onDragOver={(e) => e.preventDefault()}
+                onDragLeave={(e) => e.target === e.currentTarget && setDropping(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDropping(false);
+                  const file = e.dataTransfer.files[0];
+                  const r = e.currentTarget.getBoundingClientRect();
+                  if (file) void canvas.addFile(file, { x: e.clientX - r.left, y: e.clientY - r.top });
+                }}
+              >
+                <p className="pointer-events-none rounded-card bg-surface-primary px-3 py-2 text-body2 text-text-primary shadow-surface">
+                  Drop an image or a video
+                </p>
+              </div>
+            ) : null}
           </div>
           {/* Read-only here; never on the slide (the frame hides `aside[data-notes]`). */}
           {framing && frameKind === "slides" && (deckNotes || editable) && !grid ? (
@@ -1003,9 +1233,26 @@ export function ArtifactPanel({
             </details>
           ) : null}
         </div>
-        {/* ponytail: desktop only; on a phone the panel has no room beside the frame. Add a sheet when asked. */}
+        {/* ponytail: annotation styles are desktop only; on a phone the panel has no room beside the frame. */}
         {annotating && srcdoc !== null && !isMobile && target?.kind === "element" ? (
           <StyleInspector selector={target.selector} values={draft.values} onChange={draft.change} />
+        ) : !isMobile ? (
+          propertiesPanel
+        ) : null}
+        {propertiesPanel && isMobile ? (
+          // Not modal: the canvas above stays usable, so a tap there selects.
+          <Sheet open modal={false} onOpenChange={(open) => !open && canvas.setProperties(false)}>
+            <SheetContent
+              side="bottom"
+              aria-describedby={undefined}
+              className="max-h-[55vh] gap-0"
+              onInteractOutside={(e) => e.preventDefault()}
+              onOpenAutoFocus={(e) => e.preventDefault()}
+            >
+              <SheetTitle className="sr-only">Properties</SheetTitle>
+              {propertiesPanel}
+            </SheetContent>
+          </Sheet>
         ) : null}
       </div>
 

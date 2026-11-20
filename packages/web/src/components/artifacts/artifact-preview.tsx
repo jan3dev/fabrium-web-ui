@@ -1,4 +1,7 @@
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
+import type { FrameAsset } from "@/hooks/use-artifact-assets";
+import type { EditorMode } from "@/hooks/use-canvas-editor";
+import { type CanvasSelection, gestureGate, type KeyLike, readEditKey, readSelection } from "@/lib/artifacts/canvas";
 import { type FrameKey, type FrameView, readFrameKey } from "@/lib/artifacts/frames";
 import { readTarget, type ArtifactRefTarget } from "@/lib/artifacts/refs";
 import { readStyles, type StyleEdit, type Styles } from "@/lib/artifacts/styles";
@@ -13,6 +16,17 @@ import type { ArtifactKind } from "@/model/types";
 
 export interface ArtifactPreviewHandle {
   style: (edit: StyleEdit) => void;
+  /** Any parent → frame message (the canvas editor's `patch` and `select`). */
+  post: (type: string, detail: unknown) => void;
+}
+
+/** The canvas editor in the frame (spec §6.4): its mode and what it reports. */
+export interface PreviewEditor {
+  mode: EditorMode;
+  onSelection: (selection: CanvasSelection) => void;
+  /** Ops as the frame sent them: the caller validates (canvas.ts `readOp`). */
+  onOps: (raw: unknown) => void;
+  onKey: (key: KeyLike) => void;
 }
 
 export interface ArtifactPreviewProps {
@@ -32,6 +46,11 @@ export interface ArtifactPreviewProps {
   frame?: FrameView;
   /** A key from `FRAME_KEYS` pressed while focus is inside the frame. */
   onKey?: (key: FrameKey) => void;
+  editor?: PreviewEditor;
+  /** Downloaded assets the document names (spec §5.4); each is posted once per document. */
+  assets?: readonly FrameAsset[];
+  /** Files are dragged over the frame: the caller shows its own drop target over it. */
+  onDragFiles?: () => void;
 }
 
 /** The URL if it is http(s), else null: the frame is untrusted, so the parent checks too. */
@@ -64,10 +83,19 @@ export function ArtifactPreview({
   onOpenLink,
   frame,
   onKey,
+  editor,
+  assets,
+  onDragFiles,
 }: ArtifactPreviewProps) {
   const ref = useRef<HTMLIFrameElement>(null);
-  const handlers = useRef({ onPicked, onError, onOpenLink, onKey });
-  handlers.current = { onPicked, onError, onOpenLink, onKey };
+  const handlers = useRef({ onPicked, onError, onOpenLink, onKey, editor, onDragFiles });
+  handlers.current = { onPicked, onError, onOpenLink, onKey, editor, onDragFiles };
+  const gate = useRef(gestureGate());
+  const assetsRef = useRef(assets);
+  assetsRef.current = assets;
+  // The URIs this document already has: a new document (`ready`) starts empty.
+  const posted = useRef(new Set<string>());
+  const mode = editor?.mode ?? "off";
   const annotatingRef = useRef(annotating);
   annotatingRef.current = annotating;
   const frameRef = useRef(frame);
@@ -76,7 +104,19 @@ export function ArtifactPreview({
   const post = (type: string, detail: unknown) =>
     ref.current?.contentWindow?.postMessage({ type, channel, detail }, "*");
 
-  useImperativeHandle(handle, () => ({ style: (edit) => post(PreviewMessage.style, edit) }));
+  useImperativeHandle(handle, () => ({ style: (edit) => post(PreviewMessage.style, edit), post }));
+
+  function postAssets() {
+    const fresh = (assetsRef.current ?? []).filter((a) => !posted.current.has(a.mxc));
+    if (fresh.length === 0) return;
+    for (const a of fresh) posted.current.add(a.mxc);
+    post(PreviewMessage.assets, { assets: fresh });
+  }
+  useEffect(postAssets, [assets]);
+
+  useEffect(() => {
+    post(PreviewMessage.editor, { mode });
+  }, [mode]);
 
   useEffect(() => {
     post(PreviewMessage.pick, { on: annotating });
@@ -84,7 +124,7 @@ export function ArtifactPreview({
 
   useEffect(() => {
     if (frame) post(PreviewMessage.frame, frame);
-  }, [frame?.index, frame?.zoom]);
+  }, [frame?.index, frame?.zoom, frame?.present, frame?.canvas]);
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -96,6 +136,8 @@ export function ArtifactPreview({
       } | null;
       if (!data || typeof data !== "object" || data.channel !== channel) return;
       const detail = (data.detail ?? {}) as Record<string, unknown>;
+      // Every message renews the grace after a real activation; only ops and keys need it.
+      const userActive = gate.current(navigator.userActivation?.isActive === true, Date.now());
       if (data.type === PreviewMessage.error) {
         handlers.current.onError(detail);
       } else if (data.type === PreviewMessage.openLink) {
@@ -110,12 +152,28 @@ export function ArtifactPreview({
       } else if (data.type === PreviewMessage.key) {
         const key = readFrameKey(detail);
         if (key) handlers.current.onKey?.(key);
+      } else if (data.type === PreviewMessage.selection) {
+        const sel = readSelection(detail);
+        if (sel && handlers.current.editor?.mode !== "off") handlers.current.editor?.onSelection(sel);
+      } else if (data.type === PreviewMessage.op) {
+        // Gestures only, and only while the user is active (`gestureGate`): a script in the
+        // frame cannot make an edit that saves as the user's.
+        if (handlers.current.editor?.mode !== "off" && userActive) handlers.current.editor?.onOps(detail);
+      } else if (data.type === PreviewMessage.editKey) {
+        // Delete, cut and paste (which reads the clipboard) included: the same gate.
+        const key = readEditKey(detail);
+        if (key && handlers.current.editor?.mode !== "off" && userActive) handlers.current.editor?.onKey(key);
+      } else if (data.type === PreviewMessage.drag) {
+        handlers.current.onDragFiles?.();
       } else if (data.type === PreviewMessage.ready) {
         // From the kind, not the frame: the parent never fetches what agent code names.
         const needs = runtimesFor(kind);
         if (annotatingRef.current) post(PreviewMessage.pick, { on: true });
         // A new document starts at frame 0: show the one the panel has open.
         if (frameRef.current) post(PreviewMessage.frame, frameRef.current);
+        post(PreviewMessage.editor, { mode: handlers.current.editor?.mode ?? "off" });
+        posted.current = new Set();
+        postAssets();
         if (needs.length === 0) return;
         loadRuntimes(needs).then(
           (modules) => post(PreviewMessage.runtime, { modules }),
