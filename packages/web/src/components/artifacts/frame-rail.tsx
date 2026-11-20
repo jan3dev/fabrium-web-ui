@@ -14,6 +14,7 @@ import { type FrameInfo, type FrameKind, ZOOMS as ZOOM_LEVELS } from "@/lib/arti
 import { cn } from "@/lib/utils";
 import type { ActorKind } from "@/model/types";
 import { type FrameAction, FrameMenu, frameUnit } from "./artifact-menus";
+import type { FrameAsset } from "@/hooks/use-artifact-assets";
 import { FrameCard } from "./frame-card";
 
 /** Drag data type of a card being moved; other drops are ignored. */
@@ -44,6 +45,7 @@ export function FrameRail({
   grid = false,
   edit,
   changed,
+  assets,
 }: {
   /** "Slides" or "Screens". */
   label: string;
@@ -57,6 +59,8 @@ export function FrameRail({
   edit?: FrameRailEdit;
   /** Frames the shown version changed, marked in its author's actor color. */
   changed?: { indexes: readonly number[]; actor: ActorKind };
+  /** Images and fonts for the cards (spec §5.4); videos stay out, a card does not play them. */
+  assets?: readonly FrameAsset[];
 }) {
   const ref = useRef<HTMLElement>(null);
   const [menuFor, setMenuFor] = useState<number | null>(null);
@@ -122,6 +126,7 @@ export function FrameRail({
             <FrameCard
               srcdoc={srcdoc}
               channel={channel}
+              assets={assets}
               index={i}
               frame={frame}
               width={grid ? 236 : 148}

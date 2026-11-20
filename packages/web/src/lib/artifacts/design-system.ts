@@ -80,6 +80,21 @@ export const LIMITS = {
 
 export type Raw = Record<string, unknown>;
 
+/**
+ * The font families typography tokens name, for the font picker: the part of a `font`
+ * shorthand after its size (`600 32px/1.2 "Inter", sans-serif` → `"Inter", sans-serif`),
+ * or the whole value when it has no size.
+ */
+export function fontFamilies(tokens: readonly DesignToken[]): string[] {
+  const out = new Set<string>();
+  for (const t of tokens) {
+    const m = /(?:^|\s)[\d.]+(?:px|r?em|%|pt|vw|vh|ch|ex)(?:\/\S+)?\s+(.+)$/i.exec(t.value);
+    const family = cssValue((m ? m[1]! : t.value).trim());
+    if (family && !/^\d/.test(family)) out.add(family);
+  }
+  return [...out];
+}
+
 export const isObject = (v: unknown): v is Raw =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 

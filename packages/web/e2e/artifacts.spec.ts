@@ -16,6 +16,11 @@ const REACT = `export default function Counter() {
   return <button className="p-2" onClick={() => setN(n + 1)}>Count: {n}</button>;
 }`;
 
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
 /** The open slide's card in the rail; its text starts with the slide number. */
 const activeSlide = (panel: ReturnType<Page["getByTestId"]>) =>
   panel.getByRole("navigation", { name: "Slides" }).locator("[aria-current]");
@@ -172,8 +177,10 @@ test("slides and design artifacts open in their frame modes", async ({ page, hum
   await page.keyboard.press("ArrowRight");
   await expect(activeSlide(panel)).toHaveText(/^3\D/);
   await expect(frame.getByText("Third slide text")).toBeVisible();
-  // Keys pressed inside the frame come back to the panel.
+  // Keys pressed inside the frame come back to the panel. A click selects the layer (the
+  // canvas editor), where Home selects the first layer: Esc clears it first.
   await frame.getByText("Third slide text").click();
+  await page.keyboard.press("Escape");
   await page.keyboard.press("Home");
   await expect(activeSlide(panel)).toHaveText(/^1\D/);
 
@@ -181,8 +188,19 @@ test("slides and design artifacts open in their frame modes", async ({ page, hum
   await expect(panel.getByRole("heading", { name: "Checkout" })).toBeVisible();
   const screens = panel.getByRole("navigation", { name: "Screens" });
   await screens.getByRole("button", { name: /Phone/ }).click();
+  // Every artboard sits in one row (spec §6.3); the screen list centres the one it selects.
   await expect(frame.getByText("Phone screen")).toBeVisible();
-  await expect(frame.getByText("Home screen")).toBeHidden();
+  await expect(frame.getByText("Home screen")).toBeVisible();
+  const centred = (n: number) =>
+    frame.locator(`body > section:nth-of-type(${n})`).evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return Math.abs(r.left + r.width / 2 - document.documentElement.clientWidth / 2) < 2;
+    });
+  await expect.poll(() => centred(2)).toBe(true);
+  await screens.getByRole("button", { name: /Home/ }).click();
+  await expect.poll(() => centred(1)).toBe(true);
+  await screens.getByRole("button", { name: /Phone/ }).click();
+  await expect.poll(() => centred(2)).toBe(true);
   // At 100 % the artboard has its own width; fit scales it to the stage.
   const width = () => frame.locator("body > section:nth-of-type(2)").evaluate((el) => el.getBoundingClientRect().width);
   await panel.getByTestId("frame-zoom").click();
@@ -739,4 +757,149 @@ test("Add slide opens a layout picker in the deck's design and autosaves the cho
   );
   await expect(panel.getByTestId("artifact-versions")).toHaveText(/v1 of 1/);
   await expect(threadCards).toHaveCount(2);
+});
+
+test("a text box and an image inserted on the canvas, restyled, hold after a reload", async ({ page, human, daemon }) => {
+  test.setTimeout(120_000);
+  // A wide window: the canvas toolbar shows every tool inline beside the Properties panel.
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const { roomId, artifact, open } = await openThread({ page, human, daemon });
+  await artifact({ identifier: "launch-deck", type: "slides", title: "Launch deck", body: SLIDES });
+  await open();
+  await page.getByTestId("artifact-card").click();
+  const panel = page.getByTestId("artifact-panel");
+  const frame = page.frameLocator('[data-testid="artifact-preview"]');
+  await expect(frame.getByText("Welcome")).toBeVisible();
+
+  // Text places a free layer in the middle of the slide, ready to retype.
+  await panel.getByRole("toolbar", { name: "Canvas tools" }).getByRole("button", { name: "Text", exact: true }).click();
+  const box = frame.locator('p[data-layer="Text"]');
+  await expect(box).toHaveText("Text");
+  await box.dblclick();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.type("Hello canvas");
+  await page.keyboard.press("Escape");
+  await expect(box).toHaveText("Hello canvas");
+
+  // Properties: the layer is listed and selected; a font size restyles it in place.
+  await panel.getByRole("button", { name: "Properties" }).click();
+  const props = page.getByTestId("style-inspector");
+  await expect(props.getByTestId("layers-list").getByRole("button", { name: "Text", pressed: true })).toBeVisible();
+  await props.getByLabel("Font size").fill("64");
+  await expect(box).toHaveCSS("font-size", "64px");
+
+  // The save holds the app's own copy of the source: no ids, the layer where it was placed.
+  const saved = await daemon.waitForMessage(roomId, (e) => {
+    const body = String((e.content as { body?: unknown }).body ?? "");
+    return (
+      e.type === "dev.fabrium.artifact.version" &&
+      e.sender === human.userId &&
+      body.includes("Hello canvas") &&
+      body.includes("font-size: 64px")
+    );
+  });
+  const body = (saved.content as { body: string }).body;
+  expect(body).not.toContain("data-fab-id");
+  expect(body).toMatch(
+    /<p data-free="" data-layer="Text" style="position: absolute; left: 720px; top: 492px; [^"]*font-size: 64px;[^"]*">Hello canvas<\/p><\/section>/,
+  );
+  await expect(panel.getByTestId("artifact-versions")).toHaveText(/v1 of 1/);
+
+  // After a reload the version still holds the text box.
+  await page.reload();
+  await expect(frame.locator('p[data-layer="Text"]')).toHaveText("Hello canvas");
+  await expect(frame.locator('p[data-layer="Text"]')).toHaveCSS("font-size", "64px");
+
+  // Image: uploaded through authenticated media, named by its mxc URI; the frame (no network)
+  // shows the bytes the app posts in, as its own object URL.
+  const tools = panel.getByRole("toolbar", { name: "Canvas tools" });
+  const chooser = page.waitForEvent("filechooser");
+  await tools.getByRole("button", { name: "Image", exact: true }).click();
+  await (await chooser).setFiles({ name: "dot.png", mimeType: "image/png", buffer: TINY_PNG });
+  const img = frame.locator('img[data-layer="Image"]');
+  await expect(img).toHaveAttribute("src", /^blob:/);
+  await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBe(1);
+  await props.getByLabel("Radius").fill("24");
+  await expect(img).toHaveCSS("border-radius", "24px");
+  const withImage = await daemon.waitForMessage(roomId, (e) => {
+    const b = String((e.content as { body?: unknown }).body ?? "");
+    return e.sender === human.userId && b.includes('<img src="mxc://') && b.includes("border-radius: 24px");
+  });
+  const imageBody = (withImage.content as { body: string }).body;
+  expect(imageBody).toMatch(/<img src="mxc:\/\/[^"]+" alt="" data-free="" data-layer="Image" style="[^"]*border-radius: 24px;[^"]*">/);
+  expect(imageBody).toContain("Hello canvas");
+  const mxc = /<img src="(mxc:\/\/[^"]+)"/.exec(imageBody)![1]!;
+  expect((await daemon.downloadMedia(mxc)).equals(TINY_PNG)).toBe(true);
+
+  // Anything else dropped on the canvas is refused, at the stage: the frame never gets the file.
+  const notMedia = await page.evaluateHandle(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(["hi"], "notes.txt", { type: "text/plain" }));
+    return dt;
+  });
+  await page.getByTestId("artifact-preview").dispatchEvent("dragenter", { dataTransfer: notMedia });
+  await page.getByTestId("canvas-drop").dispatchEvent("drop", { dataTransfer: notMedia });
+  await expect(page.getByText("Only images and videos can be dropped here.")).toBeVisible();
+
+  await page.reload();
+  await expect(frame.locator('p[data-layer="Text"]')).toHaveText("Hello canvas");
+  await expect(frame.locator('img[data-layer="Image"]')).toHaveAttribute("src", /^blob:/);
+  await expect(frame.locator('img[data-layer="Image"]')).toHaveCSS("border-radius", "24px");
+
+  // A script in the frame cannot edit as the user: an op it posts without a user gesture is dropped.
+  const srcdoc = (await page.getByTestId("artifact-preview").getAttribute("srcdoc")) ?? "";
+  const channel = /var CHANNEL = "([^"]+)"/.exec(srcdoc)![1]!;
+  const id = await frame.locator('p[data-layer="Text"]').getAttribute("data-fab-id");
+  await frame.locator("body").evaluate(
+    (_, [ch, target]) =>
+      parent.postMessage({ type: "fabrium.preview.op", channel: ch, detail: { ops: [{ kind: "delete", id: target }] } }, "*"),
+    [channel, id] as const,
+  );
+  await page.waitForTimeout(1000);
+  await expect(frame.locator('p[data-layer="Text"]')).toHaveText("Hello canvas");
+
+  // An element the agent wrote in the flow moves anywhere by drag: an offset, its siblings stay put.
+  const heading = frame.getByRole("heading", { name: "Welcome" });
+  const hb = (await heading.boundingBox())!;
+  await page.mouse.move(hb.x + 10, hb.y + 10);
+  await page.mouse.down();
+  await page.mouse.move(hb.x + 18, hb.y + 14, { steps: 8 });
+  await page.mouse.up();
+  const moved = await daemon.waitForMessage(roomId, (e) => {
+    const b = String((e.content as { body?: unknown }).body ?? "");
+    return e.sender === human.userId && /<h1 style="translate: -?\d+px( -?\d+px)?;">Welcome<\/h1>/.test(b);
+  });
+  expect((moved.content as { body: string }).body).not.toContain("data-free=\"\">Welcome");
+
+  // Double-click puts a live caret where the pointer is: the frame has focus and the selection is collapsed in the heading.
+  const nb = (await heading.boundingBox())!;
+  // Near its left end: the text box from above sits over the heading's middle.
+  await page.mouse.dblclick(nb.x + 12, nb.y + nb.height / 2);
+  await expect
+    .poll(() =>
+      heading.evaluate((el) => {
+        const s = getSelection()!;
+        return document.hasFocus() && document.activeElement === el && s.isCollapsed && el.contains(s.anchorNode);
+      }),
+    )
+    .toBe(true);
+  await page.keyboard.press("Escape");
+
+  // Align, its own menu: one flow layer aligns to the slide, by an offset.
+  await page.keyboard.press("Escape");
+  await page.mouse.click(nb.x + 12, nb.y + nb.height / 2);
+  await tools.getByRole("button", { name: "Align" }).click();
+  await page.getByRole("menuitem", { name: "Align left" }).click();
+  const slideX = (await frame.locator("section").first().boundingBox())!.x;
+  await expect.poll(async () => Math.abs((await heading.boundingBox())!.x - slideX)).toBeLessThan(1.5);
+
+  // A narrow stage collapses the toolbar: the insert tools become a menu, inside the stage.
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await expect(tools.getByRole("button", { name: "Text", exact: true })).toBeHidden();
+  await expect(tools.getByRole("button", { name: "Insert" })).toBeVisible();
+  await expect(tools.getByRole("button", { name: "Align" })).toBeVisible();
+  const stage = (await page.getByTestId("artifact-preview").boundingBox())!;
+  const bar = (await tools.boundingBox())!;
+  expect(bar.x).toBeGreaterThanOrEqual(stage.x);
+  expect(bar.x + bar.width).toBeLessThanOrEqual(stage.x + stage.width + 0.5);
 });

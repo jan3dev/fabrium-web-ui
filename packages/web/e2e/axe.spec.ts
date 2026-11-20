@@ -142,6 +142,17 @@ for (const theme of ["light", "dark"] as const) {
       body: "<!doctype html><html><body><section><h1>One</h1><aside data-notes>Open with the numbers.</aside></section><section data-skip><h1>Two</h1></section></body></html>",
       "m.relates_to": { rel_type: "m.thread", event_id: deckRoot },
     });
+    // A design with two artboards, in its own thread: the all-artboards canvas.
+    const designRoot = await daemon.sendText(roomId, "Sketch the checkout");
+    await (
+      daemon.agentClient.sendEvent as (r: string, t: string, c: Record<string, unknown>) => Promise<unknown>
+    )(roomId, "dev.fabrium.artifact.version", {
+      identifier: "checkout",
+      type: "design",
+      title: "Checkout",
+      body: '<!doctype html><html><body><section data-name="Cart"><h1>Cart</h1></section><section data-name="Phone" data-width="390" data-height="844"><h1>Phone cart</h1></section></body></html>',
+      "m.relates_to": { rel_type: "m.thread", event_id: designRoot },
+    });
     // A design system, in its own thread too.
     const tokensRoot = await daemon.sendText(roomId, "Write down our tokens");
     await (
@@ -271,6 +282,25 @@ for (const theme of ["light", "dark"] as const) {
       await page.getByTestId("artifact-versions").click();
       await page.getByRole("menuitemradio").first().waitFor();
     });
+    // Level 3: the canvas tools and the Properties panel with its layers list.
+    await sweep(`${room}?thread=${encodeURIComponent(deckRoot)}&artifact=deck`, async () => {
+      await page.getByRole("toolbar", { name: "Canvas tools" }).waitFor();
+      await page.getByRole("button", { name: "Properties" }).click();
+      await page.getByTestId("layers-list").waitFor();
+    });
+    // The design canvas: every artboard in a row, with Properties (open since the sweep above).
+    await sweep(`${room}?thread=${encodeURIComponent(designRoot)}&artifact=checkout`, async () => {
+      const frame = page.frameLocator('[data-testid="artifact-preview"]');
+      await frame.getByText("Cart", { exact: true }).waitFor();
+      await frame.getByText("Phone cart").waitFor();
+      await page.getByTestId("layers-list").waitFor();
+    });
+    // On a phone: Properties is a sheet under the canvas.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await sweep(`${room}?thread=${encodeURIComponent(deckRoot)}&artifact=deck`, async () => {
+      await page.getByRole("dialog", { name: "Properties" }).getByTestId("layers-list").waitFor();
+    });
+    await page.setViewportSize({ width: 1280, height: 720 });
     await sweep(`${room}?thread=${encodeURIComponent(tokensRoot)}&artifact=tokens`, async () => {
       await page.getByRole("navigation", { name: "Design system sections" }).getByRole("button", { name: /Colors/ }).click();
       await page.getByRole("button", { name: "Edit" }).click();

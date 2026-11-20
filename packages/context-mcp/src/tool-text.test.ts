@@ -54,6 +54,12 @@ describe('shared tool text ([[ZOD094]])', () => {
     expect(ARTIFACT_DESCRIPTION).toMatch(/The user may have edited the artifact/)
     expect(ARTIFACT_DESCRIPTION).toMatch(/`edits` apply to the latest version from any author/)
     expect(ARTIFACT_DESCRIPTION).toMatch(/pass only `identifier` and `read: true`/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/data-layer="Name" names an element in the layers list/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/data-free places an element freely \(position: absolute with left, top, width and height in px/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/data-lock keeps a layout element from being selected by hand/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/<aside data-note> in a section \(not data-notes\).*read the notes when you build or change the artifact/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/pass only `identifier` and `assets`.*each path mapped to an mxc:\/\/ URI/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/src on <img>, <video> or <source>, or in url\(\) in @font-face/)
     expect(ARTIFACT_DESCRIPTION).toMatch(/When you were told "The user edited artifact `<identifier>`".*call `read` before you change it, with `edits` or with a full `content` rewrite/)
   })
 

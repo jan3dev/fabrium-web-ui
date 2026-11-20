@@ -106,7 +106,8 @@ function withAttrs(raw: string, edit: (el: Element) => void): string {
   return open ? `<section${attrs.join("")}>${raw.slice(open[0].length)}` : el.outerHTML;
 }
 
-function editFrame(html: string, i: number, edit: (raw: string) => string): string {
+/** Frame `i`'s raw markup replaced by `edit`'s; the rest of the source stays as it is. */
+export function editFrame(html: string, i: number, edit: (raw: string) => string): string {
   const c = cut(html);
   const raw = c.secs[i];
   if (raw === undefined) return html;

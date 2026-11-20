@@ -248,7 +248,7 @@ All are plain attributes and elements the agent writes. Unknown ones are ignored
 | `data-transition="none\|fade\|slide"` on `body` or a section | Transition into that slide. Off under `prefers-reduced-motion`. | 1 |
 | `<template data-layout="NAME">` in `head` (slides) | A slide layout in the deck's own design: one `<section>` with placeholder text. Names: `blank`, `title`, `section`, `title-body`, `bullets`, `two-columns`, `table`, `quote`, `image-caption`, `closing`. Not a slide, never shown. Add slide offers them (§6.2). | 2 |
 | `data-layer="Name"` on any element | Its name in the layers list; else tag and first text | 3 |
-| `data-free` on an element | Free-placed: `position: absolute` with `left`, `top`, `width`, `height` in px on the canvas. Move and resize write these four. Other elements are in flow and only swap with siblings. | 3 |
+| `data-free` on an element | Free-placed: `position: absolute` with `left`, `top`, `width`, `height` in px on the canvas. Move and resize write these four. Other elements stay in the flow: a move writes a `translate` offset, so siblings keep their places. | 3 |
 | `data-lock` on an element | Cannot be selected by hand (layout-owned) | 3 |
 | `<aside data-note>` in a section | A note for the builder; shown as a note on the canvas, hidden in Present and exports | 3 |
 | `<script type="application/json" data-tweaks>` in `head` | Tweaks (§6.7) | 4 |
@@ -363,7 +363,7 @@ dev.fabrium.design_systems   (state_key "")
 
 ### 6.4 Canvas editing
 
-- Click selects; double-click or Return edits text; Esc ends. Drag moves; handles resize; Shift keeps the ratio. Free-placed layers move by px; flow layers swap with their neighbours and show an insertion line.
+- Click selects; double-click or Return edits text; Esc ends. Drag moves; handles resize; Shift keeps the ratio. Free-placed layers move by px; flow layers move by a `translate` offset. Cmd/Ctrl-drag swaps a flow layer with its neighbours and shows an insertion line. Double-click puts the caret at the pointer.
 - Insert tools place a free layer on the active slide or artboard from a template in the app: text box, rectangle, rounded rectangle, oval, diamond, line, arrow, image, video, table (rows × columns, then typed cell by cell), note.
 - Drop a file on the canvas: an image or a video becomes a layer at the drop point (upload first, §5.4). Other files are rejected with "Only images and videos can be dropped here."
 - Group, ungroup, bring to front, send to back, flip, align (left, center, right, top, middle, bottom, distribute), duplicate, copy, cut, paste, delete, select all.
@@ -523,13 +523,13 @@ Level 2:
 
 Level 3:
 
-- [ ] Stamp and strip `data-fab-id`; op messages in `PreviewMessage`; op validator with tests.
-- [ ] Editor runtime in the hook script: selection box, handles, drag, text editing, snapping, drop target.
-- [ ] `components/artifacts/canvas-toolbar.tsx`, `layers-list.tsx`, floating toolbar; stories.
-- [ ] Extend `style-inspector.tsx` and `styles.ts` to the sections in §6.5; color picker with design-system colors and contrast.
-- [ ] Assets: upload, `mxc` resolution, bytes into the frame, CSP `font-src blob:`, inlining on download.
-- [ ] All-artboards canvas with pan and zoom.
-- [ ] Mobile sheet for properties.
+- [x] Stamp and strip `data-fab-id`; op messages in `PreviewMessage`; op validator with tests.
+- [x] Editor runtime in the hook script: selection box, handles, drag, text editing, snapping. (The file drop target comes with assets.)
+- [x] `components/artifacts/canvas-toolbar.tsx`, `layers-list.tsx`, floating toolbar; stories.
+- [x] Extend `style-inspector.tsx` and `styles.ts` to the sections in §6.5; color picker with design-system colors and contrast.
+- [x] Assets: upload, `mxc` resolution, bytes into the frame, CSP `font-src blob:`, inlining on download; Image and Video tools, file drop on the canvas.
+- [x] All-artboards canvas with pan and zoom.
+- [x] Mobile sheet for properties.
 
 Level 4:
 
@@ -548,7 +548,7 @@ Level 5:
 
 - [x] L1: tool text for `<aside data-notes>`, `data-skip`, `data-transition`.
 - [x] L2: `latestArtifact` resolves the newest version from any allowed author; `zooid_artifact` `read`; the "user edited" line in the next turn; `based_on` on agent versions; `started_ts` on `dev.zooid.turn.end`; tool text for `<template data-layout>`.
-- [ ] L3: `assets` input on `zooid_artifact`; tool text for `data-layer`, `data-free`, `data-lock`, `data-note`.
+- [x] L3: `assets` input on `zooid_artifact`; tool text for `data-layer`, `data-free`, `data-lock`, `data-note`.
 - [ ] L4: `zooid_design_system` tool; tool text for questions, variations, placeholders, tweaks and the conformance check; honor `dev.fabrium.artifact_hint`; `focus` live state for the cursor; confirm that thread attachments reach the agent, and add it if not.
 - [ ] L5: kinds `whiteboard` and `motion` with validation; tool text for the export and build requests; render tooling on the agent VM image (headless browser, `ffmpeg`, a PPTX writer) — each needs `package-vetting`.
 
@@ -582,6 +582,8 @@ Level 5:
 
 - Agent markup (slides, designs, components, assets) renders only in the sandboxed frame without `allow-same-origin` and without network. This does not change at any level. The PDF export's print frame, which exists only from the Export click until the print dialog closes, also has `allow-modals` (`print()` needs it); no other frame does.
 - From level 2, users write versions. The app serializes only its own inert copy of the source after validated operations (§5.3). The frame can ask for a move, a number or a text; it cannot hand over markup, attribute names outside the allow-list, or CSS that fails `cssValue`.
+- Agent scripts run in the same frame as the editor, so the app takes ops and keys from the frame only during the user's transient activation or a few seconds after it (a long drag). A script cannot edit, delete or paste while the user is idle; during that window it can still send ops or keys of its own, which then save as the user's edit.
+- Files dropped on the canvas go to a drop target on the stage, outside the frame; the frame swallows file drags and never sees the file.
 - Pasted slides and clipboard content are markup from outside: they are parsed inert, stored as source, and run only in the frame.
 - Assets come through authenticated media and enter the frame as bytes. Sizes and counts are capped (§5.4). SVG is an image, never inlined by the app.
 - Tweaks, whiteboards, design-system JSON and every frame message are untrusted input with readers that clamp and drop.

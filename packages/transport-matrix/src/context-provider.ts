@@ -24,6 +24,7 @@ import {
   MAX_INLINE_ARTIFACT_BYTES,
   applyArtifactEdits,
   artifactAuthorCheck,
+  assetType,
   readStoredArtifact,
   sha256Hex,
   threadEventsNewestFirst,
@@ -91,7 +92,8 @@ export interface MatrixContextProviderOpts {
   media?: MediaClientLike
   /**
    * Host workdir, the prefix the agent sees it at, and whether the agent is
-   * confined to it (container runtimes). Absent = sendAttachment throws attachment_failed.
+   * confined to it (container runtimes). Absent = sendAttachment throws attachment_failed
+   * and artifact `assets` are refused.
    */
   workspace?: { hostDir: string; agentPath: string; confined: boolean }
 }
@@ -416,6 +418,7 @@ export class MatrixContextProvider implements TransportContextProvider {
     if (!threadId.startsWith('$')) {
       throw new Error('unsupported: artifacts are shown in threads. Reply in a thread to use zooid_artifact.')
     }
+    if (input.assets) return { identifier: input.identifier, assets: await this.uploadAssets(input.assets) }
     const previous = await this.latestArtifact(channelId, threadId, input.identifier)
     const notFound = `not_found: no version of "${input.identifier}" in this thread.`
     if (input.read) {
@@ -498,6 +501,39 @@ export class MatrixContextProvider implements TransportContextProvider {
       return { ...stored, eventId: ev.event_id, sender: ev.sender }
     }
     return null
+  }
+
+  /**
+   * Upload workspace files for an artifact to reference (spec §5.4). Every
+   * path is checked before any upload, so a bad one uploads nothing.
+   */
+  private async uploadAssets(paths: string[]): Promise<Record<string, string>> {
+    const { media, workspace, asUserId } = this.opts
+    if (!media || !workspace) throw new Error('assets_unavailable: this agent cannot upload files.')
+    const files: Array<{ path: string; hostPath: string; type: { mime: string; max: number } }> = []
+    for (const path of new Set(paths)) {
+      const type = assetType(path)
+      let hostPath: string
+      try {
+        // Always confined, even for a local agent: an asset never comes from outside the workspace.
+        hostPath = resolveAttachmentPath({ ...workspace, path, confined: true })
+      } catch {
+        throw new Error(`invalid_asset: ${path} is outside your workspace.`)
+      }
+      const info = await stat(hostPath).catch(() => null)
+      if (!info?.isFile()) throw new Error(`invalid_asset: no file ${path} in your workspace.`)
+      if (info.size > type.max) throw new Error(`too_large: ${path} is ${info.size} bytes, the limit for its type is ${type.max}.`)
+      files.push({ path, hostPath, type })
+    }
+    const uris: Record<string, string> = {}
+    for (const { path, hostPath, type } of files) {
+      const data = await readFile(hostPath)
+      // The file may have grown since stat.
+      if (data.byteLength > type.max) throw new Error(`too_large: ${path} is over ${type.max} bytes.`)
+      const { content_uri } = await media.upload({ data, contentType: type.mime, filename: basename(path), asUserId })
+      uris[path] = content_uri
+    }
+    return uris
   }
 
   /** Inline body, or the media body only when it matches the version's sha256. */
