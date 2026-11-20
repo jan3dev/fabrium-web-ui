@@ -26,7 +26,7 @@ const tick = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
 
 const settled: AgentList = {
   agents: [makeAgent(), PROFILE],
-  vms: [{ name: "lima", state: "running" }],
+  vms: [{ name: "lima", state: "running", project_id: null }],
   people: [],
 };
 
@@ -70,7 +70,7 @@ describe("useAgents", () => {
   it.each(["pending", "stopping", "shutting-down"] as const)(
     "polls every 5 s while a VM of the list is %s",
     async (state) => {
-      const fetchMock = serve({ agents: [PROFILE], vms: [{ name: "lima", state }], people: [] });
+      const fetchMock = serve({ agents: [PROFILE], vms: [{ name: "lima", state, project_id: null }], people: [] });
       renderHook(() => useAgents());
 
       await tick(0);

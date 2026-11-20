@@ -2,7 +2,16 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { CAN_NOTHING, PROFILE, VM_GONE, makeAgent } from "../../../test/vm-fixtures";
+import {
+  CAN_NOTHING,
+  MARKETING,
+  PAYMENTS,
+  PROFILE,
+  PROJECTS,
+  PROJECT_AGENT,
+  VM_GONE,
+  makeAgent,
+} from "../../../test/vm-fixtures";
 import { FabriumApiError } from "../../client/fabrium-api";
 import type { AgentInput } from "../../model/types";
 import { AgentDialog } from "./agent-dialog";
@@ -24,10 +33,14 @@ function setup({
     open: true,
     onOpenChange,
     agent: null,
-    vms: [{ name: "lima", state: "running" }],
+    vms: [{ name: "lima", state: "running", project_id: null }],
     models: MODELS,
     modelsError: null,
     members: MEMBERS,
+    projects: PROJECTS,
+    projectsError: null,
+    canManageProjects: true,
+    onCreateProject: vi.fn(async (name: string) => ({ id: "p9", name, in_use: false })),
     onSubmit,
     ...over,
   };
@@ -45,6 +58,13 @@ const optionTexts = (select: HTMLElement) =>
   within(select)
     .getAllByRole("option")
     .map((o) => o.textContent);
+const projectField = () => screen.getByRole("combobox", { name: "Project" });
+async function pickProject(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(projectField());
+  await user.click(await screen.findByRole("option", { name }));
+}
+const KILO = { name: "kilo", state: "running" as const, project_id: PAYMENTS.id };
+const NO_PROJECT_VM = "A project agent runs only on a project VM. No project VM is available.";
 const setDescription = (text: string) =>
   act(() => {
     fireEvent.change(screen.getByLabelText("Agent description"), { target: { value: text } });
@@ -83,11 +103,10 @@ describe("<AgentDialog>", () => {
     await user.selectOptions(screen.getByLabelText("VM"), "lima");
     expect(screen.getByText(note)).toBeInTheDocument();
     await user.type(screen.getByLabelText("Tag"), "Reviewer");
-    await user.type(screen.getByLabelText("Project"), "Payments");
     await user.click(button("Create agent"));
 
     expect(onSubmit.mock.calls).toStrictEqual([
-      [{ name: "scout", model: "glm-5-3", tag: "Reviewer", project: "Payments", vm: "lima" }],
+      [{ name: "scout", model: "glm-5-3", tag: "Reviewer", vm: "lima" }],
     ]);
   });
 
@@ -214,7 +233,7 @@ describe("<AgentDialog>", () => {
 
   it("shows the restart note only for an agent with a live VM", () => {
     const note =
-      "A change of the description or the model restarts every agent of the VM lima. A turn in progress is lost.";
+      "A change of the description, the model, the owner, or the project restarts every agent of the VM lima. A turn in progress is lost.";
     const { rerender } = setup({ agent: makeAgent() });
     expect(screen.getByRole("dialog", { name: "Edit agent" })).toHaveAccessibleDescription(note);
 
@@ -236,9 +255,9 @@ describe("<AgentDialog>", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("the Haven model list does not answer");
     expect(screen.getByLabelText("Model")).toHaveValue("glm-5-3");
 
-    await user.type(screen.getByLabelText("Project"), "-2");
+    await user.type(screen.getByLabelText("Tag"), "-2");
     await user.click(button("Save"));
-    expect(onSubmit.mock.calls).toStrictEqual([[{ project: "Payments-2" }]]);
+    expect(onSubmit.mock.calls).toStrictEqual([[{ tag: "Reviewer-2" }]]);
   });
 
   it("a new agent cannot be created while the model list failed", async () => {
@@ -291,6 +310,147 @@ describe("<AgentDialog>", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("matrix timeout");
     expect(alert).toHaveTextContent("Failed at step: join.");
+  });
+
+  it("creates a project agent", async () => {
+    const { user, onSubmit } = setup();
+    await user.type(screen.getByLabelText("Name"), "scout");
+    await pickProject(user, "Payments");
+    expect(projectField()).toHaveTextContent("Payments");
+    await user.click(button("Create agent"));
+    expect(onSubmit.mock.calls).toStrictEqual([
+      [{ name: "scout", model: "glm-5-3", project_id: PAYMENTS.id }],
+    ]);
+  });
+
+  it("the VM list of a project agent has only project VMs", async () => {
+    const { user } = setup({ vms: [{ name: "lima", state: "running", project_id: null }, KILO] });
+    expect(optionTexts(screen.getByLabelText("VM"))).toEqual(["No VM", "lima", "kilo"]);
+    await pickProject(user, "Payments");
+    expect(optionTexts(screen.getByLabelText("VM"))).toEqual(["No VM", "kilo"]);
+  });
+
+  it("clears a personal VM that the chosen project leaves out", async () => {
+    const { user } = setup({ vms: [{ name: "lima", state: "running", project_id: null }, KILO] });
+    await user.selectOptions(screen.getByLabelText("VM"), "lima");
+    await pickProject(user, "Payments");
+    expect(screen.getByLabelText("VM")).toHaveValue("");
+  });
+
+  it("shows the reason when a project agent has no project VM", async () => {
+    const { user } = setup();
+    expect(screen.queryByText(NO_PROJECT_VM)).toBeNull();
+    await pickProject(user, "Payments");
+    expect(optionTexts(screen.getByLabelText("VM"))).toEqual(["No VM"]);
+    expect(screen.getByLabelText("VM")).toHaveAccessibleDescription(NO_PROJECT_VM);
+  });
+
+  it("an edit sends project_id only when it changed", async () => {
+    const { user, onSubmit, rerender } = setup({ agent: makeAgent() });
+    await user.clear(screen.getByLabelText("Tag"));
+    await user.type(screen.getByLabelText("Tag"), "X");
+    await user.click(button("Save"));
+    expect(onSubmit.mock.calls).toStrictEqual([[{ tag: "X" }]]);
+
+    rerender({ open: false });
+    rerender({ open: true, agent: PROJECT_AGENT });
+    expect(projectField()).toHaveTextContent("Payments");
+    expect(button("Save")).toBeDisabled();
+    await pickProject(user, "Marketing");
+    await user.click(button("Save"));
+    expect(onSubmit.mock.calls[1]).toStrictEqual([{ project_id: MARKETING.id }]);
+  });
+
+  it("an edit has the selector only with can.set_project", () => {
+    setup({ agent: makeAgent({ can: { ...makeAgent().can, set_project: false } }) });
+    expect(screen.queryByRole("combobox", { name: "Project" })).toBeNull();
+  });
+
+  it("hides the Owner field when a project is selected, and drops its change", async () => {
+    const { user, onSubmit } = setup({ agent: makeAgent() });
+    await user.selectOptions(screen.getByLabelText("Owner"), "@luis:example.org");
+    await pickProject(user, "Payments");
+    expect(screen.queryByLabelText("Owner")).toBeNull();
+    await user.click(button("Save"));
+    expect(onSubmit.mock.calls).toStrictEqual([[{ project_id: PAYMENTS.id }]]);
+  });
+
+  it("an admin who takes an agent out of a project picks the owner", async () => {
+    const { user, onSubmit } = setup({ agent: PROJECT_AGENT });
+    expect(screen.queryByLabelText("Owner")).toBeNull();
+    await pickProject(user, "No project");
+
+    const owner = screen.getByLabelText("Owner");
+    expect(owner).toHaveValue("");
+    expect(optionTexts(owner)).toEqual([
+      "Choose an owner",
+      "Ann (@ann:example.org)",
+      "Luis (@luis:example.org)",
+    ]);
+    expect(owner).toHaveAccessibleDescription("The agent leaves the project. Choose who owns it.");
+    expect(button("Save")).toBeDisabled();
+
+    await user.selectOptions(owner, "@luis:example.org");
+    await user.click(button("Save"));
+    expect(onSubmit.mock.calls).toStrictEqual([
+      [{ project_id: "", owner: "@luis:example.org" }],
+    ]);
+  });
+
+  it("a take-out starts on the stored owner when it is a person", async () => {
+    const { user, onSubmit } = setup({ agent: { ...PROJECT_AGENT, owner: "@ann:example.org" } });
+    await pickProject(user, "No project");
+    expect(screen.getByLabelText("Owner")).toHaveValue("@ann:example.org");
+    await user.click(button("Save"));
+    expect(onSubmit.mock.calls).toStrictEqual([[{ project_id: "", owner: "@ann:example.org" }]]);
+  });
+
+  it("shows the restart note for the owner and the project", () => {
+    setup({ agent: PROJECT_AGENT });
+    expect(screen.getByRole("dialog", { name: "Edit agent" })).toHaveAccessibleDescription(
+      "A change of the description, the model, the owner, or the project restarts every agent of the VM kilo. A turn in progress is lost.",
+    );
+  });
+
+  it("keeps Save off, and explains, when the project is gone", async () => {
+    const { user } = setup({ agent: PROJECT_AGENT, projects: [MARKETING] });
+    expect(projectField()).toHaveTextContent("Payments");
+    expect(projectField()).toHaveAccessibleDescription(
+      "That project no longer exists. Pick another one.",
+    );
+    await user.type(screen.getByLabelText("Tag"), "X");
+    expect(button("Save")).toBeDisabled();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("an edit can save other fields while the projects failed to load", async () => {
+    const { user, onSubmit } = setup({
+      agent: makeAgent(),
+      projects: null,
+      projectsError: "control plane unreachable",
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Could not load the projects. control plane unreachable",
+    );
+    await user.type(screen.getByLabelText("Tag"), "-2");
+    await user.click(button("Save"));
+    expect(onSubmit.mock.calls).toStrictEqual([[{ tag: "Reviewer-2" }]]);
+  });
+
+  it("shows the 409 of the rule of the project VM and stays open", async () => {
+    const onSubmit = vi
+      .fn<(input: AgentInput) => Promise<void>>()
+      .mockRejectedValueOnce(new FabriumApiError(409, "a project agent needs a project vm"));
+    const { user, onOpenChange } = setup({ onSubmit, vms: [KILO] });
+    await user.type(screen.getByLabelText("Name"), "scout");
+    await pickProject(user, "Payments");
+    await user.selectOptions(screen.getByLabelText("VM"), "kilo");
+    await user.click(button("Create agent"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "A project agent runs only on a project VM.",
+    );
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 
   it("Cancel closes the dialog", async () => {

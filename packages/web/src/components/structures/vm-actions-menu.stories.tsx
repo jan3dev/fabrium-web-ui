@@ -7,7 +7,7 @@ const meta = {
   component: VmActionsMenu,
   parameters: { layout: "centered" },
   args: {
-    vm: { name: "lima", state: "running" },
+    vm: { name: "lima", state: "running", can: { set_project: true } },
     busy: false,
     onSelect: () => {},
   },
@@ -26,7 +26,7 @@ async function open({ args }: { args: { vm: { name: string } } }) {
 export const Running: Story = { play: open };
 
 export const Stopped: Story = {
-  args: { vm: { name: "kilo", state: "stopped" } },
+  args: { vm: { name: "kilo", state: "stopped", can: { set_project: true } } },
   play: open,
 };
 

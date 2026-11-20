@@ -2,7 +2,16 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { CAN_NOTHING, INSTANCE_TYPES, PROFILE, VM_GONE } from "../../../test/vm-fixtures";
+import {
+  CAN_NOTHING,
+  INSTANCE_TYPES,
+  MARKETING,
+  PAYMENTS,
+  PROFILE,
+  PROJECTS,
+  PROJECT_AGENT,
+  VM_GONE,
+} from "../../../test/vm-fixtures";
 import { FabriumApiError } from "../../client/fabrium-api";
 import type { CreateVmRequest } from "../../model/types";
 import { CreateVmDialog } from "./create-vm-dialog";
@@ -11,6 +20,15 @@ type Props = ComponentProps<typeof CreateVmDialog>;
 
 /** A profile, seen by a VM creator: it may get a VM. */
 const FOR_VM_CREATOR = { ...PROFILE, can: { ...PROFILE.can, create_vm: true } };
+/** A project agent whose VM is gone, seen by an admin. */
+const PROJECT_NO_VM = {
+  ...PROJECT_AGENT,
+  vm: { name: "kilo" },
+  can: { ...PROJECT_AGENT.can, create_vm: true },
+};
+const NOTE =
+  "Every member with a role can run agents on this VM, with its Haven API key and its GitHub token. Use credentials made for the project, not for one person.";
+const REASON = "This agent is in a project, so its VM must be in a project too.";
 
 function setup({
   onSubmit = vi.fn(async (_req: CreateVmRequest) => {}),
@@ -23,6 +41,10 @@ function setup({
     agent: FOR_VM_CREATOR,
     types: INSTANCE_TYPES,
     typesError: null,
+    projects: PROJECTS,
+    projectsError: null,
+    canManageProjects: true,
+    onCreateProject: vi.fn(async (name: string) => ({ id: "p9", name, in_use: false })),
     onSubmit,
     ...over,
   };
@@ -37,6 +59,7 @@ function setup({
 
 const create = () => screen.getByRole("button", { name: "Create VM" });
 const field = (label: string) => screen.getByLabelText(label);
+const projectField = () => screen.getByRole("combobox", { name: "Project" });
 
 describe("<CreateVmDialog>", () => {
   it("sends the agent id, the name, the type, the hours, and the key", async () => {
@@ -214,5 +237,84 @@ describe("<CreateVmDialog>", () => {
     setup({ types: null });
     expect(within(screen.getByRole("dialog")).getByText("Loading instance types…")).toBeInTheDocument();
     expect(create()).toBeDisabled();
+  });
+
+  it("starts on the project of the agent", () => {
+    setup({ agent: PROJECT_NO_VM });
+    expect(projectField()).toHaveTextContent("Payments");
+  });
+
+  it("disables No project for a project agent, with the reason", async () => {
+    const { user } = setup({ agent: PROJECT_NO_VM });
+    expect(projectField()).toHaveAccessibleDescription(REASON);
+    await user.click(projectField());
+    expect(screen.getByRole("option", { name: "No project" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  it("allows No project for a personal agent", async () => {
+    const { user } = setup();
+    expect(projectField()).toHaveTextContent("No project");
+    expect(screen.queryByText(REASON)).toBeNull();
+    await user.click(projectField());
+    expect(screen.getByRole("option", { name: "No project" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  it("shows the credentials note only while a project is selected", async () => {
+    const { user, rerender } = setup({ agent: PROJECT_NO_VM });
+    expect(screen.getByRole("status")).toHaveTextContent(NOTE);
+
+    rerender({ open: false });
+    rerender({ open: true, agent: FOR_VM_CREATOR });
+    expect(screen.queryByText(NOTE)).toBeNull();
+    await user.click(projectField());
+    await user.click(screen.getByRole("option", { name: "Payments" }));
+    expect(screen.getByText(NOTE)).toBeInTheDocument();
+  });
+
+  it("sends project_id, and no project_id for a personal VM", async () => {
+    const { user, onSubmit, rerender } = setup({ agent: PROJECT_NO_VM });
+    await user.type(field("Haven API key"), "hk-1");
+    await user.click(create());
+    expect(onSubmit.mock.calls).toStrictEqual([
+      [expect.objectContaining({ name: "kilo", project_id: PAYMENTS.id })],
+    ]);
+
+    rerender({ open: false });
+    rerender({ open: true, agent: FOR_VM_CREATOR });
+    await user.type(field("VM name"), "lima");
+    await user.type(field("Haven API key"), "hk-1");
+    await user.click(create());
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(onSubmit.mock.calls[1][0]).not.toHaveProperty("project_id");
+  });
+
+  it("keeps Create VM off while the project is gone", async () => {
+    const { user } = setup({ agent: PROJECT_NO_VM, projects: [MARKETING] });
+    await user.type(field("Haven API key"), "hk-1");
+    expect(projectField()).toHaveAccessibleDescription(
+      `${REASON} That project no longer exists. Pick another one.`,
+    );
+    expect(create()).toBeDisabled();
+  });
+
+  it("shows the 409 of the rule of the project VM and stays open", async () => {
+    const onSubmit = vi
+      .fn<(req: CreateVmRequest) => Promise<void>>()
+      .mockRejectedValueOnce(new FabriumApiError(409, "a project agent needs a project vm"));
+    const { user, onOpenChange } = setup({ onSubmit });
+    await user.type(field("VM name"), "lima");
+    await user.type(field("Haven API key"), "hk-1");
+    await user.click(create());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "A project agent runs only on a project VM.",
+    );
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 });

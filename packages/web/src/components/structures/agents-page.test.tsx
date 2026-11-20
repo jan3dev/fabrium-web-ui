@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeRoom, mkMatrixEvent } from "../../../test/factories";
 import { mswServer } from "../../../test/setup";
 import { signInForVmApi } from "../../../test/vm-api";
@@ -9,13 +9,17 @@ import {
   CAN_NOTHING,
   INSTANCE_AGENT,
   INSTANCE_TYPES,
+  MARKETING,
+  PAYMENTS,
   PROFILE,
+  PROJECTS,
+  PROJECT_AGENT,
   VM_GONE,
   makeAgent,
 } from "../../../test/vm-fixtures";
 import { MatrixClientPeg } from "../../client/peg";
 import { WorkforceSpaceContext } from "../../hooks/use-workforce";
-import type { Agent, AgentList } from "../../model/types";
+import type { Agent, AgentList, ProjectList } from "../../model/types";
 import { AgentsRoute } from "./agents-page";
 
 const API = "/_fabrium/v1";
@@ -27,7 +31,7 @@ const PEOPLE: AgentList["people"] = [
 /** A fake browser API: `GET /agents` answers `list`; `calls` records each request, with its body. */
 function serve(
   agents: Agent[],
-  vms: AgentList["vms"] = [{ name: "lima", state: "running" }],
+  vms: AgentList["vms"] = [{ name: "lima", state: "running", project_id: null }],
   people: AgentList["people"] = [],
 ) {
   const api = { list: { agents, vms, people } as AgentList, calls: [] as string[] };
@@ -80,7 +84,23 @@ const buttonsIn = (row: HTMLElement) =>
     .queryAllByRole("button")
     .map((b) => b.textContent);
 
+/** `GET /projects`, for every test: it answers `projects.list` and counts its requests apart. */
+const projects = { list: null as unknown as ProjectList, gets: 0 };
+beforeEach(() => {
+  projects.list = { projects: PROJECTS, can: { manage: true } };
+  projects.gets = 0;
+  mswServer.use(
+    http.get(`${API}/projects`, () => {
+      projects.gets++;
+      return HttpResponse.json(projects.list);
+    }),
+  );
+});
+
 afterEach(() => MatrixClientPeg.reset());
+
+const projectField = (dialog: HTMLElement) =>
+  within(dialog).getByRole("combobox", { name: "Project" });
 
 describe("<AgentsRoute>", () => {
   it("shows a row for an agent on a VM", async () => {
@@ -104,7 +124,6 @@ describe("<AgentsRoute>", () => {
       "@lima.echo:example.org",
       "@ann:example.org",
       "Reviewer",
-      "Payments",
       "glm-5-3",
       "lima",
       "running",
@@ -285,6 +304,32 @@ describe("<AgentsRoute>", () => {
     ]);
   });
 
+  it("creates a project VM for a project agent", async () => {
+    const agent = {
+      ...PROJECT_AGENT,
+      vm: { name: "kilo" },
+      can: { ...PROJECT_AGENT.can, create_vm: true },
+    };
+    const api = serve([agent]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Create VM for triage" }));
+    const dialog = await screen.findByRole("dialog", { name: "Create a VM for triage" });
+    await within(dialog).findByLabelText("Instance type");
+    await waitFor(() => expect(projectField(dialog)).toBeEnabled());
+    expect(projectField(dialog)).toHaveTextContent("Payments");
+    await user.type(within(dialog).getByLabelText("Haven API key"), "hk-1");
+    await user.click(within(dialog).getByRole("button", { name: "Create VM" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(api.calls).toEqual([
+      "GET /agents",
+      `POST /vms {"agent":"${agent.id}","name":"kilo","instance_type":"t3a.medium","auto_stop_hours":12,"haven_api_key":"hk-1","project_id":"${PAYMENTS.id}"}`,
+      "GET /agents",
+    ]);
+  });
+
   it("deletes an agent, closes, and refreshes the list", async () => {
     const api = serve([PROFILE]);
     const user = userEvent.setup();
@@ -330,6 +375,189 @@ describe("<AgentsRoute>", () => {
     await user.click(within(dialog).getByRole("button", { name: "Delete agent and VM" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(api.calls.slice(3)).toEqual([`DELETE ${sibling.id}?vm=1`, "GET /agents"]);
+  });
+
+  it("creates a project from the selector and sends its id", async () => {
+    const api = serve([makeAgent()]);
+    mswServer.use(
+      http.post(`${API}/projects`, async ({ request }) => {
+        api.calls.push(`POST /projects ${await request.text()}`);
+        return HttpResponse.json({ id: "p9", name: "Billing", in_use: false }, { status: 201 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("rowheader", { name: /^echo/ });
+
+    await user.click(screen.getByRole("button", { name: "New agent" }));
+    const dialog = await screen.findByRole("dialog", { name: "New agent" });
+    await waitFor(() => expect(within(dialog).getByLabelText("Model")).toHaveValue("glm-5-3"));
+    await user.type(within(dialog).getByLabelText("Name"), "nova");
+    await waitFor(() => expect(projectField(dialog)).toBeEnabled());
+    await user.click(projectField(dialog));
+    await user.type(
+      screen.getByRole("combobox", { name: "Search or create a project" }),
+      "Billing",
+    );
+    await user.click(screen.getByRole("option", { name: 'Create project "Billing"' }));
+    await waitFor(() => expect(projectField(dialog)).toHaveTextContent("Billing"));
+    await user.click(within(dialog).getByRole("button", { name: "Create agent" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(api.calls).toEqual([
+      "GET /agents",
+      'POST /projects {"name":"Billing"}',
+      'POST /agents {"name":"nova","model":"glm-5-3","project_id":"p9"}',
+      "GET /agents",
+    ]);
+  });
+
+  it("an agents-manager gets no Create project", async () => {
+    serve([makeAgent()]);
+    projects.list = { projects: PROJECTS, can: { manage: false } };
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("rowheader", { name: /^echo/ });
+
+    await user.click(screen.getByRole("button", { name: "New agent" }));
+    const dialog = await screen.findByRole("dialog", { name: "New agent" });
+    await waitFor(() => expect(projectField(dialog)).toBeEnabled());
+    await user.click(projectField(dialog));
+    await user.type(
+      screen.getByRole("combobox", { name: "Search or create a project" }),
+      "Billing",
+    );
+    expect(screen.queryByRole("option", { name: /Create project/ })).toBeNull();
+    expect(screen.getByText("No projects match")).toBeInTheDocument();
+  });
+
+  it("loads the projects again after unknown project, and the dialog shows it", async () => {
+    const api = serve([makeAgent()]);
+    mswServer.use(
+      http.put(`${API}/agents/:id`, () => {
+        api.calls.push("PUT (400)");
+        // Another admin deleted Marketing while the dialog was open.
+        projects.list = { projects: [PAYMENTS], can: { manage: true } };
+        return HttpResponse.json({ error: "unknown project" }, { status: 400 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Edit echo" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit agent" });
+    await waitFor(() => expect(projectField(dialog)).toBeEnabled());
+    const before = projects.gets;
+    await user.click(projectField(dialog));
+    await user.click(await screen.findByRole("option", { name: "Marketing" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(projectField(dialog)).toHaveAccessibleDescription(
+        "That project no longer exists. Pick another one.",
+      ),
+    );
+    expect(projects.gets).toBe(before + 1);
+    expect(projectField(dialog)).toHaveTextContent("Marketing");
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(within(dialog).getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("shows the owner of a personal agent and Project for a project agent", async () => {
+    serve([makeAgent(), PROJECT_AGENT]);
+    renderPage();
+    await screen.findByRole("rowheader", { name: /^echo/ });
+    const ownerCell = (name: string) => within(rowOf(name)).getAllByRole("cell")[0];
+    expect(ownerCell("echo")).toHaveTextContent("@ann:example.org");
+    expect(ownerCell("triage")).toHaveTextContent(/^Project$/);
+  });
+
+  it("shows the name of the project in the Project column", async () => {
+    serve([makeAgent(), PROJECT_AGENT]);
+    renderPage();
+    await screen.findByRole("rowheader", { name: /^triage/ });
+    const projectCell = (name: string) => within(rowOf(name)).getAllByRole("cell")[2];
+    expect(projectCell("triage")).toHaveTextContent(/^Payments$/);
+    expect(projectCell("echo")).toHaveTextContent(/^$/);
+  });
+
+  it("shows Manage projects only with can.manage", async () => {
+    serve([makeAgent()]);
+    projects.list = { projects: PROJECTS, can: { manage: false } };
+    renderPage();
+    await screen.findByRole("rowheader", { name: /^echo/ });
+    await waitFor(() => expect(projects.gets).toBe(1));
+    expect(screen.queryByRole("button", { name: "Manage projects" })).toBeNull();
+
+    MatrixClientPeg.reset();
+    projects.list = { projects: PROJECTS, can: { manage: true } };
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Manage projects" })).toBeInTheDocument();
+  });
+
+  it("refreshes the projects and the agents after a rename", async () => {
+    const api = serve([makeAgent()]);
+    mswServer.use(
+      http.put(`${API}/projects/:id`, async ({ params, request }) => {
+        api.calls.push(`PUT /projects/${params.id} ${await request.text()}`);
+        projects.list = {
+          projects: [MARKETING, { ...PAYMENTS, name: "Billing" }],
+          can: { manage: true },
+        };
+        return HttpResponse.json({ ...PAYMENTS, name: "Billing" });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Manage projects" }));
+    const dialog = await screen.findByRole("dialog", { name: "Manage projects" });
+    await user.click(await within(dialog).findByRole("button", { name: "Rename Payments" }));
+    const input = within(dialog).getByRole("textbox", { name: "Name of Payments" });
+    await user.clear(input);
+    await user.type(input, "Billing{Enter}");
+
+    expect(await within(dialog).findByRole("button", { name: "Rename Billing" })).toBeInTheDocument();
+    const gets = projects.gets;
+    expect(api.calls).toEqual([
+      "GET /agents",
+      `PUT /projects/${PAYMENTS.id} {"name":"Billing"}`,
+      "GET /agents",
+    ]);
+    expect(gets).toBeGreaterThanOrEqual(3); // the page, the dialog, and the rename
+  });
+
+  it("refreshes the projects after a stale delete, and the button turns off", async () => {
+    const api = serve([makeAgent()]);
+    mswServer.use(
+      http.delete(`${API}/projects/:id`, ({ params }) => {
+        api.calls.push(`DELETE /projects/${params.id} (409)`);
+        // An agent entered Marketing after the list was loaded.
+        projects.list = {
+          projects: [{ ...MARKETING, in_use: true }, PAYMENTS],
+          can: { manage: true },
+        };
+        return HttpResponse.json({ error: "project in use" }, { status: 409 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Manage projects" }));
+    const dialog = await screen.findByRole("dialog", { name: "Manage projects" });
+    await user.click(await within(dialog).findByRole("button", { name: "Delete Marketing" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Something belongs to this project. Move it out first.",
+    );
+    await waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "Delete Marketing" })).toBeDisabled(),
+    );
+    expect(api.calls).toEqual([
+      "GET /agents",
+      `DELETE /projects/${MARKETING.id} (409)`,
+      "GET /agents",
+    ]);
   });
 
   it("shows the empty state", async () => {

@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mswServer } from "../../../test/setup";
 import { signInForVmApi } from "../../../test/vm-api";
-import { makeVm } from "../../../test/vm-fixtures";
+import { PAYMENTS, PROJECTS, PROJECT_VM, makeVm } from "../../../test/vm-fixtures";
 import { MatrixClientPeg } from "../../client/peg";
 import type { Vm } from "../../model/types";
 import { VmRoute } from "./vm-page";
@@ -139,7 +139,17 @@ describe("<VmRoute>", () => {
     await screen.findByRole("rowheader", { name: "lima" });
     expect(
       screen.getAllByRole("columnheader").map((h) => h.textContent),
-    ).toEqual(["Name", "Agents", "Owner", "Type", "State", "IP", "Launched", "Actions"]);
+    ).toEqual([
+      "Name",
+      "Agents",
+      "Owner",
+      "Project",
+      "Type",
+      "State",
+      "IP",
+      "Launched",
+      "Actions",
+    ]);
 
     const running = within(rowOf("lima"));
     expect(running.getByText("echo")).toBeInTheDocument();
@@ -205,11 +215,12 @@ describe("<VmRoute>", () => {
     expect(within(rowOf("lima")).queryByText("Confidential")).toBeNull();
   });
 
+  // The fixtures are seen by an admin: can.set_project offers Move to project.
   it.each([
-    ["kilo", "stopped", ["Start", "Update credentials", "Delete"]],
-    ["lima", "running", ["Stop", "Reboot", "Update credentials", "Delete"]],
-    ["oscar", "pending", ["Update credentials", "Delete"]],
-    ["papa", "stopping", ["Update credentials", "Delete"]],
+    ["kilo", "stopped", ["Start", "Update credentials", "Move to project", "Delete"]],
+    ["lima", "running", ["Stop", "Reboot", "Update credentials", "Move to project", "Delete"]],
+    ["oscar", "pending", ["Update credentials", "Move to project", "Delete"]],
+    ["papa", "stopping", ["Update credentials", "Move to project", "Delete"]],
   ])("offers actions by state: %s is %s", async (name, _state, labels) => {
     serve([kilo, lima, oscar, papa]);
     const user = userEvent.setup();
@@ -228,7 +239,11 @@ describe("<VmRoute>", () => {
       expect(within(rowOf("lima")).getByText("stopping")).toBeInTheDocument(),
     );
     expect(cp.calls).toEqual(["GET /vms", `POST ${lima.id}/stop`, "GET /vms"]);
-    expect(await actionsOf(user, "lima")).toEqual(["Update credentials", "Delete"]);
+    expect(await actionsOf(user, "lima")).toEqual([
+      "Update credentials",
+      "Move to project",
+      "Delete",
+    ]);
   });
 
   it("has no per-action buttons in the row", async () => {
@@ -579,5 +594,108 @@ describe("auto-stop and owner", () => {
     await user.click(within(dialog).getByRole("button", { name: "Start" }));
     await waitFor(() => expect(cp.calls).toContain(`POST ${juliet.id}/start`));
     expect(cp.started).toEqual([null]);
+  });
+});
+
+describe("projects", () => {
+  /** `GET /projects`: answers `list`, and counts its requests. */
+  function serveProjects() {
+    const api = { list: { projects: PROJECTS, can: { manage: true } }, gets: 0 };
+    mswServer.use(
+      http.get(`${API}/projects`, () => {
+        api.gets++;
+        return HttpResponse.json(api.list);
+      }),
+    );
+    return api;
+  }
+
+  it("shows the Project column, and Project in the Owner column of a project VM", async () => {
+    serve([lima, PROJECT_VM]);
+    renderPage();
+    await screen.findByRole("rowheader", { name: "kilo" });
+    // The cells after the Agents cell: Owner, then Project.
+    const cells = (name: string) =>
+      within(rowOf(name))
+        .getAllByRole("cell")
+        .slice(1, 3)
+        .map((c) => c.textContent);
+    expect(cells("kilo")).toEqual(["Project", "Payments"]);
+    expect(cells("lima")).toEqual(["@ann:example.org", ""]);
+  });
+
+  it("moves a VM to a project and refreshes the list", async () => {
+    const cp = serve([lima]);
+    serveProjects();
+    mswServer.use(
+      http.put(`${API}/vms/:id/owner`, async ({ params, request }) => {
+        cp.calls.push(`PUT ${params.id}/owner ${await request.text()}`);
+        cp.vms = [{ ...lima, project_id: PAYMENTS.id, project: PAYMENTS.name }];
+        return HttpResponse.json(cp.vms[0]);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await chooseAction(user, "lima", "Move to project");
+    const dialog = await screen.findByRole("dialog", { name: "Move lima to a project" });
+    const field = within(dialog).getByRole("combobox", { name: "Project" });
+    await waitFor(() => expect(field).toBeEnabled());
+    await user.click(field);
+    await user.click(await screen.findByRole("option", { name: "Payments" }));
+    await user.click(within(dialog).getByRole("button", { name: "Move VM" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() =>
+      expect(cp.calls).toEqual([
+        "GET /vms",
+        `PUT ${lima.id}/owner {"project_id":"${PAYMENTS.id}"}`,
+        "GET /vms",
+      ]),
+    );
+    expect(await within(rowOf("lima")).findByText("Payments")).toBeInTheDocument();
+  });
+
+  it("loads the projects again after unknown project", async () => {
+    serve([lima]);
+    const projects = serveProjects();
+    mswServer.use(
+      http.put(`${API}/vms/:id/owner`, () => {
+        projects.list = { projects: [PAYMENTS], can: { manage: true } };
+        return HttpResponse.json({ error: "unknown project" }, { status: 400 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await chooseAction(user, "lima", "Move to project");
+    const dialog = await screen.findByRole("dialog", { name: "Move lima to a project" });
+    const field = within(dialog).getByRole("combobox", { name: "Project" });
+    await waitFor(() => expect(field).toBeEnabled());
+    const before = projects.gets;
+    await user.click(field);
+    await user.click(await screen.findByRole("option", { name: "Marketing" }));
+    await user.click(within(dialog).getByRole("button", { name: "Move VM" }));
+
+    await waitFor(() =>
+      expect(field).toHaveAccessibleDescription("That project no longer exists. Pick another one."),
+    );
+    expect(projects.gets).toBe(before + 1);
+    expect(within(dialog).getByRole("button", { name: "Move VM" })).toBeDisabled();
+  });
+
+  it("returns the focus to the menu trigger after Cancel in Move to project", async () => {
+    serve([lima]);
+    serveProjects();
+    const user = userEvent.setup();
+    renderPage();
+
+    await chooseAction(user, "lima", "Move to project");
+    const dialog = await screen.findByRole("dialog", { name: "Move lima to a project" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Actions for lima" })).toHaveFocus(),
+    );
   });
 });

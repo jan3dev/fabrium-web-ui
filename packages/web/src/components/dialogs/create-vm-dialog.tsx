@@ -11,9 +11,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { FabriumApiError } from "../../client/fabrium-api";
-import type { Agent, CreateVmRequest, VmInstanceType } from "../../model/types";
+import { serverText } from "../../lib/fabrium-errors";
+import type { Agent, CreateVmRequest, Project, VmInstanceType } from "../../model/types";
 import { Failure, Field } from "./agent-dialog";
 import { AutoStopField, DEFAULT_AUTO_STOP_HOURS, parseAutoStopHours } from "./auto-stop-field";
+import { ProjectSelector, ProjectVmNote, projectGone } from "./project-selector";
 
 /** The VM name rule of the daemon and the control plane. */
 const VM_NAME_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -29,6 +31,13 @@ interface CreateVmDialogProps {
   /** `null` while they load or when they failed. */
   types: VmInstanceType[] | null;
   typesError: string | null;
+  /** `null` while the list loads or when it failed. */
+  projects: Project[] | null;
+  projectsError: string | null;
+  /** `can.manage` of the project list: the selector offers Create project. */
+  canManageProjects: boolean;
+  /** Creates a project. Rejects with the reason it failed. */
+  onCreateProject: (name: string) => Promise<Project>;
   /** Creates the VM. Rejects with the reason it failed. */
   onSubmit: (req: CreateVmRequest) => Promise<void>;
 }
@@ -62,6 +71,10 @@ function CreateVmForm({
   agent,
   types,
   typesError,
+  projects,
+  projectsError,
+  canManageProjects,
+  onCreateProject,
   onSubmit,
   submitting,
   setSubmitting,
@@ -82,6 +95,8 @@ function CreateVmForm({
   });
   const [failure, setFailure] = useState<{ message: string; step?: string } | null>(null);
   const set = (key: keyof typeof form, value: string) => setForm((f) => ({ ...f, [key]: value }));
+  const [projectId, setProjectId] = useState(agent.project_id);
+  const gone = projectGone(projects, projectId);
 
   // An agent with a VM name gets its VM back under that name.
   const fixed = agent.vm?.name;
@@ -101,6 +116,7 @@ function CreateVmForm({
     VM_NAME_RE.test(vmName) &&
     autoStopHours !== null &&
     havenKey !== "" &&
+    !gone &&
     !submitting;
 
   const submit = async (e: FormEvent) => {
@@ -116,12 +132,13 @@ function CreateVmForm({
         auto_stop_hours: autoStopHours,
         haven_api_key: havenKey,
         ...(githubToken ? { github_token: githubToken } : {}),
+        ...(projectId ? { project_id: projectId } : {}),
       });
       setSubmitting(false);
       close();
     } catch (err) {
       setFailure({
-        message: err instanceof Error ? err.message : String(err),
+        message: serverText(err),
         step: err instanceof FabriumApiError ? err.step : undefined,
       });
       setSubmitting(false);
@@ -157,6 +174,25 @@ function CreateVmForm({
             placeholder="lima"
           />
         </Field>
+        <ProjectSelector
+          id="vm-project"
+          projects={projects}
+          loadError={projectsError}
+          value={projectId}
+          fallbackName={agent.project}
+          onChange={setProjectId}
+          canCreate={canManageProjects}
+          onCreate={onCreateProject}
+          // A project agent runs only on a project VM.
+          noneDisabled={agent.project_id !== null}
+          hint={
+            agent.project_id !== null
+              ? "This agent is in a project, so its VM must be in a project too."
+              : undefined
+          }
+          disabled={submitting}
+        />
+        {projectId !== null ? <ProjectVmNote /> : null}
         {types ? (
           <Field id="vm-type" label="Instance type">
             <NativeSelect
@@ -193,7 +229,8 @@ function CreateVmForm({
           onChange={set}
           disabled={submitting}
         />
-        <Failure failure={failure} retry="Create VM" />
+        {/* A gone project: the field says it. */}
+        <Failure failure={gone ? null : failure} retry="Create VM" />
         <DialogFooter>
           <Button type="button" variant="secondary" onClick={close} disabled={submitting}>
             Cancel

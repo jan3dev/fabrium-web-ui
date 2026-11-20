@@ -22,19 +22,38 @@ interface AgentsViewProps {
   onNew: () => void;
   onAction: (agent: Agent, action: AgentAction) => void;
   onRetry: () => void;
+  /** `can.manage` of the project list: the page offers Manage projects. */
+  canManageProjects: boolean;
+  onManageProjects: () => void;
 }
 
 /** The Agents page. It shows each action from the `can` flags of the agent, never from a rule of its own. */
-export function AgentsView({ agents, error, noAccess, onNew, onAction, onRetry }: AgentsViewProps) {
+export function AgentsView({
+  agents,
+  error,
+  noAccess,
+  onNew,
+  onAction,
+  onRetry,
+  canManageProjects,
+  onManageProjects,
+}: AgentsViewProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex items-center justify-between gap-4 border-b border-border px-6 py-4">
         <h1 className="font-heading text-subtitle font-medium">Agents</h1>
         {noAccess ? null : (
-          <Button size="sm" onClick={onNew}>
-            <PlusIcon aria-hidden />
-            New agent
-          </Button>
+          <div className="flex gap-2">
+            {canManageProjects ? (
+              <Button size="sm" variant="secondary" onClick={onManageProjects}>
+                Manage projects
+              </Button>
+            ) : null}
+            <Button size="sm" onClick={onNew}>
+              <PlusIcon aria-hidden />
+              New agent
+            </Button>
+          </div>
         )}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
@@ -111,7 +130,8 @@ function AgentRow({
           </div>
         ) : null}
       </th>
-      <td className={CELL}>{agent.owner}</td>
+      {/* The stored owner of a project agent is data only. */}
+      <td className={CELL}>{agent.project_id !== null ? "Project" : agent.owner}</td>
       <td className={CELL}>{agent.tag}</td>
       <td className={CELL}>{agent.project}</td>
       <td className={CELL}>{agent.model}</td>
