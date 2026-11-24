@@ -141,6 +141,32 @@ for (const theme of ["light", "dark"] as const) {
       "dev.fabrium.preview": { name: "todo-app", title: "Todo app", command: "npm run dev", action: "started" },
       "m.relates_to": { rel_type: "m.thread", event_id: rootId },
     });
+    // A slides artifact, in its own thread so it does not open over the app preview.
+    const deckRoot = await daemon.sendText(roomId, "Make a launch deck");
+    await (
+      daemon.agentClient.sendEvent as (r: string, t: string, c: Record<string, unknown>) => Promise<unknown>
+    )(roomId, "dev.fabrium.artifact.version", {
+      identifier: "deck",
+      type: "slides",
+      title: "Deck",
+      body: "<!doctype html><html><body><section><h1>One</h1><aside data-notes>Open with the numbers.</aside></section><section data-skip><h1>Two</h1></section></body></html>",
+      "m.relates_to": { rel_type: "m.thread", event_id: deckRoot },
+    });
+    // A design system, in its own thread too.
+    const tokensRoot = await daemon.sendText(roomId, "Write down our tokens");
+    await (
+      daemon.agentClient.sendEvent as (r: string, t: string, c: Record<string, unknown>) => Promise<unknown>
+    )(roomId, "dev.fabrium.artifact.version", {
+      identifier: "tokens",
+      type: "design-system",
+      title: "Tokens",
+      body: JSON.stringify({
+        overview: "# Tokens",
+        colors: [{ name: "brand", value: "rgb(51, 85, 255)" }],
+        spacing: [{ name: "sm", value: "8px" }],
+      }),
+      "m.relates_to": { rel_type: "m.thread", event_id: tokensRoot },
+    });
     await page.route("**/config.json", (route) =>
       route.fulfill({ json: { homeserver_url: HS_URL, workforce_space: workforceSpace, previews: true } }),
     );
@@ -233,6 +259,20 @@ for (const theme of ["light", "dark"] as const) {
         await page.getByRole("tabpanel", { name: "App logs" }).waitFor();
       },
     );
+    await sweep(`${room}?thread=${encodeURIComponent(deckRoot)}&artifact=deck`, async () => {
+      await page.getByRole("navigation", { name: "Slides" }).getByRole("button", { name: /Two/ }).waitFor();
+      await page.getByTestId("speaker-notes").waitFor();
+    });
+    // The grid view: the same preview cards, larger.
+    await sweep(`${room}?thread=${encodeURIComponent(deckRoot)}&artifact=deck`, async () => {
+      await page.getByRole("button", { name: "Grid view" }).click();
+      await page.getByTestId("frame-grid").getByRole("button", { name: /Two/ }).waitFor();
+      await page.getByTestId("frame-grid").locator("iframe").first().waitFor();
+    });
+    await sweep(`${room}?thread=${encodeURIComponent(tokensRoot)}&artifact=tokens`, async () => {
+      await page.getByRole("navigation", { name: "Design system sections" }).getByRole("button", { name: /Colors/ }).click();
+      await page.getByRole("form", { name: "Add to colors" }).waitFor();
+    });
     await sweep(`${room}?pane=members`, text(human.username));
     await sweep(`${room}?pane=info`, text("Room info"));
     await sweep("/search", () => page.getByRole("main").waitFor());

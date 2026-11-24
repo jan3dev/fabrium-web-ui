@@ -2,7 +2,7 @@ import { type MatrixEvent, RoomStateEvent } from "matrix-js-sdk";
 import { useSyncExternalStore } from "react";
 import { MatrixClientPeg } from "../client/peg";
 import { subscribeRoomState } from "./matrix-subscriptions";
-import { useSpaceName } from "./use-space-name";
+import { useRoomName } from "./use-room-name";
 
 export type JoinRule = "invite" | "restricted" | "public";
 
@@ -42,6 +42,6 @@ export function useJoinRule(roomId: string): { rule: JoinRule; spaceName: string
     () => snapshot(roomId),
     () => EMPTY,
   );
-  const spaceName = useSpaceName(state.spaceId);
+  const spaceName = useRoomName(state.spaceId);
   return { rule: state.rule, spaceName };
 }

@@ -42,6 +42,10 @@ describe('shared tool text ([[ZOD094]])', () => {
     expect(AGENT_NOTIFY_INSTRUCTIONS).toMatch(/do not notify agents/i)
     expect(SEND_MESSAGE_DESCRIPTION).toMatch(/zooid_handoff/)
     expect(SEND_MESSAGE_DESCRIPTION).toMatch(/do not notify agents/i)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/<aside data-notes>/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/data-skip/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/data-transition="fade" or "slide"/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/sections a script adds at run time are not listed/)
   })
 
   it('is exactly what the MCP server serves', async () => {

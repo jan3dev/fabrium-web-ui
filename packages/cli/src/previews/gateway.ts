@@ -11,7 +11,13 @@ const MAX_HTML_BYTES = 8 * 1024 * 1024
 const DROP_REQUEST = new Set(['host', 'connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'accept-encoding', 'te', 'trailer'])
 const DROP_RESPONSE = new Set(['connection', 'keep-alive', 'transfer-encoding', 'x-frame-options', 'referrer-policy'])
 
-/** Reports the URL, title and errors to the parent; accepts back/forward/reload and pick mode (§5.3). */
+/**
+ * What the style inspector reads and may set on a picked element. Mirrors `STYLE_PROPS` in the
+ * web UI's lib/artifacts/styles.ts.
+ */
+const STYLE_PROPS = ['background-color', 'color', 'opacity', 'border-radius', 'border-style', 'border-color', 'border-width', 'box-shadow', 'filter', 'backdrop-filter', 'rotate', 'mix-blend-mode']
+
+/** Reports the URL, title and errors to the parent; accepts back/forward/reload, pick mode and style edits (§5.3). */
 export function bridgeScript(appOrigin: string): string {
   return `(() => {
   const target = ${JSON.stringify(appOrigin)};
@@ -30,13 +36,16 @@ export function bridgeScript(appOrigin: string): string {
   addEventListener('error', (e) => report([e.error || e.message]));
   addEventListener('unhandledrejection', (e) => report(['Unhandled rejection:', e.reason]));
   // Pick mode (annotate): outline the hovered element, report the clicked one instead of acting on it.
-  let picking = false, hovered = null, style = null;
-  const mark = (el, on) => { if (el && el.toggleAttribute) el.toggleAttribute('data-fab-pick', on); };
+  const PROPS = ${JSON.stringify(STYLE_PROPS)};
+  let picking = false, hovered = null, picked = null, saved = {}, style = null;
+  const mark = (el, on, attr = 'data-fab-pick') => { if (el && el.toggleAttribute) el.toggleAttribute(attr, on); };
+  // Style edits are a draft on the picked element: they go when it is left, unless the parent keeps them.
+  const restore = () => { if (picked) for (const p in saved) picked.style.setProperty(p, ...saved[p]); saved = {}; };
   const setPick = (on) => {
-    picking = on; mark(hovered, false); hovered = null;
+    picking = on; restore(); mark(hovered, false); mark(picked, false, 'data-fab-picked'); hovered = picked = null;
     if (on && !style) {
       style = document.createElement('style');
-      style.textContent = '[data-fab-pick]{outline:2px dashed rgb(59,130,246)!important;outline-offset:2px!important;cursor:crosshair!important}';
+      style.textContent = '[data-fab-pick]{outline:2px dashed rgb(59,130,246)!important;outline-offset:2px!important;cursor:crosshair!important}[data-fab-picked]{outline:2px solid rgb(37,99,235)!important;outline-offset:2px!important}';
       document.documentElement.appendChild(style);
     }
   };
@@ -68,10 +77,12 @@ export function bridgeScript(appOrigin: string): string {
     e.preventDefault(); e.stopPropagation();
     const el = e.target.nodeType === 1 ? e.target : e.target.parentElement;
     if (!el) return;
-    mark(hovered, false);
+    restore(); mark(hovered, false); mark(picked, false, 'data-fab-picked');
     const html = String(el.outerHTML || '').slice(0, 1500);
-    mark(hovered, true);
-    post({ type: 'picked', selector: selectorOf(el), html, text: String(el.innerText || el.textContent || '').trim().slice(0, 1500), href: location.href });
+    const computed = getComputedStyle(el), styles = {};
+    for (const p of PROPS) styles[p] = computed.getPropertyValue(p);
+    picked = el; mark(hovered, true); mark(picked, true, 'data-fab-picked');
+    post({ type: 'picked', selector: selectorOf(el), html, styles, text: String(el.innerText || el.textContent || '').trim().slice(0, 1500), href: location.href });
   }, true);
   addEventListener('message', (e) => {
     if (e.origin !== target || e.source !== parent || !e.data || e.data.source !== 'fabrium-preview-parent') return;
@@ -79,6 +90,13 @@ export function bridgeScript(appOrigin: string): string {
     else if (e.data.command === 'forward') history.forward();
     else if (e.data.command === 'reload') location.reload();
     else if (e.data.command === 'pick') setPick(!!e.data.on);
+    else if (e.data.command === 'style-reset') restore();
+    else if (e.data.command === 'style-keep') saved = {};
+    else if (e.data.command === 'style' && picked && PROPS.includes(e.data.prop)) {
+      const p = e.data.prop;
+      if (!(p in saved)) saved[p] = [picked.style.getPropertyValue(p), picked.style.getPropertyPriority(p)];
+      picked.style.setProperty(p, String(e.data.value ?? ''));
+    }
   });
 })();
 `

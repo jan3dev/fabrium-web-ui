@@ -202,6 +202,8 @@ describe('preview tunnel and gateway', () => {
 
     const bridge = await get(centralPort, host(url), '/__fabrium/bridge.js')
     expect(bridge.body).toContain('"http://localhost:5173"')
+    // The script is a template literal: a slip in it only shows in the browser. This parses it.
+    expect(() => new Function(bridge.body)).not.toThrow()
 
     // An upgrade (HMR WebSocket) reaches the app and bytes flow both ways.
     const hmr = await upgradeTo(centralPort, host(url))

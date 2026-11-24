@@ -45,7 +45,7 @@ export interface SendMessageResult {
   thread_id?: string
 }
 
-export const ARTIFACT_KINDS = ['html', 'svg', 'react', 'markdown', 'code'] as const
+export const ARTIFACT_KINDS = ['html', 'svg', 'react', 'markdown', 'code', 'slides', 'design', 'design-system'] as const
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number]
 
 export interface ArtifactEdit {

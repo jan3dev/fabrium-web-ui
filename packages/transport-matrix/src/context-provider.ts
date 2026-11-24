@@ -24,6 +24,7 @@ import {
   applyArtifactEdits,
   readStoredArtifact,
   sha256Hex,
+  validateArtifactContent,
   validateArtifactInput,
   type StoredArtifact,
 } from './artifacts.js'
@@ -427,6 +428,7 @@ export class MatrixContextProvider implements TransportContextProvider {
       throw new Error(`too_large: ${bytes.byteLength} bytes, the limit is ${MAX_ARTIFACT_BYTES}. Split or simplify it.`)
     }
     const type = input.type ?? previous!.type
+    validateArtifactContent(type, text)
     const content: Record<string, unknown> = {
       identifier: input.identifier,
       type,

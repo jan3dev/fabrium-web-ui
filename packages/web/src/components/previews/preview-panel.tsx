@@ -7,6 +7,7 @@ import {
 } from "@/client/fabrium-api";
 import { MatrixClientPeg } from "@/client/peg";
 import { AnnotationForm } from "@/components/artifacts/artifact-refs";
+import { StyleInspector } from "@/components/artifacts/style-inspector";
 import { AppWindowIcon, CloseIcon, EllipsisIcon } from "@/components/icons";
 import {
   DropdownMenu,
@@ -20,13 +21,15 @@ import { Spinner } from "@/components/ui/spinner";
 import { useActor } from "@/hooks/use-actor";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { usePreviewStatus } from "@/hooks/use-preview-status";
-import { usePreviewRoute, useThreadPreviews, type PreviewRef } from "@/hooks/use-previews";
+import { useStyleDraft } from "@/hooks/use-style-draft";
+import { refreshRoomPreviews, usePreviewRoute, useThreadPreviews, type PreviewRef } from "@/hooks/use-previews";
 import {
   addArtifactRefDraft,
   MAX_REF_SNIPPET,
   MAX_REFS,
   type ArtifactRefTarget,
 } from "@/lib/artifacts/refs";
+import { annotationNote } from "@/lib/artifacts/styles";
 import { copyToClipboard } from "@/lib/browser-actions";
 import { setComposerFill } from "@/lib/quote-draft-store";
 import { cn } from "@/lib/utils";
@@ -96,6 +99,12 @@ export function PreviewPanel({
   // Only people restart or stop an app, annotate it, or ask for fixes; agents use their tools.
   const isHuman = viewer.kind === "human";
   const { info, log, error } = usePreviewStatus(agentId, name);
+  // The room header lists the running apps on a slower poll: it follows this one's status
+  // once it is known (not on mount, when the header has just polled).
+  const status = info?.status;
+  useEffect(() => {
+    if (status) refreshRoomPreviews();
+  }, [status]);
   const title = info?.title ?? event?.title ?? name;
   const running = info?.status === "running";
   // Changes on every run, also when a restart goes from running to running between two polls.
@@ -150,6 +159,9 @@ export function PreviewPanel({
   const command = (c: BridgeCommand, extra?: Record<string, unknown>) => {
     if (origin) postToBridge(frame.current, origin, c, extra);
   };
+  const draft = useStyleDraft((edit) =>
+    "reset" in edit ? command("style-reset") : "keep" in edit ? command("style-keep") : command("style", edit),
+  );
 
   useEffect(() => {
     if (!origin) return;
@@ -158,12 +170,17 @@ export function PreviewPanel({
       const m = readBridgeMessage(e.data, origin!);
       if (m?.type === "location") {
         setPath(m.path);
-        // A new page has a new bridge: it starts out of pick mode.
+        // A new page has a new bridge: the old pick and its style edits are gone with the old page.
+        setTarget(null);
+        setNote("");
+        draft.picked({});
+        // The new bridge also starts out of pick mode.
         if (annotatingRef.current) postToBridge(frame.current, origin!, "pick", { on: true });
       } else if (m?.type === "console") {
         setErrors((list) => addConsoleEntry(list, m.message));
       } else if (m?.type === "picked" && annotatingRef.current) {
         setTarget({ path: m.path, target: m.target });
+        draft.picked(m.styles);
       }
     }
     window.addEventListener("message", onMessage);
@@ -195,7 +212,9 @@ export function PreviewPanel({
     else toast.error("Enter a path in this app, like /todos");
   }
 
-  function resetAnnotation() {
+  /** Drops the pick. The style edits leave the page too, unless they were added to the reply (`keep`). */
+  function resetAnnotation(keep = false) {
+    draft.reset(keep);
     setTarget(null);
     setNote("");
   }
@@ -216,8 +235,8 @@ export function PreviewPanel({
   }
 
   function addAnnotation() {
-    if (!target || !addRef(target.target, target.path, note.trim())) return;
-    resetAnnotation();
+    if (!target || !addRef(target.target, target.path, annotationNote(draft.changes, note))) return;
+    resetAnnotation(true);
     toast("Annotation added to your reply");
   }
 
@@ -324,52 +343,58 @@ export function PreviewPanel({
           }
           onOpenInNewTab={() => src && window.open(src, "_blank", "noopener,noreferrer")}
         />
-        <div className={cn("relative min-h-0 flex-1", width && "bg-surface-secondary")}>
-          {fatal || sessionError ? (
-            <p role="alert" className="p-4 text-body2 text-text-tertiary">
-              {fatal ?? sessionError}
-            </p>
-          ) : !info ? (
-            <div className="flex h-full items-center justify-center">
-              <Spinner size="medium" className="text-text-tertiary" />
-            </div>
-          ) : (
-            <>
-              {live && !phoneOnly ? (
-                <iframe
-                  key={`${session.url}#${loads}`}
-                  ref={frame}
-                  src={src}
+        <div className="flex min-h-0 flex-1">
+          <div className={cn("relative min-h-0 min-w-0 flex-1", width && "bg-surface-secondary")}>
+            {fatal || sessionError ? (
+              <p role="alert" className="p-4 text-body2 text-text-tertiary">
+                {fatal ?? sessionError}
+              </p>
+            ) : !info ? (
+              <div className="flex h-full items-center justify-center">
+                <Spinner size="medium" className="text-text-tertiary" />
+              </div>
+            ) : (
+              <>
+                {live && !phoneOnly ? (
+                  <iframe
+                    key={`${session.url}#${loads}`}
+                    ref={frame}
+                    src={src}
+                    title={title}
+                    data-testid="preview-frame"
+                    className={cn(
+                      "mx-auto block h-full max-w-full border-0 bg-background",
+                      width ? "border-x border-border" : "w-full",
+                    )}
+                    style={width ? { width } : undefined}
+                    sandbox={PREVIEW_FRAME_SANDBOX}
+                    referrerPolicy="no-referrer"
+                    allow=""
+                  />
+                ) : running ? (
+                  <div className="flex h-full items-center justify-center">
+                    <Spinner size="medium" className="text-text-tertiary" />
+                  </div>
+                ) : null}
+                <PreviewState
+                  status={info.status}
                   title={title}
-                  data-testid="preview-frame"
-                  className={cn(
-                    "mx-auto block h-full max-w-full border-0 bg-background",
-                    width ? "border-x border-border" : "w-full",
-                  )}
-                  style={width ? { width } : undefined}
-                  sandbox={PREVIEW_FRAME_SANDBOX}
-                  referrerPolicy="no-referrer"
-                  allow=""
+                  agentName={agent.displayName}
+                  exitCode={info.exit_code}
+                  since={info.since}
+                  log={log}
+                  phoneOnly={phoneOnly}
+                  onRestart={isHuman ? restart : undefined}
+                  onStop={isHuman ? stop : undefined}
+                  onAskFix={isHuman && log ? () => askToFix(logTail(log), "App log") : undefined}
                 />
-              ) : running ? (
-                <div className="flex h-full items-center justify-center">
-                  <Spinner size="medium" className="text-text-tertiary" />
-                </div>
-              ) : null}
-              <PreviewState
-                status={info.status}
-                title={title}
-                agentName={agent.displayName}
-                exitCode={info.exit_code}
-                since={info.since}
-                log={log}
-                phoneOnly={phoneOnly}
-                onRestart={isHuman ? restart : undefined}
-                onStop={isHuman ? stop : undefined}
-                onAskFix={isHuman && log ? () => askToFix(logTail(log), "App log") : undefined}
-              />
-            </>
-          )}
+              </>
+            )}
+          </div>
+          {/* ponytail: desktop only; on a phone the panel has no room beside the app. Add a sheet when asked. */}
+          {annotating && live && !isMobile && target?.target.kind === "element" ? (
+            <StyleInspector selector={target.target.selector} values={draft.values} onChange={draft.change} />
+          ) : null}
         </div>
         {annotating && live ? (
           <div className="shrink-0 border-t border-border p-3" data-testid="preview-annotation-bar">
@@ -379,7 +404,7 @@ export function PreviewPanel({
                 note={note}
                 onNoteChange={setNote}
                 onAdd={addAnnotation}
-                onCancel={resetAnnotation}
+                onCancel={() => resetAnnotation()}
               />
             ) : (
               <p className="text-caption1 text-text-tertiary">Click an element in the preview to annotate it.</p>

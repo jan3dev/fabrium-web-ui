@@ -1,4 +1,5 @@
 import { onePath, readTarget, type ArtifactRefTarget } from "@/lib/artifacts/refs";
+import { readStyles, type Styles } from "@/lib/artifacts/styles";
 
 // The parent side of the bridge script the gateway adds to every page of a preview
 // (PREVIEWS_SPEC.md §5.3). The frame is the agent's app: everything it sends is untrusted.
@@ -10,9 +11,10 @@ export const MAX_CONSOLE_ENTRIES = 50;
 export type BridgeMessage =
   | { type: "location"; path: string }
   | { type: "console"; message: string }
-  | { type: "picked"; path: string; target: Extract<ArtifactRefTarget, { kind: "element" }> };
+  | { type: "picked"; path: string; target: Extract<ArtifactRefTarget, { kind: "element" }>; styles: Styles };
 
-export type BridgeCommand = "back" | "forward" | "reload" | "pick";
+/** `style` sets one property on the picked element; `style-reset` drops the edits, `style-keep` leaves them in the page. */
+export type BridgeCommand = "back" | "forward" | "reload" | "pick" | "style" | "style-reset" | "style-keep";
 
 /** The page path of an href on the session origin, or null. */
 export function pathOn(href: unknown, origin: string): string | null {
@@ -40,7 +42,7 @@ export function readBridgeMessage(data: unknown, origin: string): BridgeMessage 
   if (d.type === "picked") {
     const path = pathOn(d.href, origin);
     const target = readTarget({ ...d, kind: "element" });
-    return path && target?.kind === "element" ? { type: "picked", path, target } : null;
+    return path && target?.kind === "element" ? { type: "picked", path, target, styles: readStyles(d.styles) } : null;
   }
   return null;
 }

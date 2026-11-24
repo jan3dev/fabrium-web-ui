@@ -51,6 +51,32 @@ export function validateArtifactInput(input: ArtifactInput): void {
   }
 }
 
+/**
+ * Checks the final content (after `edits`) of the kinds whose panel mode
+ * needs a structure; the web reader re-checks the details. Throws for the model.
+ */
+export function validateArtifactContent(type: ArtifactKind, content: string): void {
+  if ((type === "slides" || type === "design") && !/<section[\s>]/i.test(content)) {
+    const unit = type === "slides" ? "slide" : "screen";
+    throw new Error(
+      `invalid_content: a "${type}" artifact needs one <section> per ${unit} as direct children of <body>.`,
+    );
+  }
+  if (type === "design-system") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(
+        'invalid_content: a "design-system" artifact is one JSON object with any of: overview, colors, spacing, typography, radius, shadows, components, assets.',
+      );
+    }
+  }
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

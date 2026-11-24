@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyArtifactEdits,
   ARTIFACT_EVENT_TYPE,
+  validateArtifactContent,
   validateArtifactInput,
 } from "./artifacts.js";
 import { MatrixContextProvider } from "./context-provider.js";
@@ -44,6 +45,36 @@ describe("validateArtifactInput", () => {
     expect(() =>
       validateArtifactInput({ identifier: "a", type: "html", content: "x" }),
     ).not.toThrow();
+  });
+});
+
+describe("validateArtifactContent", () => {
+  it("wants a <section> in slides and design", () => {
+    for (const type of ["slides", "design"] as const) {
+      expect(() =>
+        validateArtifactContent(type, "<body><section data-name=\"A\">a</section></body>"),
+      ).not.toThrow();
+      expect(() => validateArtifactContent(type, "<SECTION>a</SECTION>")).not.toThrow();
+      expect(() => validateArtifactContent(type, "<body><div>a</div></body>")).toThrow(
+        `invalid_content: a "${type}" artifact needs one <section>`,
+      );
+      expect(() => validateArtifactContent(type, "<sections>a</sections>")).toThrow(/invalid_content/);
+    }
+  });
+
+  it("wants a design system to be one JSON object", () => {
+    expect(() => validateArtifactContent("design-system", '{"colors":[]}')).not.toThrow();
+    expect(() => validateArtifactContent("design-system", "{}")).not.toThrow();
+    for (const bad of ["[]", "null", "1", '"x"', "{colors:", ""]) {
+      expect(() => validateArtifactContent("design-system", bad)).toThrow(
+        /invalid_content: a "design-system" artifact is one JSON object/,
+      );
+    }
+  });
+
+  it("leaves the other kinds alone", () => {
+    expect(() => validateArtifactContent("html", "<p>x</p>")).not.toThrow();
+    expect(() => validateArtifactContent("markdown", "")).not.toThrow();
   });
 });
 
@@ -131,6 +162,27 @@ describe("MatrixContextProvider.sendArtifact", () => {
       title: "Page",
       body: "<b>v3</b>",
     });
+  });
+
+  it("refuses edits that break a design system's JSON", async () => {
+    const { provider, sendCustomEvent } = setup([
+      {
+        sender: me,
+        content: {
+          identifier: "tokens",
+          type: "design-system",
+          title: "Tokens",
+          body: '{"colors":[{"name":"brand","value":"#3355ff"}]}',
+        },
+      },
+    ]);
+    await expect(
+      provider.sendArtifact("!r:hs", "$root", {
+        identifier: "tokens",
+        edits: [{ old_str: '"#3355ff"}]}', new_str: '"#3355ff"' }],
+      }),
+    ).rejects.toThrow(/invalid_content: a "design-system"/);
+    expect(sendCustomEvent).not.toHaveBeenCalled();
   });
 
   it("refuses edits with no earlier version", async () => {

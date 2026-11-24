@@ -3,7 +3,10 @@ import {
   CodeIcon,
   ComponentIcon,
   FileTextIcon,
+  FrameIcon,
   ImageIcon,
+  PaletteIcon,
+  PresentationIcon,
 } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import type { ArtifactKind, ArtifactVersion } from "@/model/types";
@@ -14,6 +17,9 @@ const KIND_LABEL: Record<ArtifactKind, string> = {
   react: "Component",
   markdown: "Document",
   code: "Code",
+  slides: "Slides",
+  design: "Design",
+  "design-system": "Design system",
 };
 
 const KIND_ICON: Record<ArtifactKind, typeof CodeIcon> = {
@@ -22,6 +28,9 @@ const KIND_ICON: Record<ArtifactKind, typeof CodeIcon> = {
   react: ComponentIcon,
   markdown: FileTextIcon,
   code: CodeIcon,
+  slides: PresentationIcon,
+  design: FrameIcon,
+  "design-system": PaletteIcon,
 };
 
 export function artifactKindLabel(

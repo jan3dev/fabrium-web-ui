@@ -15,6 +15,7 @@ import { useMyPowerLevel } from "../../hooks/use-my-power-level";
 import { useRoomFavorite } from "../../hooks/use-room-favorite";
 import { useRoomNotifState } from "../../hooks/use-room-notif-state";
 import { useRoomTopic } from "../../hooks/use-room-topic";
+import { useRoomName } from "../../hooks/use-room-name";
 import type { RoomNotifState } from "../../lib/matrix/notification-prefs";
 import { RoomAvatar } from "../room-avatar";
 import { MemberPanel } from "./member-panel";
@@ -58,6 +59,7 @@ function InfoView({ roomId, onNavigate, onClose }: Omit<RightPaneProps, "view" |
   const client = MatrixClientPeg.safeGet();
   const room = client?.getRoom(roomId);
   const topic = useRoomTopic(roomId);
+  const roomName = useRoomName(roomId) ?? roomId;
   const { rule, spaceName } = useJoinRule(roomId);
   const { isFavorite, toggle: toggleFavorite } = useRoomFavorite(roomId);
   const myPL = useMyPowerLevel(roomId);
@@ -70,7 +72,6 @@ function InfoView({ roomId, onNavigate, onClose }: Omit<RightPaneProps, "view" |
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const { Icon: RuleIcon, text: ruleText } = RULE_LABEL[rule];
-  const roomName = room?.name ?? roomId;
   const alias = (room as unknown as { getCanonicalAlias?: () => string | null })?.getCanonicalAlias?.() ?? null;
   const memberCount = room?.getJoinedMemberCount() ?? 0;
 

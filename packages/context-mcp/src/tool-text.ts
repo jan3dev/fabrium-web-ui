@@ -27,6 +27,10 @@ export const SEND_MESSAGE_DESCRIPTION =
 export const ARTIFACT_DESCRIPTION =
   'Show content to the user in the side panel of the chat, with live preview and version history. The user cannot see files in your workspace; this is how they see what you made. ' +
   'Types: "html" (complete self-contained page, inline CSS/JS), "svg", "react" (one component with `export default`; React hooks are globals, Tailwind classes work, no other libraries), "markdown" (a document), "code" (set `language`; shown, not run). ' +
+  '"slides": one HTML document; each slide is a <section> that is a direct child of <body>, a 1920x1080 px canvas sized in px; shared CSS in one <style> in <head>; optional data-title names a slide; speaker notes go in an <aside data-notes> inside the slide (plain text, never shown on it); data-transition="fade" or "slide" on <body> or a section animates Present. ' +
+  '"design": one HTML document; each screen is a <section> that is a direct child of <body>, with data-name (e.g. "Home") and optional data-width and data-height in px (default 1440x900, phone 390x844). ' +
+  'In both, data-skip on a section leaves it out of Present and the PDF export; sections a script adds at run time are not listed. ' +
+  '"design-system": one JSON object with any of: overview (markdown), colors, spacing, typography, radius, shadows (each a list of {name, value, description?}; token names kebab-case; a typography value is a CSS font shorthand, e.g. "600 32px/1.2 Inter, sans-serif"), components (list of {name, description?, html}), assets (list of {name, svg}). Component html may use the tokens as CSS variables --color-<name>, --spacing-<name>, --font-<name>, --radius-<name>, --shadow-<name>. ' +
   'Previews have NO network: no fetch, CDN scripts, web fonts or remote images; no localStorage, cookies, alert, popups. Inline everything; use sample data. ' +
   'To create or fully rewrite, pass `content`. To change an artifact you created earlier in this thread, keep the SAME identifier and pass `edits` (find/replace pairs; each old_str copied verbatim from the latest version and unique in it) for small changes, or the full `content` for large ones. ' +
   'Users can annotate parts of an artifact; their message then lists each annotation with the artifact identifier, version, the selected element or text, and their note. Under ~500 KB.'
@@ -38,14 +42,24 @@ export const ARTIFACT_DESCRIPTION =
  */
 export const ARTIFACT_INSTRUCTIONS =
   'The user reads you in a chat that shows artifacts in a side panel with a live preview; files you write in your workspace are invisible to them. ' +
-  'Call zooid_artifact without being asked whenever your answer includes: a web page, UI component, mockup or prototype (html or react); an SVG image, chart or diagram; a document over ~20 lines such as a plan, spec, report, README, proposal or email draft (markdown); or a complete file or script the user should read or reuse (code). ' +
+  'Call zooid_artifact without being asked whenever your answer includes: a working web page, UI component or interactive prototype (html or react); a presentation (slides); a visual design (design); a design system (design-system); an SVG image, chart or diagram; a document over ~20 lines such as a plan, spec, report, README, proposal or email draft (markdown); or a complete file or script the user should read or reuse (code). ' +
+  'Pick the type from the request: a presentation, deck, pitch or slides is "slides"; a visual design, mockup, wireframe, screen, landing page or app UI design is "design"; a design system, style guide, brand guidelines or design tokens is "design-system"; a working page or interactive prototype stays "html" or "react". ' +
   'Also call it when you create or change such a file on disk and the user should look at it. ' +
-  'When the user asks to change something you showed as an artifact, update the same identifier. ' +
+  'When the user asks to change something you showed as an artifact, update the same identifier; changing one slide, screen or token is an `edits` call on it. ' +
   'Keep the chat message short: say what you made, do not repeat the artifact content in it. Short answers, explanations and snippets under ~15 lines stay in the message.'
 
 // A local value, not core's ARTIFACT_KINDS: the bin must stay free of @zooid/core
 // at runtime (tsup.config.ts). The Record fails to compile if the kinds drift.
-const KINDS: Record<ArtifactKind, true> = { html: true, svg: true, react: true, markdown: true, code: true }
+const KINDS: Record<ArtifactKind, true> = {
+  html: true,
+  svg: true,
+  react: true,
+  markdown: true,
+  code: true,
+  slides: true,
+  design: true,
+  'design-system': true,
+}
 /** The artifact kinds, for the MCP and pi tool schemas. */
 export const ARTIFACT_KINDS = Object.keys(KINDS) as [ArtifactKind, ...ArtifactKind[]]
 
