@@ -11,7 +11,10 @@ export interface AgentRecord {
   description: string
   model: string
   tag: string | null
+  /** The text label of phase 1: stored, never read. */
   project: string | null
+  /** The project of the agent, or null for a personal agent. An absent value is read as null. */
+  project_id: string | null
   vm: string | null
   rooms: string[]
 }
@@ -35,6 +38,7 @@ function isRecord(value: unknown): value is AgentRecord {
     typeof r.model === 'string' &&
     isText(r.tag) &&
     isText(r.project) &&
+    (r.project_id === undefined || isText(r.project_id)) &&
     (r.vm === null || (typeof r.vm === 'string' && VM_NAME_RE.test(r.vm))) &&
     Array.isArray(r.rooms) &&
     r.rooms.every((room) => typeof room === 'string')
@@ -42,7 +46,7 @@ function isRecord(value: unknown): value is AgentRecord {
 }
 
 /** The JSON answer. A status below 500 passes on with its body. Any other failure is a 502. */
-async function call(cp: ControlPlane, method: string, path: string, body?: unknown): Promise<unknown> {
+export async function call(cp: ControlPlane, method: string, path: string, body?: unknown): Promise<unknown> {
   const upstream = await cp.request(method, path, body)
   const text = await readBody(upstream)
   let json: unknown
@@ -63,7 +67,7 @@ async function call(cp: ControlPlane, method: string, path: string, body?: unkno
 
 function record(value: unknown): AgentRecord {
   if (!isRecord(value)) throw invalid()
-  return value
+  return { ...value, project_id: value.project_id ?? null }
 }
 
 export async function fetchRecords(cp: ControlPlane): Promise<AgentRecord[]> {

@@ -14,6 +14,7 @@ import type { AgentRecord } from './agent-records.js'
 import { createFakeMatrix } from './fake-matrix.js'
 import { mountFabriumApi, type FabriumApiDeps } from './index.js'
 import { HAVEN_PRICING_URL } from './models.js'
+import type { Project } from './project-records.js'
 
 export const CONTROL_PLANE_URL = 'https://control.example.org'
 export const CONTROL_PLANE_KEY = 'tenant-key-0123456789'
@@ -50,10 +51,14 @@ export const stalledResponse =
     )
 
 /**
- * Serves the agent routes of contracts section 1 from memory on the fake control plane, with its two 409 rules.
- * A later `controlPlane.on` for the same route wins, so a test can still make one route fail.
+ * Serves the agent routes of contracts section 1 from memory on the fake control plane, with its two 409 rules
+ * and the 400 of an unknown project. A later `controlPlane.on` for the same route wins, so a test can still make
+ * one route fail.
  */
-export function fakeAgentStore(controlPlane: ReturnType<typeof createTestApi>['controlPlane']): {
+export function fakeAgentStore(
+  controlPlane: ReturnType<typeof createTestApi>['controlPlane'],
+  projects: Project[] = [],
+): {
   records: AgentRecord[]
 } {
   const records: AgentRecord[] = []
@@ -66,10 +71,17 @@ export function fakeAgentStore(controlPlane: ReturnType<typeof createTestApi>['c
   const nameInUse = (name: string, vm: string | null, id?: string) =>
     vm !== null && records.some((r) => r.vm === vm && r.name === name && r.id !== id)
   type Body = Partial<AgentRecord>
+  // Only a PUT reads "" as "clear": in a POST it is an unknown project.
+  const unknownProject = (b: Body, put: boolean) =>
+    b.project_id !== undefined &&
+    b.project_id !== null &&
+    !(put && b.project_id === '') &&
+    !projects.some((p) => p.id === b.project_id)
 
   controlPlane.on('GET', '/v1/agents', () => jsonResponse(200, records))
   controlPlane.on('POST', '/v1/agents', (req) => {
     const b = req.body as Body
+    if (unknownProject(b, false)) return jsonResponse(400, { error: 'unknown project' })
     const record: AgentRecord = {
       id: randomBytes(16).toString('hex'),
       name: b.name!,
@@ -78,6 +90,7 @@ export function fakeAgentStore(controlPlane: ReturnType<typeof createTestApi>['c
       model: b.model!,
       tag: b.tag || null,
       project: b.project || null,
+      project_id: b.project_id ?? null,
       vm: b.vm ?? null,
       rooms: b.rooms ?? [],
     }
@@ -89,6 +102,7 @@ export function fakeAgentStore(controlPlane: ReturnType<typeof createTestApi>['c
     const record = find(req)
     if (!record) return jsonResponse(404, { error: 'not found' })
     const b = req.body as Body
+    if (unknownProject(b, true)) return jsonResponse(400, { error: 'unknown project' })
     if (b.vm !== undefined) {
       if (record.vm !== null) return jsonResponse(409, { error: 'vm already set' })
       if (nameInUse(record.name, b.vm, record.id)) return jsonResponse(409, { error: 'name in use' })
@@ -99,6 +113,7 @@ export function fakeAgentStore(controlPlane: ReturnType<typeof createTestApi>['c
       // "" clears tag and project.
       b.tag === undefined ? {} : { tag: b.tag || null },
       b.project === undefined ? {} : { project: b.project || null },
+      b.project_id === undefined ? {} : { project_id: b.project_id || null },
     )
     return jsonResponse(200, record)
   })
@@ -109,6 +124,88 @@ export function fakeAgentStore(controlPlane: ReturnType<typeof createTestApi>['c
     return new Response(null, { status: 204 })
   })
   return { records }
+}
+
+/**
+ * Serves the project routes of contracts section 1 and `PUT /v1/vms/{id}/owner` from memory. A project is in use
+ * while a record of `world.records` or a VM of `world.vms` has it. The owner route changes the entry of
+ * `world.vms` with that id; `registered: false` stands for a VM without a registry row.
+ */
+export function fakeProjectStore(
+  controlPlane: ReturnType<typeof createTestApi>['controlPlane'],
+  projects: Project[],
+  world: { records: AgentRecord[]; vms: Record<string, unknown>[] },
+): void {
+  const BY_ID = /^\/v1\/projects\/([^/]+)$/
+  const idOf = (req: ControlPlaneRequest) => decodeURIComponent(BY_ID.exec(req.path.split('?')[0]!)?.[1] ?? '')
+  const lower = (s: string) => s.replace(/[A-Z]/g, (c) => c.toLowerCase())
+  const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+  /** The 400 or 409 answer of a name, or undefined when `{"name"}` is fine for the project `id`. */
+  function refuse(body: unknown, id?: string): Response | undefined {
+    const b = body as { name?: unknown } | null
+    if (typeof b !== 'object' || b === null || Object.keys(b).join() !== 'name' || typeof b.name !== 'string') {
+      return jsonResponse(400, { error: 'invalid request body' })
+    }
+    const name = b.name
+    const length = [...name].length
+    if (length < 1 || length > 64 || /[\u0000-\u001f\u007f-\u009f]/.test(name) || name.trim() !== name) {
+      return jsonResponse(400, { error: 'invalid project name' })
+    }
+    if (projects.some((p) => p.id !== id && lower(p.name) === lower(name))) {
+      return jsonResponse(409, { error: 'name in use' })
+    }
+    return undefined
+  }
+  const now = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z')
+
+  controlPlane.on('GET', '/v1/projects', () =>
+    jsonResponse(
+      200,
+      [...projects].sort((a, b) => order(lower(a.name), lower(b.name)) || order(a.id, b.id)),
+    ),
+  )
+  controlPlane.on('POST', '/v1/projects', (req) => {
+    const refused = refuse(req.body)
+    if (refused) return refused
+    const at = now()
+    const name = (req.body as { name: string }).name
+    const made = { id: randomBytes(16).toString('hex'), name, created_at: at, updated_at: at }
+    projects.push(made)
+    return jsonResponse(201, made)
+  })
+  controlPlane.on('PUT', BY_ID, (req) => {
+    const project = projects.find((p) => p.id === idOf(req))
+    if (!project) return jsonResponse(404, { error: 'not found' })
+    const refused = refuse(req.body, project.id)
+    if (refused) return refused
+    Object.assign(project, { name: (req.body as { name: string }).name, updated_at: now() })
+    return jsonResponse(200, project)
+  })
+  controlPlane.on('DELETE', BY_ID, (req) => {
+    const project = projects.find((p) => p.id === idOf(req))
+    if (!project) return jsonResponse(404, { error: 'not found' })
+    const has = (x: { project_id?: unknown }) => x.project_id === project.id
+    if (world.records.some(has) || world.vms.some(has)) return jsonResponse(409, { error: 'project in use' })
+    projects.splice(projects.indexOf(project), 1)
+    return new Response(null, { status: 204 })
+  })
+  controlPlane.on('PUT', /^\/v1\/vms\/[^/]+\/owner$/, (req) => {
+    const b = req.body as { project_id?: unknown; creator?: unknown } | null
+    const keys = typeof b === 'object' && b !== null ? Object.keys(b) : []
+    if (keys.length === 0 || keys.some((k) => k !== 'project_id' && k !== 'creator')) {
+      return jsonResponse(400, { error: 'invalid request body' })
+    }
+    if (b!.project_id !== undefined && b!.project_id !== '' && !projects.some((p) => p.id === b!.project_id)) {
+      return jsonResponse(400, { error: 'unknown project' })
+    }
+    const id = decodeURIComponent(req.path.split('/')[3]!)
+    const vm = world.vms.find((v) => v.id === id)
+    if (!vm) return jsonResponse(404, { error: 'not found' })
+    if (vm.registered === false) return jsonResponse(409, { error: 'vm has no registry row' })
+    if (b!.project_id !== undefined) vm.project_id = b!.project_id || null
+    if (b!.creator !== undefined) vm.creator = b!.creator
+    return jsonResponse(200, vm)
+  })
 }
 
 export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
@@ -127,6 +224,8 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
       replies.push({ method, path, reply })
     },
   }
+  // A tenant without projects, until a test installs the route.
+  controlPlane.on('GET', '/v1/projects', () => jsonResponse(200, []))
 
   const controlPlaneFetch = async (url: string, init?: RequestInit): Promise<Response> => {
     const parsed = new URL(url)
