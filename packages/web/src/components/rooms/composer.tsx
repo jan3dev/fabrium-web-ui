@@ -15,7 +15,7 @@ import {
 import { buildQuoteContent } from "@/lib/matrix/quote";
 import { setComposerFill, setQuoteDraft, useComposerFill, useQuoteDraft } from "@/lib/quote-draft-store";
 import { QuoteChip } from "./quote-chip";
-import { CreateChip, CreateMenu } from "./create-menu";
+import { CreateChip, CreateExamples, CreateMenu } from "./create-menu";
 import {
   ARTIFACT_HINT_FIELD,
   createLine,
@@ -68,11 +68,13 @@ export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }:
   const [hintState, setHintState] = useState<{ at: string; type: CreateType | null }>({ at: hintAt, type: null });
   const hint = hintState.at === hintAt ? hintState.type : null;
   const setHint = (type: CreateType | null) => setHintState({ at: hintAt, type });
+  // Example prompts show while the field is empty (spec §3.1).
+  const [typed, setTyped] = useState(false);
   // The daemon picks the default per kind, so the chip names the one the hinted kind gets.
   const activeSystem = activeDesignSystem(
     designSystems.systems,
     designSystems.prefs,
-    hint === "slides" || hint === "design" ? hint : undefined,
+    hint === "slides" || hint === "design" || hint === "motion" ? hint : undefined,
   );
   const fill = useComposerFill(roomId, threadId);
   // Text another view put here (a preview's "Ask agent to fix"): taken once, then cleared.
@@ -229,6 +231,7 @@ export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }:
   const header = (
     <>
       {hint && <CreateChip type={hint} onRemove={() => setHint(null)} />}
+      {hint && !typed && <CreateExamples type={hint} onPick={(prompt) => input.current?.fill(prompt)} />}
       {quoteDraft && (
         <QuoteChip draft={quoteDraft} onRemove={() => setQuoteDraft(roomId, threadId, null)} />
       )}
@@ -260,6 +263,7 @@ export function Composer({ roomId, threadRootEventId, workforceSpaceId = null }:
       footer={<DesignSystemChip name={activeSystem?.name ?? null} />}
       placeholder={threadScoped ? "Reply in thread…" : undefined}
       onSubmit={send}
+      onTextChange={(text) => setTyped(text.trim() !== "")}
     />
   );
 }

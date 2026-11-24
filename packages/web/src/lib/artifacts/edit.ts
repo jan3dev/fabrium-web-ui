@@ -1,6 +1,7 @@
 import { lineDiff } from "@/lib/line-diff";
 import { isObject, LIMITS, type Raw, type TokenSection, tokenName } from "./design-system";
 import { DEFAULT_SLIDE_SIZE, FRAME_SIZE, type FrameKind, MAX_NAME, MAX_NOTES, type SlideSize } from "./frames";
+import { clampDuration } from "./motion";
 
 /**
  * User edits (spec §5.3, level 2): pure operations on the artifact source, string in,
@@ -199,6 +200,11 @@ export function resizeFrame(html: string, i: number, width: number, height: numb
   );
 }
 
+/** A motion scene's `data-duration` in ms, clamped as the reader clamps it (spec §6.11). Order is `moveFrame`. */
+export function setSceneDuration(html: string, i: number, ms: number): string {
+  return editFrame(html, i, (raw) => withAttrs(raw, (el) => el.setAttribute("data-duration", String(clampDuration(ms)))));
+}
+
 /**
  * Pasted text after frame `after`, or null when it holds no `<section>`. The text comes
  * from outside: it is parsed inert and only its first section, re-serialized, is kept.
@@ -334,13 +340,18 @@ export function withFrames(html: string, sections: readonly string[]): string {
 
 // ── Design system (JSON) ────────────────────────────────────────────────────
 
-/** Parses, edits and re-serializes with the source's indent, so a diff shows only the edit. */
+/** `data` as JSON in the indent of `text` (a design system, a whiteboard), so a diff shows only the edit. */
+export function jsonLike(text: string, data: unknown): string {
+  const indent = /^\{\s*?\n([ \t]+)/.exec(text)?.[1] ?? (text.trim().includes("\n") ? 2 : undefined);
+  return JSON.stringify(data, null, indent) + (text.endsWith("\n") ? "\n" : "");
+}
+
+/** Parses, edits and re-serializes with the source's indent. */
 function editJson(text: string, edit: (data: Raw) => void): string {
   const data: unknown = JSON.parse(text);
   if (!isObject(data)) throw new Error("The design system is not a JSON object.");
   edit(data);
-  const indent = /^\{\s*?\n([ \t]+)/.exec(text)?.[1] ?? (text.trim().includes("\n") ? 2 : undefined);
-  return JSON.stringify(data, null, indent) + (text.endsWith("\n") ? "\n" : "");
+  return jsonLike(text, data);
 }
 
 const findToken = (data: Raw, section: TokenSection, name: string) =>

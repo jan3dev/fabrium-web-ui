@@ -8,12 +8,10 @@ import {
   CloseIcon,
   CodeIcon,
   CopyIcon,
-  DownloadIcon,
   EyeIcon,
   FileDiffIcon,
   InfoIcon,
   PanelRightIcon,
-  PrinterIcon,
   WarningIcon,
 } from "@/components/icons";
 import { DiffView } from "@/components/timeline/diff-view";
@@ -41,25 +39,30 @@ import {
 import { useActor } from "@/hooks/use-actor";
 import { useAgentFocus } from "@/hooks/use-agent-focus";
 import { useArtifactComments } from "@/hooks/use-artifact-comments";
-import { assetDataUrls, useArtifactAssets } from "@/hooks/use-artifact-assets";
+import { assetDataUrls, uploadAsset, useArtifactAssets } from "@/hooks/use-artifact-assets";
 import { headAuthor, useArtifactDraft } from "@/hooks/use-artifact-draft";
 import { type EditorMode, useCanvasEditor } from "@/hooks/use-canvas-editor";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useGuestIds } from "@/hooks/use-member-roles";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useMotionClock } from "@/hooks/use-motion-clock";
 import { useMyPowerLevel } from "@/hooks/use-my-power-level";
 import { useDesignSystems } from "@/hooks/use-design-systems";
 import { useStyleDraft } from "@/hooks/use-style-draft";
 import { useThreadEntries } from "@/hooks/use-timeline-entries";
 import {
   addArtifactRefDraft,
+  type ArtifactRefDraft,
   type ArtifactRefTarget,
   MAX_REFS,
+  type Point,
+  sketchTarget,
+  useArtifactRefDrafts,
 } from "@/lib/artifacts/refs";
 import { inlineAssets } from "@/lib/artifacts/assets";
 import { type Box, canStructure, editKeyOf, isCanvasKind, type KeyLike } from "@/lib/artifacts/canvas";
 import { type ArtifactComment, RESOLVE_KEY } from "@/lib/artifacts/comments";
-import { CURSOR_PIN, PICK_PIN, type PinRequest } from "@/lib/artifacts/pins";
+import { CURSOR_PIN, PICK_PIN, type PinRequest, SKETCH_PIN } from "@/lib/artifacts/pins";
 import { sendReaction } from "@/lib/matrix/reactions";
 import {
   addValueRef,
@@ -89,6 +92,7 @@ import {
   setFrameNotes,
   setFrameSkip,
   setOverview,
+  setSceneDuration,
   setTokenField,
   slideLayouts,
   withFrames,
@@ -107,10 +111,27 @@ import {
   clampZoom,
   ZOOM_KEYS,
 } from "@/lib/artifacts/frames";
-import { addPreviewError, composeFitRequest, composeFixRequest } from "@/lib/artifacts/runtime";
-import { buildArtifactSrcdoc } from "@/lib/artifacts/srcdoc";
+import { readScenes, type Scene, sceneStart } from "@/lib/artifacts/motion";
+import {
+  addPreviewError,
+  type AgentRequest,
+  composeAgentRequest,
+  composeFitRequest,
+  composeFixRequest,
+} from "@/lib/artifacts/runtime";
+import { buildArtifactSrcdoc, PreviewMessage } from "@/lib/artifacts/srcdoc";
 import { clampTweak, readTweaks, tweakMessage, type TweakValue, writeTweaks } from "@/lib/artifacts/tweaks";
 import { annotationNote } from "@/lib/artifacts/styles";
+import {
+  areaTarget,
+  boardCommentTarget,
+  type BoardRequest,
+  boardTargetOf,
+  composeBoardRequest,
+  editBoard,
+  findBoardAssets,
+  readBoard,
+} from "@/lib/artifacts/whiteboard";
 import { copyToClipboard, downloadBlob } from "@/lib/browser-actions";
 import { isEditableKeyboardTarget } from "@/lib/keyboard-shortcuts";
 import { cn } from "@/lib/utils";
@@ -131,15 +152,19 @@ import { CommentList, FramePins } from "./artifact-comments";
 import { AnnotationForm } from "./artifact-refs";
 import { ArtifactTextView } from "./artifact-text-view";
 import { CanvasToolbar } from "./canvas-toolbar";
+import { ExportMenu } from "./export-menu";
 import { FloatingToolbar } from "./floating-toolbar";
 import { LayersList } from "./layers-list";
+import { MotionBar, MotionScenes } from "./motion-controls";
 import { DesignSystemEditor } from "./design-system-editor";
+import { SketchOverlay, DrawToggle } from "./sketch-overlay";
 import { SpeakerNotesField } from "./speaker-notes-field";
 import { DesignSystemNav } from "./design-system-nav";
 import { LayoutPicker } from "./layout-picker";
 import { FrameControls, FrameRail, type PresentMode } from "./frame-rail";
 import { FrameProperties, type PaletteColor, StyleInspector } from "./style-inspector";
 import { TweaksPanel } from "./tweaks-panel";
+import { WhiteboardBoard } from "./whiteboard-board";
 
 type Tab = "preview" | "code" | "changes";
 /** The side panel's tabs, in their order. */
@@ -157,6 +182,8 @@ const EXTENSION: Record<ArtifactKind, string> = {
   slides: "html",
   design: "html",
   "design-system": "json",
+  whiteboard: "json",
+  motion: "html",
 };
 
 /**
@@ -165,6 +192,7 @@ const EXTENSION: Record<ArtifactKind, string> = {
  * wait in the thread composer until the user sends them.
  */
 const NO_TWEAKS: Record<string, TweakValue> = {};
+const NO_SCENES: Scene[] = [];
 
 export function ArtifactPanel({
   roomId,
@@ -219,18 +247,25 @@ export function ArtifactPanel({
   );
   const [dsChoice, setDsChoice] = useState<{ id: string; key: DesignSystemSection }>({ id: "", key: "overview" });
   const dsSections = useMemo(() => (system ? designSystemSections(system) : []), [system]);
+  // Whiteboard (spec §6.10): drawn in the app, never in the frame; null when the text is no board.
+  const whiteboard = current?.kind === "whiteboard";
+  const board = useMemo(() => (whiteboard && text !== null ? readBoard(text) : null), [whiteboard, text]);
   // Slides and design: the frames, read from the source (never from the frame).
   const frameKind = current && isFrameKind(current.kind) ? current.kind : null;
   const frames = useMemo(
     () => (frameKind && text !== null ? readFrames(frameKind, text) : []),
     [frameKind, text],
   );
+  // Motion (spec §6.11): the scenes, read from the source; the app's clock drives the frame.
+  const motion = current?.kind === "motion";
+  const scenes = useMemo(() => (motion && text !== null ? readScenes(text) : NO_SCENES), [motion, text]);
   const section = dsSections.find((s) => s.key === dsChoice.key && dsChoice.id === current?.identifier)?.key ?? dsSections[0]?.key;
 
   const [channel] = useState(() => `artifact_${crypto.randomUUID()}`);
   const framed =
     previewable &&
     current.kind !== "markdown" &&
+    !whiteboard &&
     tab === "preview" &&
     (current.kind !== "design-system" || (section !== undefined && section !== "overview"));
   // Add slide: the layout picker for a new slide after `picker`, in the deck's design.
@@ -277,6 +312,10 @@ export function ArtifactPanel({
   const pinSink = useRef<((boxes: Map<string, Box>) => void) | null>(null);
   const [target, setTarget] = useState<ArtifactRefTarget | null>(null);
   const [note, setNote] = useState("");
+  // Draw (spec §3.8): the toggle, the stroke being noted, and the markups queued in the reply.
+  const [drawOn, setDrawOn] = useState(false);
+  const [stroke, setStroke] = useState<Point[] | null>(null);
+  const refDrafts = useArtifactRefDrafts(roomId, threadRootId);
   const preview = useRef<ArtifactPreviewHandle>(null);
   const draft = useStyleDraft((edit) => preview.current?.style(edit));
   const [errors, setErrors] = useState<{ id: string; list: readonly string[] }>(
@@ -308,7 +347,10 @@ export function ArtifactPanel({
     () => (system && section && section !== "overview" ? designSystemSectionPage(system, section) : null),
     [system, section],
   );
-  const media = useArtifactAssets(canvasKind ? text : section === "fonts" ? dsPage : null);
+  const media = useArtifactAssets(
+    canvasKind || whiteboard || motion ? text : section === "fonts" ? dsPage : null,
+    whiteboard ? findBoardAssets : undefined,
+  );
   // Spec §5.6: owners and admins list a design system for the whole workspace.
   const designSystems = useDesignSystems(workforceSpaceId);
   const listed = designSystems.workspace.some((s) => s.roomId === roomId && s.identifier === current?.identifier);
@@ -332,7 +374,8 @@ export function ArtifactPanel({
     me,
   });
   // Tweaks (spec §6.7): the document's controls; changed values are kept per version until Keep or Reset.
-  const tweaks = useMemo(() => (canvasKind && text !== null ? readTweaks(text) : []), [canvasKind, text]);
+  const tweakKind = canvasKind ?? (motion ? "motion" : null);
+  const tweaks = useMemo(() => (tweakKind && text !== null ? readTweaks(text) : []), [tweakKind, text]);
   const [tweakState, setTweakState] = useState<{ id: string; open: boolean; values: Record<string, TweakValue> }>({
     id: "",
     open: false,
@@ -364,6 +407,9 @@ export function ArtifactPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `text` only when no stamped copy is kept
     [framed, current?.kind, canvas.doc ?? text, channel, dsPage],
   );
+  const clock = useMotionClock(current?.identifier, scenes, motion && srcdoc !== null, (index, time) => {
+    if (motion) preview.current?.post(PreviewMessage.seek, { index, time });
+  });
   // The rail's cards: the plain source, settled, so a drag does not reload every card.
   const railText = useDebounce(text, 400);
   const railSrcdoc = useMemo(
@@ -491,12 +537,19 @@ export function ArtifactPanel({
   const dsInvalid = tab === "preview" && current.kind === "design-system" && text !== null && !system;
   const dsEmpty = tab === "preview" && system !== null && dsSections.length === 0;
   const framing = frameKind !== null && srcdoc !== null && frames.length > 0;
+  const motionStage = motion && srcdoc !== null && scenes.length > 0;
   // Edit controls: the latest version, for users with edit rights (spec D2), never while presenting.
   const editable = mayEdit && onLatest && text !== null && !presenting;
   const dsEditor =
     dsEditing && editable && system !== null && section !== undefined && tab === "preview" ? section : null;
   const canAnnotate =
-    tab !== "changes" && text !== null && !dsInvalid && !dsEmpty && !(framing && grid) && dsEditor === null;
+    tab !== "changes" &&
+    text !== null &&
+    !dsInvalid &&
+    !dsEmpty &&
+    !(framing && grid) &&
+    dsEditor === null &&
+    !(whiteboard && tab === "preview" && !board);
   const deckNotes = frameKind === "slides" && frames.some((f) => f.notes);
   // Pins: a marker per open comment on an element (comment mode), and the agent cursor on the latest version.
   const commenting = annotating && canAnnotate && !presenting;
@@ -505,10 +558,46 @@ export function ArtifactPanel({
   // A picked element's note is written in a popover beside it. On a phone, and for a line or a
   // paragraph, the form is in the Comments tab.
   const pickSelector = commenting && !isMobile && srcdoc !== null && target?.kind === "element" ? target.selector : null;
+  // The same on a whiteboard (drawn in the app): the node or connection being commented on.
+  const boardCommenting = commenting && whiteboard && tab === "preview" && board !== null;
+  const boardPick = boardCommenting && !isMobile && target ? boardTargetOf(target) : null;
+  // Draw: on a slide or artboard in comment mode, not on a phone. The queued markups on the open
+  // frame stay drawn until the reply is sent or they are removed.
+  const sketchable = commenting && framing && !isMobile;
+  const sketchMarks = sketchable
+    ? [
+        ...refDrafts.flatMap((r) =>
+          r.identifier === current.identifier && r.sketch?.index === frameIndex ? [r.sketch.points] : [],
+        ),
+        ...(stroke ? [stroke] : []),
+      ]
+    : [];
+  const sketch =
+    sketchable && (drawOn || sketchMarks.length > 0)
+      ? {
+          width: frames[frameIndex]!.width,
+          height: frames[frameIndex]!.height,
+          marks: sketchMarks,
+          drawing: drawOn,
+          onStroke: endStroke,
+          noting: stroke,
+        }
+      : null;
+  // Export (spec §6.9): the agent who wrote the artifact, else one that wrote another in the thread.
+  // Only humans ask.
+  const askAgent =
+    viewer.kind === "human"
+      ? ([...versions].reverse().find((v) => v.author.kind === "agent") ?? [...all].reverse().find((v) => v.author.kind === "agent"))
+          ?.author.id
+      : undefined;
+  const extension =
+    (current.kind === "code" && current.language ? current.language : EXTENSION[current.kind]).replace(/[^a-z0-9]/gi, "") ||
+    "txt";
   const pins: PinRequest[] = [
     ...(pickSelector ? [{ id: PICK_PIN, selector: pickSelector }] : []),
     ...markers.flatMap((c) => (c.ref.target.kind === "element" ? [{ id: c.id, selector: c.ref.target.selector }] : [])),
     ...(cursorShown ? [{ id: CURSOR_PIN, selector: cursor.selector }] : []),
+    ...(sketch ? [{ id: SKETCH_PIN, selector: `body > section:nth-of-type(${frameIndex + 1})` }] : []),
   ];
   // The canvas editor (spec §6.4): on by default for an editor of slides and design; for html
   // (style and text only, D3) and for viewers (inspect) while Properties is open. On a phone,
@@ -719,6 +808,7 @@ export function ArtifactPanel({
       setZoom(key === "zoomFit" ? null : stepZoom(zoom, key === "zoomIn" ? 1 : -1));
       return true;
     }
+    if (motionStage) return motionKey(key);
     if (presenting && key === "Escape") endPresent();
     else if (presenting && key === "f") toggleFullscreen();
     else {
@@ -726,6 +816,18 @@ export function ArtifactPanel({
       if (next !== null) selectFrame(next);
       return next !== null;
     }
+    return true;
+  }
+
+  /** Motion: Space plays or pauses; the arrows, Page keys, Home and End go to a scene's start. */
+  function motionKey(key: string): boolean {
+    if (key === " " || key === "Space") {
+      clock.toggle();
+      return true;
+    }
+    const next = stepFrame(key, clock.scene, scenes.map(() => ({ skip: false })));
+    if (next === null) return false;
+    clock.seek(sceneStart(scenes, next));
     return true;
   }
 
@@ -792,12 +894,16 @@ export function ArtifactPanel({
     draft.reset(keep);
     setTarget(null);
     setNote("");
+    setStroke(null);
   }
 
   /** Shows a tab of the side panel; null closes it. Leaving Comments drops a half-made comment. */
   function showSide(next: SideTab | null) {
     resetAnnotation();
+    setDrawOn(false);
     setAnnotating(next === "comments");
+    // A comment is on the frame as it stands: motion holds still while comment mode is on.
+    if (next === "comments") clock.pause();
     setTweaks({ open: next === "tweaks" });
     if (next === "properties") canvas.setProperties(true);
     // Closed for good, not only until Tweaks or Comments close. Where Properties is no tab, the choice stays.
@@ -811,7 +917,7 @@ export function ArtifactPanel({
   }
 
   /** False, with a toast, when the composer already holds the most annotations a reply carries. */
-  function addRef(refTarget: ArtifactRefTarget, refNote: string): boolean {
+  function addRef(refTarget: ArtifactRefTarget, refNote: string, sketch?: ArtifactRefDraft["sketch"]): boolean {
     if (!current) return false;
     const added = addArtifactRefDraft(roomId, threadRootId, {
       identifier: current.identifier,
@@ -822,6 +928,7 @@ export function ArtifactPanel({
       note: refNote,
       // A comment sent to the agent mentions it (spec §6.6).
       ...(current.author.kind === "agent" ? { agent: current.author.id } : {}),
+      ...(sketch ? { sketch } : {}),
     });
     if (!added) toast.error(`A reply holds at most ${MAX_REFS} annotations. Send it first.`);
     return added;
@@ -863,9 +970,24 @@ export function ArtifactPanel({
   }
 
   function addAnnotation() {
-    if (!target || !addRef(target, annotationNote(draft.changes, note))) return;
+    const sketch = stroke ? { index: frameIndex, points: stroke } : undefined;
+    if (!target || !addRef(target, annotationNote(draft.changes, note), sketch)) return;
     resetAnnotation(true);
     toast("Comment added. Send your reply to post it.");
+  }
+
+  /** A drawn stroke: its region on the open frame becomes the comment's target; its note box opens. */
+  function endStroke(points: Point[]) {
+    const f = frames[frameIndex];
+    const unit = frameKind ? frameUnit(frameKind) : "slide";
+    const t = f ? sketchTarget(unit, frameIndex, f.name, points, f.width, f.height) : null;
+    if (!t) {
+      toast.error(`Draw on the ${unit} to mark an area.`);
+      return;
+    }
+    resetAnnotation();
+    setTarget(t);
+    setStroke(points);
   }
 
   function addValue(s: TokenSection, name: string, value: string) {
@@ -886,26 +1008,49 @@ export function ArtifactPanel({
 
   async function download() {
     if (text === null || !current) return;
-    const ext =
-      current.kind === "code" && current.language
-        ? current.language
-        : EXTENSION[current.kind];
-    const body = await withAssets(text);
-    downloadBlob(
-      new Blob([body], { type: "text/plain;charset=utf-8" }),
-      `${current.identifier}.${ext.replace(/[^a-z0-9]/gi, "") || "txt"}`,
-    );
+    // A whiteboard keeps its mxc:// URIs: it is JSON, not a page.
+    const body = whiteboard ? text : await withAssets(text);
+    downloadBlob(new Blob([body], { type: "text/plain;charset=utf-8" }), `${current.identifier}.${extension}`);
   }
 
   /** `body` as a message in this thread; false, with a toast, when it was not sent. */
   async function ask(body: string): Promise<boolean> {
     try {
-      await MatrixClientPeg.get().sendMessage(roomId, threadRootId, { msgtype: "m.text", body } as never);
+      // Mentions the agent to ask, as a comment sent to it does (spec §6.6).
+      const mentions = askAgent ? { "m.mentions": { user_ids: [askAgent] } } : {};
+      await MatrixClientPeg.get().sendMessage(roomId, threadRootId, { msgtype: "m.text", body, ...mentions } as never);
       return true;
     } catch {
       toast.error("Could not send the request");
       return false;
     }
+  }
+
+  /** A fixed request to the agent, sent once the user's edits are saved: the agent reads the saved content. */
+  function askSaved(body: string) {
+    void edits
+      .flush()
+      .then((saved) => saved && ask(body))
+      .then((sent) => sent && toast("Request sent"));
+  }
+
+  /** A whiteboard's fixed request to the agent (spec §6.10), after the user's edits are saved. */
+  function requestBoard(request: BoardRequest) {
+    if (current) askSaved(composeBoardRequest(request, current.identifier));
+  }
+
+  /** "Ask about this area": the nodes go into the reply as a reference, as a comment does. */
+  function askArea(ids: string[]) {
+    if (!board) return;
+    if (ids.length === 0) toast.error("No nodes in that area. Drag over the nodes you want to ask about.");
+    else if (addRef(areaTarget(board, ids), "")) toast("Area added to your reply. Write your question and send it.");
+  }
+
+  /** An Export menu entry the agent makes: a fixed request, after the user's edits are saved. */
+  function requestExport(request: AgentRequest) {
+    if (!current) return;
+    const f = frames[frameIndex];
+    askSaved(composeAgentRequest(request, current, f ? { index: frameIndex, name: f.name } : undefined));
   }
 
   async function askToFix() {
@@ -982,9 +1127,9 @@ export function ArtifactPanel({
       }}
       onReset={() => setTweaks({ values: {} })}
       onKeep={
-        editable && canvasKind
+        editable && tweakKind
           ? () => {
-              edit((t) => writeTweaks(t, canvasKind, tweakValues), "Kept tweaks");
+              edit((t) => writeTweaks(t, tweakKind, tweakValues), "Kept tweaks");
               setTweaks({ values: {} });
             }
           : undefined
@@ -1005,11 +1150,26 @@ export function ArtifactPanel({
   const commentsPanel = (
     <div data-testid="artifact-comments-panel">
       <div className="p-3">
-        {annotationForm && !pickSelector ? (
+        {sketchable ? (
+          <div className="mb-2">
+            <DrawToggle
+              on={drawOn}
+              onChange={(on) => {
+                resetAnnotation();
+                setDrawOn(on);
+              }}
+            />
+          </div>
+        ) : null}
+        {annotationForm && !pickSelector && !stroke && !boardPick ? (
           annotationForm
         ) : (
           <p className="text-caption1 text-text-tertiary">
-            {srcdoc !== null
+            {sketch?.drawing
+              ? `Drag on the ${frameKind ? frameUnit(frameKind) : "slide"} to mark an area, then write a note.`
+              : boardCommenting
+              ? "Click a node or a connection to comment on it."
+              : srcdoc !== null
               ? "Click an element in the preview to comment on it."
               : tab === "code"
                 ? "Click a line or select code to comment on it."
@@ -1158,7 +1318,7 @@ export function ArtifactPanel({
         // Frame navigation while focus is on the rail or the stage (also in fullscreen);
         // inside the frame, the frame forwards the keys.
         onKeyDown={
-          framing
+          framing || motionStage
             ? (e) => {
                 const t = e.target as HTMLElement;
                 if (e.altKey || isEditableKeyboardTarget(t)) return;
@@ -1175,6 +1335,21 @@ export function ArtifactPanel({
         }
       >
         {rail && !isMobile && !grid ? <FrameRail {...rail} onSelect={selectFrame} /> : null}
+        {motionStage && !isMobile ? (
+          <MotionScenes
+            scenes={scenes}
+            active={clock.scene}
+            onSelect={(i) => clock.seek(sceneStart(scenes, i))}
+            edit={
+              editable
+                ? {
+                    onDuration: (i, ms) => edit((t) => setSceneDuration(t, i, ms), `Changed the duration of scene ${i + 1}`),
+                    onMove: (from, to) => edit((t) => moveFrame(t, from, to), `Moved scene ${from + 1}`),
+                  }
+                : undefined
+            }
+          />
+        ) : null}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Floats over the artifact, outside the Present target. */}
           <div
@@ -1207,6 +1382,8 @@ export function ArtifactPanel({
                 presenting={presenting}
                 onEnd={endPresent}
               />
+            ) : motionStage ? (
+              <FrameControls zoom={zoom} scale={scale} onZoom={setZoom} />
             ) : null}
             {/* On a phone there is no rail: the open slide's menu sits here. */}
             {isMobile && frameEdit && framing && !grid ? (
@@ -1247,25 +1424,22 @@ export function ArtifactPanel({
                   disabled={text === null}
                   onClick={() => text !== null && copyToClipboard(text, "Copied")}
                 />
-                <IconButton
-                  size="small"
-                  icon={<DownloadIcon />}
-                  label="Download"
+                <ExportMenu
+                  kind={current.kind}
+                  extension={extension}
                   disabled={text === null}
-                  onClick={() => void download()}
+                  onDownload={() => void download()}
+                  onPdf={
+                    frameKind && frames.length > 0
+                      ? () =>
+                          text !== null &&
+                          printDoc === null &&
+                          void withAssets(text).then((t) => setPrintDoc(buildArtifactSrcdoc(frameKind, t, channel, true)))
+                      : undefined
+                  }
+                  onAsk={askAgent ? requestExport : undefined}
+                  askBlocked={onLatest ? null : "The agent exports the latest version. Open it to ask."}
                 />
-                {frameKind && frames.length > 0 ? (
-                  <IconButton
-                    size="small"
-                    icon={<PrinterIcon />}
-                    label="Export as PDF"
-                    disabled={printDoc !== null}
-                    onClick={() =>
-                      text !== null &&
-                      void withAssets(text).then((t) => setPrintDoc(buildArtifactSrcdoc(frameKind, t, channel, true)))
-                    }
-                  />
-                ) : null}
               </>
             )}
           </div>
@@ -1313,6 +1487,39 @@ export function ArtifactPanel({
               <p role="alert" className="p-4 text-body2 text-text-secondary">
                 This design system can&apos;t be shown: its content is not a valid JSON object.
               </p>
+            ) : whiteboard && tab === "preview" ? (
+              board ? (
+                <WhiteboardBoard
+                  key={current.identifier}
+                  board={board}
+                  assets={media.assets}
+                  mode={editable ? (isMobile ? "retype" : "edit") : "view"}
+                  onEdit={(change, summary, coalesce) => void edits.apply((t) => editBoard(t, change), summary, coalesce)}
+                  onUpload={(file) => uploadAsset(file, media.named)}
+                  onRequest={viewer.kind === "human" ? requestBoard : undefined}
+                  onAskArea={viewer.kind === "human" && !isMobile ? askArea : undefined}
+                  comments={
+                    boardCommenting
+                      ? {
+                          markers: openComments.flatMap((c) => {
+                            const t = boardTargetOf(c.ref.target);
+                            return t ? [{ id: c.id, target: t, author: c.author.displayName, onSelect: () => showComment(c) }] : [];
+                          }),
+                          draft: boardPick && annotationForm ? { target: boardPick, form: annotationForm, onClose: () => resetAnnotation() } : null,
+                          onPick: (t) => {
+                            const picked = boardCommentTarget(board, t);
+                            resetAnnotation();
+                            setTarget(picked);
+                          },
+                        }
+                      : undefined
+                  }
+                />
+              ) : (
+                <p role="alert" className="p-4 text-body2 text-text-secondary">
+                  This whiteboard can&apos;t be shown: its content is not a valid JSON object.
+                </p>
+              )
             ) : dsEditor !== null && system ? (
               <DesignSystemEditor
                 // Not per version: the user's own versions must not reset the field being typed in.
@@ -1373,8 +1580,11 @@ export function ArtifactPanel({
                     ? presenting
                       ? { index: frameIndex, zoom: null, transition: frames[frameIndex]?.transition, present: true }
                       : { index: frameIndex, zoom, canvas: frameKind === "design" }
-                    : undefined
+                    : motionStage
+                      ? { index: clock.scene, zoom }
+                      : undefined
                 }
+                onReady={motion ? clock.resend : undefined}
                 onKey={frameKey}
                 onScale={setScale}
                 onZoom={(factor) => presenting || setZoom((z) => clampZoom((z ?? scale ?? 1) * factor))}
@@ -1406,7 +1616,8 @@ export function ArtifactPanel({
                 markers={markers}
                 cursorLabel={cursorShown ? cursor.label : null}
                 onSelect={showComment}
-                draft={pickSelector ? annotationForm : null}
+                sketch={sketch}
+                draft={pickSelector || stroke ? annotationForm : null}
                 onCloseDraft={() => resetAnnotation()}
               />
             ) : null}
@@ -1469,6 +1680,14 @@ export function ArtifactPanel({
               </div>
             ) : null}
           </div>
+          {motionStage ? (
+            <>
+              {isMobile ? (
+                <MotionScenes strip scenes={scenes} active={clock.scene} onSelect={(i) => clock.seek(sceneStart(scenes, i))} />
+              ) : null}
+              <MotionBar clock={clock} scenes={scenes} />
+            </>
+          ) : null}
           {/* Read-only here; never on the slide (the frame hides `aside[data-notes]`). */}
           {framing && frameKind === "slides" && (deckNotes || editable) && !grid ? (
             <details open data-testid="speaker-notes" className="shrink-0 border-t border-border">
@@ -1705,6 +1924,7 @@ function PinOverlay({
   markers,
   cursorLabel,
   onSelect,
+  sketch,
   draft,
   onCloseDraft,
 }: {
@@ -1712,7 +1932,16 @@ function PinOverlay({
   markers: readonly ArtifactComment[];
   cursorLabel: string | null;
   onSelect: (c: ArtifactComment) => void;
-  /** The note form for the picked element (`PICK_PIN`), or null. */
+  /** Draw: the markups on the open frame (`SKETCH_PIN`); `noting` is the stroke the draft is for. */
+  sketch: {
+    width: number;
+    height: number;
+    marks: readonly (readonly Point[])[];
+    drawing: boolean;
+    onStroke: (points: Point[]) => void;
+    noting: readonly Point[] | null;
+  } | null;
+  /** The note form for the picked element (`PICK_PIN`) or the drawn stroke, or null. */
   draft: ReactNode;
   onCloseDraft: () => void;
 }) {
@@ -1724,8 +1953,15 @@ function PinOverlay({
     };
   }, [sink]);
   const cursorBox = cursorLabel === null ? undefined : boxes.get(CURSOR_PIN);
-  const pickBox = draft ? boxes.get(PICK_PIN) : undefined;
+  const frameBox = sketch ? boxes.get(SKETCH_PIN) : undefined;
+  const pickBox = !draft
+    ? undefined
+    : sketch?.noting
+      ? frameBox && strokeBox(sketch.noting, frameBox, sketch.width, sketch.height)
+      : boxes.get(PICK_PIN);
   return (
+    <>
+    {sketch ? <SketchOverlay box={frameBox} {...sketch} /> : null}
     <FramePins
       draft={pickBox ? { box: pickBox, form: draft, onClose: onCloseDraft } : null}
       comments={markers.flatMap((c) => {
@@ -1734,5 +1970,15 @@ function PinOverlay({
       })}
       cursor={cursorBox && cursorLabel !== null ? { box: cursorBox, label: cursorLabel } : null}
     />
+    </>
   );
+}
+
+/** A stroke's bounding box on the stage, from the frame's own pixels. */
+function strokeBox(points: readonly Point[], frame: Box, width: number, height: number): Box {
+  const xs = points.map((p) => frame.x + (p[0] * frame.w) / width);
+  const ys = points.map((p) => frame.y + (p[1] * frame.h) / height);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }

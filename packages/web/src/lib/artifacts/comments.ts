@@ -1,5 +1,6 @@
 import type { ActorSummary, ArtifactKind, TimelineMessage } from "@/model/types";
-import type { ArtifactRef } from "./refs";
+import type { ArtifactRef, ArtifactRefTarget } from "./refs";
+import { type Board, boardHas, boardTargetOf, readBoard } from "./whiteboard";
 
 /**
  * Comments (DESIGN_MODES_SPEC.md §6.6): a thread message with an artifact reference, as an
@@ -25,8 +26,8 @@ export interface ArtifactComment {
 /** The latest version of the artifact, to check whether a comment's target is still in it. */
 export interface LatestVersion {
   eventId: string;
-  /** False when the version's source has no element for the selector. */
-  has: (selector: string) => boolean;
+  /** False when the version no longer has the target: no element for the selector, no such board node or connection. */
+  has: (target: ArtifactRefTarget) => boolean;
 }
 
 /** The artifact's open comments in thread order. */
@@ -41,31 +42,38 @@ export function artifactComments(
     if (m.reactions.some((r) => RESOLVE_KEYS.has(r.emoji) && r.actorIds.some(isHuman))) return [];
     return m.artifactRefs.flatMap((ref, i): ArtifactComment[] => {
       if (ref.identifier !== identifier || ref.preview) return [];
-      const gone =
-        latest !== undefined &&
-        ref.event_id !== latest.eventId &&
-        ref.target.kind === "element" &&
-        !latest.has(ref.target.selector);
+      const gone = latest !== undefined && ref.event_id !== latest.eventId && !latest.has(ref.target);
       return gone ? [] : [{ id: `${m.id}:${i}`, messageId: m.id, author: m.author, ref, text: m.body }];
     });
   });
 }
 
 /** Kinds whose source is the document the frame shows, so a selector can be checked against it. */
-const DOM_KINDS: ReadonlySet<ArtifactKind> = new Set(["html", "svg", "slides", "design"]);
+const DOM_KINDS: ReadonlySet<ArtifactKind> = new Set(["html", "svg", "slides", "design", "motion"]);
 
 /**
- * `has` for a version's source, parsed inert (no script runs). Other kinds, and a selector the
- * parser rejects, count as found: they never resolve a comment.
+ * `has` for a version's source, parsed inert (no script runs) on the first check: most threads
+ * have no such comments. An element target is looked up by its selector; on a whiteboard, a node
+ * by id and a connection by its ends. Every other target, other kinds, an unreadable board and a
+ * selector the parser rejects count as found: they never resolve a comment.
  */
-export function sourceHas(kind: ArtifactKind, text: string): (selector: string) => boolean {
+export function sourceHas(kind: ArtifactKind, text: string): (target: ArtifactRefTarget) => boolean {
+  if (kind === "whiteboard") {
+    let board: Board | null | undefined;
+    return (target) => {
+      const t = boardTargetOf(target);
+      if (!t) return true;
+      if (board === undefined) board = readBoard(text);
+      return !board || boardHas(board, t);
+    };
+  }
   if (!DOM_KINDS.has(kind)) return () => true;
-  // Parsed on the first check: most threads have no element comments.
   let doc: Document | null = null;
-  return (selector) => {
+  return (target) => {
+    if (target.kind !== "element") return true;
     try {
       doc ??= new DOMParser().parseFromString(text, "text/html");
-      return doc.querySelector(selector) !== null;
+      return doc.querySelector(target.selector) !== null;
     } catch {
       return true;
     }

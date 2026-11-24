@@ -81,10 +81,31 @@ describe("artifact comments", () => {
   });
 
   it("checks selectors only against DOM sources, and an invalid selector never resolves", () => {
-    expect(sourceHas("html", "<p class='a'>x</p>")("p.a")).toBe(true);
-    expect(sourceHas("html", "<p>x</p>")("p.b")).toBe(false);
-    expect(sourceHas("html", "<p>x</p>")("p[")).toBe(true);
-    expect(sourceHas("react", "export default () => null")("p.b")).toBe(true);
-    expect(sourceHas("design-system", "{}")("p.b")).toBe(true);
+    const el = (selector: string) => ref(selector).target;
+    expect(sourceHas("html", "<p class='a'>x</p>")(el("p.a"))).toBe(true);
+    expect(sourceHas("html", "<p>x</p>")(el("p.b"))).toBe(false);
+    expect(sourceHas("html", "<p>x</p>")(el("p["))).toBe(true);
+    expect(sourceHas("html", "<p>x</p>")({ kind: "text", text: "gone" })).toBe(true);
+    expect(sourceHas("react", "export default () => null")(el("p.b"))).toBe(true);
+    expect(sourceHas("design-system", "{}")(el("p.b"))).toBe(true);
+  });
+
+  it("on a whiteboard, checks a node by id and a connection by its ends in either direction", () => {
+    const board = JSON.stringify({
+      nodes: [
+        { id: "a", type: "note", x: 0, y: 0, w: 10, h: 10 },
+        { id: "b", type: "note", x: 20, y: 0, w: 10, h: 10 },
+      ],
+      edges: [{ from: "b", to: "a" }],
+    });
+    const has = sourceHas("whiteboard", board);
+    const at = (where: string) => ({ kind: "text" as const, where, text: "x" });
+    expect(has(at("whiteboard node a"))).toBe(true);
+    expect(has(at("whiteboard node gone"))).toBe(false);
+    expect(has(at("whiteboard connection a -> b"))).toBe(true);
+    expect(has(at("whiteboard connection a -> gone"))).toBe(false);
+    // An area, any other text and an unreadable board never resolve.
+    expect(has(at("whiteboard area, 2 nodes"))).toBe(true);
+    expect(sourceHas("whiteboard", "not json")(at("whiteboard node a"))).toBe(true);
   });
 });

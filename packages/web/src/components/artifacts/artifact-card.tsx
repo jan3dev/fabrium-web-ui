@@ -5,8 +5,10 @@ import {
   FileTextIcon,
   FrameIcon,
   ImageIcon,
+  MotionIcon,
   PaletteIcon,
   PresentationIcon,
+  ShapesIcon,
 } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import type { ArtifactKind, ArtifactVersion } from "@/model/types";
@@ -20,6 +22,8 @@ const KIND_LABEL: Record<ArtifactKind, string> = {
   slides: "Slides",
   design: "Design",
   "design-system": "Design system",
+  whiteboard: "Whiteboard",
+  motion: "Motion",
 };
 
 const KIND_ICON: Record<ArtifactKind, typeof CodeIcon> = {
@@ -31,6 +35,8 @@ const KIND_ICON: Record<ArtifactKind, typeof CodeIcon> = {
   slides: PresentationIcon,
   design: FrameIcon,
   "design-system": PaletteIcon,
+  whiteboard: ShapesIcon,
+  motion: MotionIcon,
 };
 
 export function artifactKindLabel(

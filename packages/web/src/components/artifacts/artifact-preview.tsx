@@ -62,6 +62,8 @@ export interface ArtifactPreviewProps {
   onPinned?: (boxes: Map<string, Box>) => void;
   /** Tweak values to apply (tweaks.ts `tweakMessage`), sent again whenever the document loads. */
   tweaks?: { vars: Record<string, string>; texts: Record<string, string> } | null;
+  /** A new document loaded and got the frame, tweaks and assets: the caller re-sends its own state (motion's time). */
+  onReady?: () => void;
 }
 
 /** The URL if it is http(s), else null: the frame is untrusted, so the parent checks too. */
@@ -102,10 +104,11 @@ export function ArtifactPreview({
   assets,
   onDragFiles,
   tweaks,
+  onReady,
 }: ArtifactPreviewProps) {
   const ref = useRef<HTMLIFrameElement>(null);
-  const handlers = useRef({ onPicked, onError, onOpenLink, onKey, onScale, onZoom, editor, onDragFiles, onPinned });
-  handlers.current = { onPicked, onError, onOpenLink, onKey, onScale, onZoom, editor, onDragFiles, onPinned };
+  const handlers = useRef({ onPicked, onError, onOpenLink, onKey, onScale, onZoom, editor, onDragFiles, onPinned, onReady });
+  handlers.current = { onPicked, onError, onOpenLink, onKey, onScale, onZoom, editor, onDragFiles, onPinned, onReady };
   const gate = useRef(gestureGate());
   const assetsRef = useRef(assets);
   assetsRef.current = assets;
@@ -211,6 +214,7 @@ export function ArtifactPreview({
         posted.current = new Set();
         if (pinsRef.current.length) post(PreviewMessage.pins, { pins: pinsRef.current });
         postAssets();
+        handlers.current.onReady?.();
         if (needs.length === 0) return;
         loadRuntimes(needs).then(
           (modules) => post(PreviewMessage.runtime, { modules }),

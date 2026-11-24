@@ -87,6 +87,8 @@ export const ARTIFACT_KINDS = [
   "slides",
   "design",
   "design-system",
+  "whiteboard",
+  "motion",
 ] as const;
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 
@@ -123,7 +125,7 @@ export interface ArtifactVersion {
 }
 
 /** The artifact kinds a design system can be limited to (`for`, spec §5.6). */
-export type DesignSystemScope = "slides" | "design";
+export type DesignSystemScope = "slides" | "design" | "motion";
 
 /** A design system a workspace or project lists (`dev.fabrium.design_systems`, spec §5.6). */
 export interface DesignSystemEntry {

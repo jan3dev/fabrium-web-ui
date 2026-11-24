@@ -219,3 +219,21 @@
 	--elevation-surface: var(--fab-elevation-surface-dark);
 	--elevation-modal: var(--fab-elevation-modal-dark);
 }
+
+/*
+ * Whiteboard colors (spec §6.10; D9: needs design sign-off). Existing primitives only.
+ * A node names its color in `data-board-color`; its fill is a 20% tint of the hue on the
+ * theme's surface, so --text-primary on it stays far above WCAG AA in both themes. The
+ * hue itself is only an outline and the edge of a shape, never a text color.
+ */
+[data-board-color] {
+	--board-fill: color-mix(in srgb, var(--board-hue) 20%, var(--surface-primary));
+}
+[data-board-color="yellow"] { --board-hue: var(--fab-harvest-gold-500); }
+[data-board-color="orange"] { --board-hue: var(--fab-wave-orange); }
+[data-board-color="red"] { --board-hue: var(--fab-scarlet-500); }
+[data-board-color="pink"] { --board-hue: color-mix(in srgb, var(--fab-scarlet-500), var(--fab-violet-400)); }
+[data-board-color="purple"] { --board-hue: var(--fab-violet-600); }
+[data-board-color="blue"] { --board-hue: var(--fab-neon-blue-500); }
+[data-board-color="green"] { --board-hue: var(--fab-forest-green-500); }
+[data-board-color="gray"] { --board-hue: var(--fab-metal-500); }

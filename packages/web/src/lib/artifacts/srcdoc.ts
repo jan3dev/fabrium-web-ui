@@ -2,6 +2,7 @@
 import type { ArtifactKind } from "@/model/types";
 import { FRAME_SIZE, type FrameKind, isFrameKind, MAX_FRAMES, NAV_KEYS, PASS_KEYS, SLIDE_SIZES, ZOOM_KEYS } from "./frames";
 import { MXC_PATTERN } from "./assets";
+import { DURATION } from "./motion";
 import { editorRuntime } from "./editor-runtime";
 import { MAX_PINS } from "./pins";
 import { STYLE_PROPS } from "./styles";
@@ -85,6 +86,8 @@ export const PreviewMessage = {
   zoom: "fabrium.preview.zoom",
   /** Parent → frame `{ vars, texts }`: tweak values (tweaks.ts `tweakMessage`), custom properties on `:root` and `[data-tweak]` text. */
   tweak: "fabrium.preview.tweak",
+  /** Parent → frame `{ index, time }` (motion): show scene `index` with every animation held at `time` ms into it. */
+  seek: "fabrium.preview.seek",
 } as const;
 
 export type RuntimeModule = "tailwind" | "react" | "jsx";
@@ -93,6 +96,9 @@ export type RuntimeModule = "tailwind" | "react" | "jsx";
 export function runtimesFor(kind: ArtifactKind): RuntimeModule[] {
   return kind === "react" ? ["tailwind", "react", "jsx"] : [];
 }
+
+/** Kinds whose `body > section`s the frame lays out one at a time. */
+type Staged = FrameKind | "motion";
 
 /** JSON-encode for an inline script, escaping `</` so the parser cannot end it early. */
 function embed(source: string): string {
@@ -107,7 +113,7 @@ function embed(source: string): string {
 function hookScript(
   channel: string,
   needs: readonly RuntimeModule[],
-  frames: FrameKind | null,
+  frames: Staged | null,
   print: boolean,
   canvas = false,
 ): string {
@@ -198,10 +204,11 @@ function hookScript(
   window.addEventListener('auxclick', intercept, true);
   window.addEventListener('keydown', function(ev){ if (ev.key === 'Enter') intercept(ev); }, true);
 
-  var frameTo = null, editing = false, onEditor = null, onFrameChange = null;
+  var frameTo = null, editing = false, onEditor = null, onFrameChange = null, onSeek = null;
   /* The canvas the editor works in: the body, or the open frame (framesRuntime). */
   var frameRoot = function(){ return document.body; };
 ${frames ? framesRuntime(frames, print) : ""}
+${frames === "motion" && !print ? motionRuntime() : ""}
 ${canvas && !print ? editorRuntime() : ""}
   /* Assets (spec §5.4): the parent posts the bytes of each mxc:// URI the document names; they
      become this frame's own object URLs on img, video and source, and in @font-face url(). */
@@ -283,6 +290,7 @@ ${canvas && !print ? editorRuntime() : ""}
     if (!data || data.channel !== CHANNEL) return;
     if (data.type === M.pick) { setPick(!!(data.detail && data.detail.on)); return; }
     if (data.type === M.frame) { if (frameTo) frameTo(data.detail || {}); return; }
+    if (data.type === M.seek) { if (onSeek) onSeek(data.detail || {}); return; }
     if (data.type === M.editor || data.type === M.patch || data.type === M.select) { if (onEditor) onEditor(data.type, data.detail || {}); if (data.type === M.patch) resolveAssets(); return; }
     if (data.type === M.tweak) { applyTweaks(data.detail || {}); return; }
     if (data.type === M.pins) { setPins(Array.isArray(data.detail && data.detail.pins) ? data.detail.pins : []); return; }
@@ -311,19 +319,20 @@ ${END_SCRIPT}`;
 }
 
 /**
- * Part of the hook script for slides and design: each `body > section` is a canvas
- * (slides 1920×1080, or the size `data-size` on `body` names; design `data-width`/`data-height`,
- * default 1440×900). Only the
+ * Part of the hook script for slides, design and motion: each `body > section` is a canvas
+ * (slides 1920×1080, or the size `data-size` on `body` names; design and motion `data-width`/`data-height`,
+ * default 1440×900 and 1920×1080). Only the
  * active one shows, scaled to fit or at the parent's zoom, entered with the parent's
  * transition. Layout is one stylesheet keyed by `:nth-of-type`, so the agent's elements
  * stay untouched for pick mode. The parent lists the frames from the source (frames.ts).
  * In print mode every section but the skipped ones is a page at its canvas size, and
  * the frame opens the print dialog once loaded.
  */
-function framesRuntime(kind: FrameKind, print: boolean): string {
+function framesRuntime(kind: Staged, print: boolean): string {
   return `
   (function(){
-    var SLIDES = ${kind === "slides"}, PRINT = ${print};
+    var SLIDES = ${kind === "slides"}, PRINT = ${print}, PAD = ${kind === "design" ? 24 : 0};
+    var DEFAULT = ${JSON.stringify(kind === "motion" ? FRAME_SIZE.slides : FRAME_SIZE.design)};
     /* The print frame has allow-modals (for print()): agent scripts get no alert, confirm or prompt over the app.
        This runs before any agent markup; a nested frame could still reach the originals, so it narrows, not closes. */
     if (PRINT) ['alert', 'confirm', 'prompt'].forEach(function(k){
@@ -408,7 +417,7 @@ function framesRuntime(kind: FrameKind, print: boolean): string {
       if (!sheet) return;
       if (row) { rowLayout(); return; }
       var f = list[active], root = document.documentElement;
-      var vw = root.clientWidth, vh = root.clientHeight, pad = SLIDES ? 0 : 24;
+      var vw = root.clientWidth, vh = root.clientHeight, pad = PAD;
       var s = zoom || Math.max(0.01, Math.min((vw - 2 * pad) / f.width, (vh - 2 * pad) / f.height));
       var w = f.width * s, h = f.height * s;
       var left = Math.max(pad, (vw - w) / 2), top = Math.max(pad, (vh - h) / 2);
@@ -447,8 +456,8 @@ function framesRuntime(kind: FrameKind, print: boolean): string {
       /* One size for the whole deck, as frames.ts reads it. */
       var ds = (document.body.getAttribute('data-size') || '').trim(), deck = DECK.hasOwnProperty(ds) ? DECK[ds] : SIZE.slides;
       for (var i = 0; i < nodes.length && i < ${MAX_FRAMES}; i++) list.push({
-        width: SLIDES ? deck[0] : size(nodes[i].getAttribute('data-width'), SIZE.design[0]),
-        height: SLIDES ? deck[1] : size(nodes[i].getAttribute('data-height'), SIZE.design[1]),
+        width: SLIDES ? deck[0] : size(nodes[i].getAttribute('data-width'), DEFAULT[0]),
+        height: SLIDES ? deck[1] : size(nodes[i].getAttribute('data-height'), DEFAULT[1]),
         skip: nodes[i].hasAttribute('data-skip')
       });
       if (!list.length) { if (PRINT) send(M.printed); return; }
@@ -532,11 +541,48 @@ function framesRuntime(kind: FrameKind, print: boolean): string {
   })();`;
 }
 
+/**
+ * Part of the hook script for motion (spec §6.11), after framesRuntime, which shows one scene.
+ * The parent owns the clock and sends `seek { index, time }`; here every animation is paused and
+ * held: the open scene's at the scene-local time, every other at 0. `getAnimations()` flushes
+ * style, so a scene's CSS animations exist the moment it shows. Ones started later
+ * (`element.animate`, a CSS animation or transition that starts) are held as they start.
+ * ponytail: an agent script that calls `play()` on a held animation runs it until the next seek;
+ * the tool text forbids timers, which is where such calls would come from.
+ */
+function motionRuntime(): string {
+  return `
+  (function(){
+    var time = 0, shown = 0, zoom = null, base = frameTo;
+    function hold(a, root){
+      var el = a && a.effect && a.effect.target, t = root && el && root.contains(el) ? time : 0;
+      try { if (a.playState !== 'paused') a.pause(); if (a.currentTime !== t) a.currentTime = t; } catch (e) {}
+    }
+    function holdAll(){
+      if (!document.getAnimations) return;
+      var root = frameRoot(), list = document.getAnimations();
+      for (var i = 0; i < list.length; i++) hold(list[i], root);
+    }
+    frameTo = function(d){ zoom = d.zoom; shown = Math.floor(Number(d.index)) || 0; base(d); holdAll(); };
+    onSeek = function(d){
+      var i = Math.floor(Number(d.index)), t = Number(d.time);
+      if (!isFinite(i) || !isFinite(t)) return;
+      time = Math.max(0, Math.min(${DURATION.max}, t));
+      if (i !== shown) { shown = i; base({ index: i, zoom: zoom }); }
+      holdAll();
+    };
+    var animate = Element.prototype.animate;
+    if (animate) Element.prototype.animate = function(){ var a = animate.apply(this, arguments); hold(a, frameRoot()); return a; };
+    ['animationstart', 'transitionrun'].forEach(function(type){ window.addEventListener(type, holdAll, true); });
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', holdAll); else holdAll();
+  })();`;
+}
+
 function head(
   channel: string,
   needs: readonly RuntimeModule[],
   style = "",
-  frames: FrameKind | null = null,
+  frames: Staged | null = null,
   print = false,
   canvas = false,
 ): string {
@@ -554,7 +600,7 @@ const SVG_ROOT = /^(?:<\?xml[^>]*>\s*)?(?:<!doctype\s+svg[^>]*>\s*)?<svg[\s>]/i;
 function buildHtmlSrcdoc(
   content: string,
   channel: string,
-  frames: FrameKind | null = null,
+  frames: Staged | null = null,
   print = false,
 ): string {
   const trimmed = content.trimStart();
@@ -650,5 +696,5 @@ export function buildArtifactSrcdoc(
 ): string {
   return kind === "react"
     ? buildReactSrcdoc(content, channel)
-    : buildHtmlSrcdoc(content, channel, isFrameKind(kind) ? kind : null, print);
+    : buildHtmlSrcdoc(content, channel, isFrameKind(kind) || kind === "motion" ? kind : null, print);
 }

@@ -36,16 +36,52 @@ export interface ArtifactRef {
  */
 export const QUIET_FIELD = "dev.fabrium.quiet";
 
-/** A reference waiting in the composer. The two extra fields stay local; `wireRef` drops them. */
+/** A reference waiting in the composer. The extra fields stay local; `wireRef` drops them. */
 export interface ArtifactRefDraft extends ArtifactRef {
   /** "Send to agent" is off: it goes in a quiet message of its own. */
   quiet?: boolean;
   /** The agent a sent comment mentions: the artifact's author or the preview's agent. */
   agent?: string;
+  /** A drawn markup (spec §3.8 Draw): its frame and stroke, in the frame's own pixels, shown until sent. */
+  sketch?: { index: number; points: readonly Point[] };
 }
 
-export function wireRef({ quiet: _quiet, agent: _agent, ...ref }: ArtifactRefDraft): ArtifactRef {
+export function wireRef({ quiet: _quiet, agent: _agent, sketch: _sketch, ...ref }: ArtifactRefDraft): ArtifactRef {
   return ref;
+}
+
+export type Point = readonly [x: number, y: number];
+
+/**
+ * A drawn markup as a reference: the frame and the stroke's bounding box in the frame's own
+ * pixels (0 to `width` by 0 to `height`, whatever the zoom), clamped to the frame. It is a text
+ * target, so the agent reads it in the body like any annotation. Null when the stroke misses
+ * the frame or is a dot.
+ * ponytail: the region only, never the stroke's shape; send the path when an agent can use it.
+ */
+export function sketchTarget(
+  unit: "slide" | "artboard",
+  index: number,
+  name: string,
+  points: readonly Point[],
+  width: number,
+  height: number,
+): ArtifactRefTarget | null {
+  if (points.length === 0) return null;
+  const clamp = (v: number, max: number) => Math.round(Math.min(max, Math.max(0, v)));
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const x = clamp(Math.min(...xs), width);
+  const y = clamp(Math.min(...ys), height);
+  const w = clamp(Math.max(...xs), width) - x;
+  const h = clamp(Math.max(...ys), height) - y;
+  if (w === 0 || h === 0) return null;
+  const frame = `${unit} ${index + 1}`;
+  return {
+    kind: "text",
+    where: `sketch on ${frame}${name ? ` "${name}"` : ""}`.slice(0, 200),
+    text: `region x=${x}, y=${y}, w=${w}, h=${h} on ${frame}, in its own pixels (${width}x${height})`,
+  };
 }
 
 const str = (v: unknown, max: number) =>

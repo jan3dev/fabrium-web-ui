@@ -137,6 +137,8 @@ export interface MessageInputProps {
   tools?: ReactNode;
   /** Rendered under the field, e.g. the design-system chip. */
   footer?: ReactNode;
+  /** The field's plain text, after every change. */
+  onTextChange?: (text: string) => void;
   className?: string;
   /** Positioning for the suggestion list, which opens above the root. */
   suggestionsClassName?: string;
@@ -170,6 +172,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
       onError,
       header,
       footer,
+      onTextChange,
       tools,
       className,
       suggestionsClassName = "left-0 right-0",
@@ -177,6 +180,9 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
     ref,
   ) {
     const [text, setText] = useState("");
+    const onText = useRef(onTextChange);
+    onText.current = onTextChange;
+    useEffect(() => onText.current?.(text), [text]);
     const [ac, setAc] = useState<AutocompleteState | null>(null);
     const [activeIdx, setActiveIdx] = useState(0);
     const [attachments, setAttachments] = useState<StagedAttachment[]>([]);

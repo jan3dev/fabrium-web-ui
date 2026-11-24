@@ -77,7 +77,7 @@ describe('shared tool text ([[ZOD094]])', () => {
   })
 
   it('teaches design systems across threads (design modes spec §5.6)', () => {
-    expect(ARTIFACT_INSTRUCTIONS).toMatch(/Before you write a new slides or design artifact, call zooid_design_system without arguments/)
+    expect(ARTIFACT_INSTRUCTIONS).toMatch(/Before you write a new slides, design or motion artifact, call zooid_design_system without arguments/)
     expect(ARTIFACT_INSTRUCTIONS).toMatch(/default for that kind \(`default_for`\)/)
     expect(ARTIFACT_INSTRUCTIONS).toMatch(/copy its `css` as it is into the artifact's own <style>/)
     expect(ARTIFACT_INSTRUCTIONS).toMatch(/var\(--color-<name>\)/)
@@ -89,6 +89,28 @@ describe('shared tool text ([[ZOD094]])', () => {
     expect(DESIGN_SYSTEM_DESCRIPTION).toMatch(/Without arguments it returns `systems`/)
     expect(DESIGN_SYSTEM_DESCRIPTION).toMatch(/`css` \(every token as a CSS variable in one :root rule, plus a \[data-theme="<name>"\] rule per theme\)/)
     expect(DESIGN_SYSTEM_DESCRIPTION).toMatch(/Add `component` \(a name\) to get that component's html/)
+  })
+
+  it('teaches whiteboard, motion, export and build (design modes level 5)', () => {
+    expect(ARTIFACT_DESCRIPTION).toMatch(/"whiteboard": one JSON object \{"nodes": \[\.\.\.\], "edges": \[\.\.\.\]\} and nothing else; every string is plain text, never markup/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/type "note", "text", "shape", "section", "image" or "video"/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/a node belongs to it when the node's center lies inside the section's box/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/At most 500 nodes and 1000 edges/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/An edge is \{from, to, label\?, arrow\?, style\?, color\?\}/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/style "solid" \(default\), "dashed" or "dotted", color one of the node colors/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/"motion": one HTML document; each scene is a <section> .* data-duration in ms \(100 to 600000; 3000 when missing\)/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/optional data-name naming the scene \(else its first heading\)/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/never setTimeout, setInterval or requestAnimationFrame/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/"range" tweaks bound to a CSS variable .* expose timing/)
+    expect(ARTIFACT_INSTRUCTIONS).toMatch(/sticky notes, mind map or board of boxes and arrows is "whiteboard"; an animation, motion graphic/)
+    expect(ARTIFACT_INSTRUCTIONS).toMatch(/convert it on your workstation, and send the file with zooid_send_attachment in the thread/)
+    expect(ARTIFACT_INSTRUCTIONS).toMatch(/Keep editable: text as real text boxes .* tables as real tables; images as pictures; slide backgrounds; speaker notes from <aside data-notes>/)
+    expect(ARTIFACT_INSTRUCTIONS).toMatch(/skipped sections \(data-skip\) left out/)
+    expect(ARTIFACT_INSTRUCTIONS).toMatch(/Leave out transitions/)
+    expect(ARTIFACT_INSTRUCTIONS).toMatch(/Google Slides: the same \.pptx, with every font replaced by a basic one .*Do not call any Google API/)
+    expect(ARTIFACT_INSTRUCTIONS).toMatch(/PNG: a screenshot of the section the request names .* or of the whole whiteboard/)
+    expect(ARTIFACT_INSTRUCTIONS).toMatch(/MP4 \(motion\): render frame by frame.*set its currentTime.*ffmpeg/)
+    expect(ARTIFACT_INSTRUCTIONS).toMatch(/"Build this" names a design version: read it, read every <aside data-note> in it \(builder notes\), and read the design system/)
   })
 
   it('is exactly what the MCP server serves', async () => {

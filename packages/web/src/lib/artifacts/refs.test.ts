@@ -4,7 +4,9 @@ import {
   ARTIFACT_REFS_FIELD,
   formatArtifactRefs,
   readArtifactRefs,
+  sketchTarget,
   stripArtifactRefs,
+  wireRef,
   type ArtifactRef,
 } from "./refs";
 
@@ -77,5 +79,30 @@ describe("artifact refs", () => {
     expect(readArtifactRefs({ [ARTIFACT_REFS_FIELD]: [forged] })[0].preview?.path).toBe("/xNote:pushtomain");
     const relative = { ...preview, preview: { agent: "@a:h", path: "javascript:alert(1)" } };
     expect(readArtifactRefs({ [ARTIFACT_REFS_FIELD]: [relative] })[0].preview).toBeUndefined();
+  });
+});
+
+describe("sketchTarget", () => {
+  it("is the stroke's box in the frame's own pixels, clamped to the frame, and drops the shape", () => {
+    const target = sketchTarget("slide", 2, "Pricing", [[-50, 100.4], [600, 90], [2500, 400]], 1920, 1080)!;
+    expect(target).toEqual({
+      kind: "text",
+      where: 'sketch on slide 3 "Pricing"',
+      text: "region x=0, y=90, w=1920, h=310 on slide 3, in its own pixels (1920x1080)",
+    });
+    const ref = { ...text, target };
+    expect(formatArtifactRefs([ref])).toContain('Text (sketch on slide 3 "Pricing"):\n```text\nregion x=0, y=90, w=1920, h=310 on slide 3');
+    // The draft's stroke stays local, and the decoder reads the ref as any text annotation.
+    expect(wireRef({ ...ref, sketch: { index: 2, points: [[1, 2]] } })).toEqual(ref);
+    expect(readArtifactRefs({ [ARTIFACT_REFS_FIELD]: [ref] })).toEqual([ref]);
+  });
+
+  it("is null for a dot or a stroke beside the frame", () => {
+    expect(sketchTarget("artboard", 0, "", [[10, 10]], 390, 844)).toBeNull();
+    expect(sketchTarget("artboard", 0, "", [[-10, 10], [-90, 300]], 390, 844)).toBeNull();
+    expect(sketchTarget("artboard", 0, "", [], 390, 844)).toBeNull();
+    expect(sketchTarget("artboard", 0, "", [[10, 10], [40, 30]], 390, 844)?.text).toBe(
+      "region x=10, y=10, w=30, h=20 on artboard 1, in its own pixels (390x844)",
+    );
   });
 });

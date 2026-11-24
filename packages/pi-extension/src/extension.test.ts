@@ -44,7 +44,7 @@ describe('Pi Zooid extension', () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       'zooid_artifact', 'zooid_complete_task', 'zooid_design_system', 'zooid_get_history', 'zooid_get_members',
       'zooid_get_recent_threads', 'zooid_get_room_info', 'zooid_get_rooms',
-      'zooid_get_thread_history', 'zooid_handoff', 'zooid_send_message',
+      'zooid_get_thread_history', 'zooid_handoff', 'zooid_send_attachment', 'zooid_send_message',
       'zooid_start_task_threads',
     ])
   })
@@ -98,6 +98,14 @@ describe('Pi Zooid extension', () => {
     )
     expect(calls).toEqual([
       { acpSessionId: 'session-a', method: 'sendMessage', params: { room: '!a:localhost', thread_id: '$t', text: 'noted' } },
+    ])
+  })
+
+  it('zooid_send_attachment forwards path, name and caption (design modes §6.9)', async () => {
+    const { tools, calls } = harness({ ok: true, result: { event_id: '$e' } })
+    await tools.find((tool) => tool.name === 'zooid_send_attachment').execute('c', { path: 'out/deck.pptx', name: 'Deck.pptx' }, undefined, undefined, ctx())
+    expect(calls).toEqual([
+      { acpSessionId: 'session-a', method: 'sendAttachment', params: { path: 'out/deck.pptx', name: 'Deck.pptx', caption: undefined } },
     ])
   })
 

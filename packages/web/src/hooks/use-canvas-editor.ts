@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { toast } from "sonner";
-import { MatrixClientPeg } from "@/client/peg";
-import { ASSET_LIMITS, findAssets, isMxc, MAX_ASSETS, uploadKind } from "@/lib/artifacts/assets";
+import { findAssets } from "@/lib/artifacts/assets";
 import {
   type Box,
   CanvasDoc,
@@ -19,6 +18,7 @@ import { PreviewMessage } from "@/lib/artifacts/srcdoc";
 import { flipScale, type Styles } from "@/lib/artifacts/styles";
 import { copyToClipboard } from "@/lib/browser-actions";
 import type { ArtifactKind } from "@/model/types";
+import { uploadAsset } from "./use-artifact-assets";
 import { useStyleDraft } from "./use-style-draft";
 
 export type EditorMode = "off" | "inspect" | "style" | "full";
@@ -57,18 +57,6 @@ interface InsertOptions {
   w?: number;
   h?: number;
   src?: string;
-}
-
-/** An image's own size, or null (the template's then). Decoded off the DOM. */
-async function imageSize(file: File): Promise<{ w: number; h: number } | null> {
-  try {
-    const bitmap = await createImageBitmap(file);
-    const size = { w: bitmap.width, h: bitmap.height };
-    bitmap.close();
-    return size.w > 0 && size.h > 0 ? size : null;
-  } catch {
-    return null;
-  }
 }
 
 /** Properties panel open or closed, kept per user (spec §6.1). */
@@ -283,38 +271,11 @@ export function useCanvasEditor(o: {
   async function addFile(file: File, at?: { x: number; y: number }) {
     const d = docRef.current;
     if (!d || !o.editable) return;
-    const kind = uploadKind(file.type);
-    if (!kind) {
-      toast.error("Only images and videos can be dropped here.");
-      return;
-    }
-    if (file.size > ASSET_LIMITS[kind]) {
-      toast.error(`This ${kind} is larger than ${ASSET_LIMITS[kind] / 1024 / 1024} MB.`);
-      return;
-    }
-    if (findAssets(d.text).size >= MAX_ASSETS) {
-      toast.error(`An artifact holds at most ${MAX_ASSETS} images, videos and fonts.`);
-      return;
-    }
-    const client = MatrixClientPeg.safeGet();
-    if (!client) return;
-    const pending = toast.loading(`Uploading ${file.name}`);
-    let src: string;
-    try {
-      src = (await client.uploadContent(file, { name: file.name, type: file.type })).content_uri;
-    } catch {
-      toast.error("Could not upload the file");
-      return;
-    } finally {
-      toast.dismiss(pending);
-    }
-    if (!isMxc(src)) {
-      toast.error("Could not upload the file");
-      return;
-    }
+    const up = await uploadAsset(file, findAssets(d.text).size);
+    if (!up) return;
+    const { mxc: src, kind } = up;
     const { frame } = latest.current.o;
-    const own = kind === "image" ? await imageSize(file) : null;
-    const base = own ?? { w: 640, h: 360 };
+    const base = up.size ?? { w: 640, h: 360 };
     const k = Math.min(1, (frame.width * 0.6) / base.w, (frame.height * 0.6) / base.h);
     const [w, h] = [Math.max(1, Math.round(base.w * k)), Math.max(1, Math.round(base.h * k))];
     const origin = latest.current.selection?.origin;

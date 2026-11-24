@@ -6,18 +6,44 @@
 
 export const ARTIFACT_HINT_FIELD = "dev.fabrium.artifact_hint";
 
-/** Menu order. Whiteboard and Motion are level-5 kinds: the hint goes out, the agent says it cannot make them yet. */
+/** Menu order. */
 export const CREATE_TYPES = [
   { type: "slides", label: "Slides", description: "A slide deck" },
   { type: "design", label: "Design", description: "Screens or a prototype" },
   { type: "design-system", label: "Design system", description: "Colors, type and components" },
-  { type: "whiteboard", label: "Whiteboard", description: "Not available yet", later: true },
-  { type: "motion", label: "Motion", description: "Not available yet", later: true },
+  { type: "whiteboard", label: "Whiteboard", description: "Notes, shapes and links on a board" },
+  { type: "motion", label: "Motion", description: "An animation in scenes" },
 ] as const;
 
 export type CreateType = (typeof CREATE_TYPES)[number]["type"];
 
 export const createLabel = (type: CreateType) => CREATE_TYPES.find((t) => t.type === type)!.label;
+
+/** Example prompts (spec §3.1), offered while the composer is empty; one fills the field. */
+export const CREATE_EXAMPLES: Record<CreateType, readonly string[]> = {
+  slides: [
+    "A 10-slide pitch deck for a seed round: problem, solution, market, traction, team and the ask",
+    "A 5-slide project update for the leadership team, with one chart",
+    "A short training deck from the notes in this thread",
+  ],
+  design: [
+    "A sign-up flow for a phone in three screens: welcome, form and confirmation",
+    "A pricing page with three plans, for desktop and phone",
+    "A dashboard for support tickets: open count, response time and a ticket list",
+  ],
+  "design-system": [
+    "A design system for a calm health app: colors, type, spacing and buttons",
+    "A design system taken from the deck in this thread",
+  ],
+  whiteboard: [
+    "A mind map of our launch plan, grouped by team",
+    "A retro board: what went well, what did not, and actions",
+  ],
+  motion: [
+    "A 10-second animated title for our product launch",
+    "An animated bar chart of monthly sign-ups in three scenes",
+  ],
+};
 
 const COMMAND = /^\/([a-z-]+)(?:\s+|$)/i;
 

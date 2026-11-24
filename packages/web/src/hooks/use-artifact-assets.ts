@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { MatrixClientPeg } from "@/client/peg";
-import { ASSET_LIMITS, type AssetKind, assetType, findAssets } from "@/lib/artifacts/assets";
+import { ASSET_LIMITS, type AssetKind, assetType, findAssets, isMxc, MAX_ASSETS, uploadKind } from "@/lib/artifacts/assets";
 import { fetchAuthedMedia } from "@/lib/matrix/authed-media";
 
 /**
@@ -35,9 +36,15 @@ function load(mxc: string, kind: AssetKind): Promise<FrameAsset | null> {
   return p;
 }
 
-/** The assets `text` names, as they arrive; `named` counts them all, loaded or not. */
-export function useArtifactAssets(text: string | null): { assets: FrameAsset[]; named: number } {
-  const wanted = useMemo(() => (text === null ? new Map<string, AssetKind>() : findAssets(text)), [text]);
+/**
+ * The assets `text` names, as they arrive; `named` counts them all, loaded or not. `find`
+ * reads them from the text: markup by default, a whiteboard's nodes (`findBoardAssets`).
+ */
+export function useArtifactAssets(
+  text: string | null,
+  find: (text: string) => Map<string, AssetKind> = findAssets,
+): { assets: FrameAsset[]; named: number } {
+  const wanted = useMemo(() => (text === null ? new Map<string, AssetKind>() : find(text)), [text, find]);
   const key = [...wanted].map(([mxc, kind]) => `${kind} ${mxc}`).join("\n");
   const [loaded, setLoaded] = useState<ReadonlyMap<string, FrameAsset | null>>(new Map());
   useEffect(() => {
@@ -69,4 +76,56 @@ export async function assetDataUrls(assets: readonly FrameAsset[]): Promise<Map<
       r.readAsDataURL(a.blob.type ? a.blob : a.blob.slice(0, a.blob.size, "application/octet-stream"));
     });
   return new Map(await Promise.all(assets.map(async (a) => [a.mxc, await read(a)] as const)));
+}
+
+/** An image's own size, or null. Decoded off the DOM. */
+async function imageSize(file: File): Promise<{ w: number; h: number } | null> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const size = { w: bitmap.width, h: bitmap.height };
+    bitmap.close();
+    return size.w > 0 && size.h > 0 ? size : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The user's image or video file, uploaded through authenticated media (spec §5.4), for an
+ * artifact that already names `named` assets. Null, after telling the user, when the file is
+ * no image or video, too large, one too many, or the upload failed.
+ */
+export async function uploadAsset(
+  file: File,
+  named: number,
+): Promise<{ mxc: string; kind: "image" | "video"; size: { w: number; h: number } | null } | null> {
+  const kind = uploadKind(file.type);
+  if (!kind) {
+    toast.error("Only images and videos can be dropped here.");
+    return null;
+  }
+  if (file.size > ASSET_LIMITS[kind]) {
+    toast.error(`This ${kind} is larger than ${ASSET_LIMITS[kind] / 1024 / 1024} MB.`);
+    return null;
+  }
+  if (named >= MAX_ASSETS) {
+    toast.error(`An artifact holds at most ${MAX_ASSETS} images, videos and fonts.`);
+    return null;
+  }
+  const client = MatrixClientPeg.safeGet();
+  if (!client) return null;
+  const pending = toast.loading(`Uploading ${file.name}`);
+  let mxc: string;
+  try {
+    mxc = (await client.uploadContent(file, { name: file.name, type: file.type })).content_uri;
+  } catch {
+    mxc = "";
+  } finally {
+    toast.dismiss(pending);
+  }
+  if (!isMxc(mxc)) {
+    toast.error("Could not upload the file");
+    return null;
+  }
+  return { mxc, kind, size: kind === "image" ? await imageSize(file) : null };
 }

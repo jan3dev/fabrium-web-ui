@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prepare an Ubuntu 24.04 VM to become an agent VM image: install Node 22, pnpm,
-# opencode, gh and Docker CE, and build the zooid CLI at --ref. It reads no bundle and
-# installs no service: provision.sh adds them on each VM made from the image.
+# opencode, gh, Docker CE and the render tools, and build the zooid CLI at --ref. It reads
+# no bundle and installs no service: provision.sh adds them on each VM made from the image.
 # See "Build a VM image" in deploy/README.md.
 set -euo pipefail
 
@@ -12,13 +12,19 @@ REPO_URL="https://github.com/jan3dev/fabrium-web-ui.git"
 INSTALL_DOCKER=1
 PNPM_VERSION=12.9.1 # same as deploy/Dockerfile and provision.sh
 OPENCODE_DOCKERFILE="packages/runtime-docker/docker/agent-opencode/Dockerfile"
+# Render tools for exports the agent makes (DESIGN_MODES_SPEC.md §6.9). Each pin passed
+# package-vetting; agent-images:check does not track these, bump them by hand after vetting.
+PLAYWRIGHT_VERSION=1.65.1
+PYTHON_PPTX_VERSION=1.0.2
+PYTHON_PPTX_SHA256=160838e0b8565a8b1f67947675886e9fea18aa5e795db7ae531606d68e785cba # the py3-none-any wheel
 
 usage() {
   cat <<USAGE
 Usage: prepare-image.sh --ref <commit|branch> [--repo-dir DIR] [--repo-url URL] [--no-docker]
 
 Prepares this VM to become an agent VM image. Installs Node 22, pnpm, opencode
-(the version that the agent-opencode image pins), gh and Docker CE, enables linger,
+(the version that the agent-opencode image pins), gh, Docker CE and the render tools
+(Playwright with headless Chromium, ffmpeg, python-pptx), enables linger,
 and builds the zooid CLI at --ref. Reads no bundle and installs no service: run
 provision.sh with the bundle on each VM made from the image. Ubuntu only. Needs sudo.
 Stops when another opencode comes first in PATH, for example ~/.opencode/bin.
@@ -191,9 +197,29 @@ else
     die "opencode $OPENCODE_VERSION is not the first opencode in the service PATH ($SERVICE_PATH)"
 fi
 
+# --- Render tools ---------------------------------------------------------
+# The agent converts artifacts on this VM: PNG and MP4 frames with Playwright's headless
+# Chromium, MP4 with ffmpeg, .pptx with python-pptx. ffmpeg and python-pptx's dependencies
+# come from Ubuntu; python-pptx itself from PyPI, hash-pinned, without its dependencies.
+log "Installing the render tools"
+$APT install -y ffmpeg python3-pip python3-lxml python3-pil python3-xlsxwriter python3-typing-extensions
+if [ "$(python3 -c 'import importlib.metadata as m; print(m.version("python-pptx"))' 2>/dev/null || true)" != "$PYTHON_PPTX_VERSION" ]; then
+  printf 'python-pptx==%s --hash=sha256:%s\n' "$PYTHON_PPTX_VERSION" "$PYTHON_PPTX_SHA256" |
+    sudo python3 -m pip install --break-system-packages --no-deps --only-binary :all: --require-hashes -r /dev/stdin
+fi
+PLAYWRIGHT="$(sudo npm prefix -g)/bin/playwright"
+if [ "$("$PLAYWRIGHT" --version 2>/dev/null || true)" != "Version $PLAYWRIGHT_VERSION" ]; then
+  sudo npm install -g --ignore-scripts "playwright@$PLAYWRIGHT_VERSION"
+fi
+# As this user, not root: the browser goes to ~/.cache/ms-playwright, where the agent looks.
+# --with-deps installs Chromium's system libraries with sudo.
+"$PLAYWRIGHT" install --with-deps --only-shell chromium
+python3 -c 'import pptx' || die "python-pptx does not import"
+ffmpeg -hide_banner -version >/dev/null || die "ffmpeg does not run"
+
 cat <<EOF_NEXT
 
-IMAGE READY: Node $(node -v), pnpm $PNPM_VERSION, opencode $OPENCODE_VERSION, the CLI built at $SHA.
+IMAGE READY: Node $(node -v), pnpm $PNPM_VERSION, opencode $OPENCODE_VERSION, Playwright $PLAYWRIGHT_VERSION, python-pptx $PYTHON_PPTX_VERSION, ffmpeg, the CLI built at $SHA.
 
 NEXT STEPS
   1. Check for credentials, clean this VM and stop it: see "Build a VM image" in deploy/README.md.
