@@ -137,6 +137,13 @@ export interface MatrixBinding {
    * @default 'mention'
    */
   trigger: 'mention' | 'any'
+  /**
+   * Matrix user IDs this agent answers. Absent: everybody. A list of 1 to 20
+   * IDs, compared byte for byte: only those users start or steer a turn, and
+   * the agent still takes the return of an agent that it called. Any other
+   * value, `[]` too, is a config error.
+   */
+  senders?: string[]
 }
 
 /**

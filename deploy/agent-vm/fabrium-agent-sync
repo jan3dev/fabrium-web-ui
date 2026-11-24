@@ -11,11 +11,23 @@ ZOOID_DIR=$ROOT/home/ubuntu/zooid
 WORKFORCE=$ZOOID_DIR/workforce
 AGENTS_DIR=$WORKFORCE/agents
 UNIT_FILE=$ROOT/home/ubuntu/.config/systemd/user/fabrium-agent.service
+STOP_MARK=$WORKFORCE/.sync-stopped    # this script stopped fabrium-agent: the next list starts it
+RESTART_MARK=$WORKFORCE/.sync-restart # the files changed and fabrium-agent has not restarted since
 HAVEN_PROVIDER_NPM="github:jan3dev/haven-proxy#semver:0.x" # as in configure-agent.sh
 # The rules of the contracts, section 1. \A and \z: in jq, ^ and $ also match at a line break.
 NAME_RULE='^[a-z][a-z0-9-]{0,31}$'
 NAME_RE='\A[a-z][a-z0-9-]{0,31}\z'
 ROOM_RE='\A[#!][^\s'"'"'",\\]+\z'
+# senders (contracts, section 5): absent or null, or 1 to 20 user IDs of printable ASCII.
+# zooid core applies the same pattern, so it starts with every list that this script writes.
+SENDER_RE='\A@[\x21-\x39\x3b-\x7e]+:[\x21-\x7e]+\z'
+# The rules of one agent, defined once for every jq program below (with "${RULE_ARGS[@]}"),
+# so the skip lines, the list, and the stop cannot disagree.
+RULES='def name_ok: .name | test($name_re);
+def rooms_ok: .rooms | length <= 20 and all(.[]; test($room_re) and utf8bytelength <= 255);
+def senders_ok: .senders == null or (.senders | type == "array" and length >= 1 and length <= 20
+  and all(.[]; type == "string" and test($sender_re) and utf8bytelength <= 255));'
+RULE_ARGS=(--arg name_re "$NAME_RE" --arg room_re "$ROOM_RE" --arg sender_re "$SENDER_RE")
 VM_RE='^[a-z0-9][a-z0-9-]{0,62}$'
 
 dry_run=0
@@ -44,6 +56,25 @@ no_list() {
   exit "$require"
 }
 
+# Remembers that fabrium-agent must restart, before a file changes: a restart that fails, or a run
+# that stops halfway, leaves the mark, and the next run restarts even when it changes no file.
+mark_restart() {
+  [ -e "$RESTART_MARK" ] || : >"$RESTART_MARK" || die "cannot write $RESTART_MARK"
+}
+
+# service ACTION WORD: systemctl --user ACTION fabrium-agent, then prints "WORD: fabrium-agent".
+# With --dry-run, or with FABRIUM_AGENT_SYNC_DIR and no unit file under it, it only prints.
+# Without a unit file the service is not set up yet: nothing to do.
+service() {
+  if [ "$dry_run" -eq 0 ] && [ -f "$UNIT_FILE" ]; then
+    XDG_RUNTIME_DIR="/run/user/$(id -u)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus" \
+      systemctl --user "$1" fabrium-agent.service || return 1
+  elif [ "$dry_run" -eq 0 ] && [ -z "$ROOT" ]; then
+    return 0
+  fi
+  echo "$2: fabrium-agent"
+}
+
 # put FILE: install $work/new as FILE through a temporary file and a rename, when the content differs.
 put() {
   local file=$1 tmp
@@ -51,6 +82,7 @@ put() {
   changed=1
   echo "write: $file"
   [ "$dry_run" -eq 1 ] && return 0
+  mark_restart
   tmp=$(mktemp "${file%/*}/.sync.XXXXXX") || die "cannot write in ${file%/*}"
   if ! { cat "$work/new" >"$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$file"; }; then
     rm -f "$tmp"
@@ -74,20 +106,28 @@ apply_list() {
   cat >"$work/answer.json" || die "cannot read the list"
 
   # A skip line per refused agent (its name as JSON, so on one line), then the others.
-  jq -r --arg name_re "$NAME_RE" --arg rule "$NAME_RULE" --arg room_re "$ROOM_RE" '
+  jq -r "${RULE_ARGS[@]}" --arg rule "$NAME_RULE" "$RULES"'
     .agents[]
-    | if (.name | test($name_re) | not) then "skip: \(.name | tojson): the name breaks the rule \($rule)"
-      elif (.rooms | length > 20 or any(.[]; (test($room_re) | not) or utf8bytelength > 255))
-      then "skip: \(.name): a room breaks the rule of the contracts"
+    | if (name_ok | not) then "skip: \(.name | tojson): the name breaks the rule \($rule)"
+      elif (rooms_ok | not) then "skip: \(.name): a room breaks the rule of the contracts"
+      elif (senders_ok | not) then "skip: \(.name): senders breaks the rule of the contracts"
       else empty end' "$work/answer.json" || die "cannot read the list"
-  jq --arg name_re "$NAME_RE" --arg room_re "$ROOM_RE" '
-    [.agents[]
-     | select((.name | test($name_re))
-              and (.rooms | length <= 20 and all(.[]; test($room_re) and utf8bytelength <= 255)))]' \
+  jq "${RULE_ARGS[@]}" "$RULES"'[.agents[] | select(name_ok and rooms_ok and senders_ok)]' \
     "$work/answer.json" >"$work/list.json" || die "cannot read the list"
   count=$(jq length "$work/list.json") || die "cannot read the list"
   # zooid refuses a zooid.yaml without agents: an empty list keeps the files, as no list does.
-  [ "$count" -gt 0 ] || no_list "every agent was skipped"
+  if [ "$count" -eq 0 ]; then
+    # An agent with a senders value (a list, or one that breaks the rule), skipped for any reason:
+    # the files of an earlier run can have no filter, or the filter of an earlier owner, so no
+    # agent goes on with them until a list applies (contracts, section 5).
+    if jq -e 'any(.agents[]; .senders != null)' "$work/answer.json" >/dev/null; then
+      if [ "$dry_run" -eq 0 ]; then
+        { mkdir -p "$WORKFORCE" && : >"$STOP_MARK"; } || die "cannot write $STOP_MARK"
+      fi
+      service stop stop || die "cannot stop fabrium-agent"
+    fi
+    no_list "every agent was skipped"
+  fi
 
   changed=0
   [ "$dry_run" -eq 1 ] || mkdir -p "$AGENTS_DIR" || die "cannot make $AGENTS_DIR"
@@ -105,7 +145,7 @@ apply_list() {
       }},
       agents: (map({key: .name, value: {
         acp: {preset: "opencode"},
-        matrix: {display_name: .name, rooms: .rooms, trigger: "mention"}
+        matrix: ({display_name: .name, rooms: .rooms, trigger: "mention"} + (if .senders then {senders} else {} end))
       }}) | from_entries)
     }' "$work/list.json" >"$work/new" || die "cannot build zooid.yaml"
   put "$WORKFORCE/zooid.yaml"
@@ -147,18 +187,21 @@ apply_list() {
     jq -e --arg name "$name" 'any(.agents[]; .name == $name)' "$work/answer.json" >/dev/null && continue
     changed=1
     echo "remove: $dir"
+    [ "$dry_run" -eq 1 ] || mark_restart
     [ "$dry_run" -eq 1 ] || rm -rf -- "$dir" || die "cannot remove $dir"
   done
 
-  if [ "$changed" -eq 0 ]; then
-    echo "no change"
-  elif [ -n "$ROOT" ] || [ "$dry_run" -eq 1 ]; then
-    echo "restart: fabrium-agent"
-  elif [ -f "$UNIT_FILE" ]; then
+  # Each mark stays until its action works, so a failed one is tried again by the next run.
+  if [ -e "$STOP_MARK" ]; then
+    # This script stopped it: restart starts a stopped unit, try-restart would leave it stopped.
+    service restart start || die "cannot start fabrium-agent"
+    [ "$dry_run" -eq 1 ] || rm -f "$STOP_MARK" "$RESTART_MARK"
+  elif [ "$changed" -eq 1 ] || [ -e "$RESTART_MARK" ]; then
     # try-restart: a service that is stopped (provision.sh stops it for an update) stays stopped.
-    XDG_RUNTIME_DIR="/run/user/$(id -u)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus" \
-      systemctl --user try-restart fabrium-agent.service || die "cannot restart fabrium-agent"
-    echo "restart: fabrium-agent"
+    service try-restart restart || die "cannot restart fabrium-agent"
+    [ "$dry_run" -eq 1 ] || rm -f "$RESTART_MARK"
+  else
+    echo "no change"
   fi
   exit 0
 }
