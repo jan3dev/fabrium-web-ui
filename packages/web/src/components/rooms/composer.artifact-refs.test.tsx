@@ -6,6 +6,7 @@ import {
   ARTIFACT_REFS_FIELD,
   formatArtifactRefs,
   getArtifactRefDrafts,
+  QUIET_FIELD,
   setArtifactRefDrafts,
   type ArtifactRef,
 } from "@/lib/artifacts/refs";
@@ -63,5 +64,28 @@ describe("<Composer /> artifact annotations", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: /send message/i }));
     await waitFor(() => expect(send).toHaveBeenCalled());
     expect(send.mock.calls[0][3].body).toBe(formatArtifactRefs([ref]));
+  });
+
+  it("sends comments with Send to agent off in a quiet message, and mentions the agent in the reply", async () => {
+    const { send } = setup();
+    render(<Composer roomId={roomId} threadRootEventId="$root" />);
+    const held = { ...ref, note: "for later", target: { ...ref.target, selector: "h1" } };
+    act(() => setArtifactRefDrafts(roomId, "$root", [{ ...ref, agent: "@coder:h.example" }, held]));
+    const user = userEvent.setup();
+    const boxes = screen.getAllByRole("checkbox", { name: "Send to agent" });
+    expect(boxes.map((b) => (b as HTMLInputElement).checked)).toEqual([true, true]);
+    await user.click(boxes[1]!);
+    await user.type(screen.getByRole("textbox", { name: /message/i }), "please{Enter}");
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    const quiet = send.mock.calls[0][3];
+    expect(quiet[QUIET_FIELD]).toBe(true);
+    expect(quiet[ARTIFACT_REFS_FIELD]).toEqual([held]);
+    expect(quiet["m.mentions"]).toBeUndefined();
+    const reply = send.mock.calls[1][3];
+    expect(reply[QUIET_FIELD]).toBeUndefined();
+    expect(reply[ARTIFACT_REFS_FIELD]).toEqual([ref]);
+    expect(reply.body).toBe(`please\n\n${formatArtifactRefs([ref])}`);
+    expect(reply["m.mentions"]).toEqual({ user_ids: ["@coder:h.example"] });
+    expect(getArtifactRefDrafts(roomId, "$root")).toEqual([]);
   });
 });

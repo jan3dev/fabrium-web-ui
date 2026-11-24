@@ -3,6 +3,7 @@ import {
   AGENT_NOTIFY_INSTRUCTIONS,
   ARTIFACT_DESCRIPTION,
   ARTIFACT_INSTRUCTIONS,
+  DESIGN_SYSTEM_DESCRIPTION,
   HANDOFF_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
 } from '@zooid/context-mcp'
@@ -41,7 +42,7 @@ describe('Pi Zooid extension', () => {
   it('registers the renamed surface plus the task and handoff tools', () => {
     const { tools } = harness()
     expect(tools.map((t) => t.name).sort()).toEqual([
-      'zooid_artifact', 'zooid_complete_task', 'zooid_get_history', 'zooid_get_members',
+      'zooid_artifact', 'zooid_complete_task', 'zooid_design_system', 'zooid_get_history', 'zooid_get_members',
       'zooid_get_recent_threads', 'zooid_get_room_info', 'zooid_get_rooms',
       'zooid_get_thread_history', 'zooid_handoff', 'zooid_send_message',
       'zooid_start_task_threads',
@@ -177,6 +178,14 @@ describe('zooid_handoff on pi ([[ZOD094]])', () => {
     expect(artifact.parameters.properties.assets).toEqual({ type: 'array', items: { type: 'string' } })
     await artifact.execute('id', { identifier: 'deck', assets: ['logo.png'] }, undefined, undefined, ctx())
     expect(calls.at(-1)).toMatchObject({ method: 'sendArtifact', params: { identifier: 'deck', assets: ['logo.png'] } })
+  })
+
+  it('zooid_design_system passes its arguments to the daemon as-is', async () => {
+    const { tools, calls } = harness()
+    const tool = tools.find((t) => t.name === 'zooid_design_system')!
+    expect(tool.description).toBe(DESIGN_SYSTEM_DESCRIPTION)
+    await tool.execute('id', { identifier: 'brand', component: 'Button' }, undefined, undefined, ctx())
+    expect(calls.at(-1)).toMatchObject({ method: 'designSystem', params: { identifier: 'brand', component: 'Button' } })
   })
 
   it('carries the MCP server instructions and the end-your-turn rule in promptGuidelines', () => {

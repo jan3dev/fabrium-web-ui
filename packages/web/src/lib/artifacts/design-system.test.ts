@@ -190,3 +190,58 @@ describe("fontFamilies", () => {
     ).toEqual(['"Inter", sans-serif', "Georgia, serif", "ui-monospace, monospace"]);
   });
 });
+
+describe("themes, fonts, icons, logos, layout (spec §5.1)", () => {
+  const MXC = "mxc://example.org/AbC123";
+  const s = parse({
+    colors: [{ name: "bg", value: "white" }],
+    themes: [
+      { name: "Dark", colors: [{ name: "bg", value: "black", description: "Page" }, { name: "x", value: "red;}" }] },
+      { name: "dark", colors: [] }, // duplicate name
+      { name: "", colors: [] },
+    ],
+    fonts: [
+      { name: "Inter", mxc: MXC, weight: 600, style: "italic" },
+      { name: "Bad weight", mxc: MXC, weight: "900;}", style: "sideways" },
+      { name: "No mxc", mxc: "https://example.org/f.woff2" },
+      { name: "Escape", mxc: 'mxc://example.org/a");}' },
+    ],
+    icons: [{ name: "Arrow", svg: "<svg></svg>" }, { name: "No svg" }],
+    logos: [{ name: "Mark", svg: "<svg></svg>" }],
+    layout: [{ name: "Page grid", value: "12 columns, 24px gutter", description: "Desktop" }, { name: "x" }],
+  });
+
+  it("reads them and drops what does not fit", () => {
+    expect(s.themes).toEqual([{ name: "dark", colors: [{ name: "bg", value: "black", description: "Page" }, { name: "x", value: "red;}" }] }]);
+    expect(s.fonts).toEqual([
+      { name: "Inter", mxc: MXC, weight: "600", style: "italic" },
+      { name: "Bad weight", mxc: MXC },
+    ]);
+    expect(s.icons).toEqual([{ name: "Arrow", svg: "<svg></svg>" }]);
+    expect(s.logos).toHaveLength(1);
+    expect(s.layout).toEqual([{ name: "Page grid", value: "12 columns, 24px gutter", description: "Desktop" }]);
+    expect(designSystemSections(s).map((x) => x.key)).toEqual(["colors", "themes", "fonts", "layout", "icons", "logos"]);
+  });
+
+  it("scopes theme values and leaves out unsafe ones", () => {
+    const page = designSystemSectionPage(s, "themes");
+    expect(page).toContain("#theme-dark{--color-bg: black;}");
+    expect(page).not.toContain("--color-x:");
+    expect(page).toContain('<section id="theme-dark"');
+    // Ids scoped per theme, so two themes with a `bg` never share one; the swatch keeps --color-bg.
+    expect(page).toContain('<div id="theme-dark-color-bg"><div class="swatch" style="background:var(--color-bg)">');
+    expect(page).toContain("Page");
+  });
+
+  it("loads fonts by mxc under a family of its own", () => {
+    const page = designSystemSectionPage(s, "fonts");
+    expect(page).toContain(`@font-face{font-family:"ds-font-0";src:url(${MXC});font-weight:600;font-style:italic;}`);
+    expect(page).toContain('class="sample f0"');
+    expect(page).not.toContain('"Inter"');
+  });
+
+  it("shows layout notes and icon cards", () => {
+    expect(designSystemSectionPage(s, "layout")).toContain("12 columns, 24px gutter");
+    expect(designSystemSectionPage(s, "icons")).toContain('id="icon-1"');
+  });
+});

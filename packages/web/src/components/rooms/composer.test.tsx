@@ -141,9 +141,63 @@ describe("<Composer />", () => {
       render(<Composer roomId={roomId} />);
       const user = userEvent.setup();
       const input = screen.getByRole("textbox", { name: /message/i });
-      await user.type(input, "/");
-      // In room mode there are no slash commands — no listbox appears
+      await user.type(input, "/cl");
+      // In room mode only the create commands exist; none matches "cl".
       expect(screen.queryByRole("listbox")).toBeNull();
+    });
+  });
+
+  describe("explicit mode (artifact hint)", () => {
+    it("/slides with a request sends it with the hint and a plain-text line", async () => {
+      const { send } = setup();
+      render(<Composer roomId={roomId} />);
+      const user = userEvent.setup();
+      const input = screen.getByRole("textbox", { name: /message/i });
+      await user.type(input, "/slides a deck about Q3");
+      await user.keyboard("{Escape}{Enter}");
+      await waitFor(() =>
+        expect(send).toHaveBeenCalledWith(roomId, null, "m.room.message", {
+          msgtype: "m.text",
+          body: "Create: Slides\n\na deck about Q3",
+          "dev.fabrium.artifact_hint": { type: "slides" },
+        }),
+      );
+    });
+
+    it("/design alone picks the kind for the next message", async () => {
+      const { send } = setup();
+      render(<Composer roomId={roomId} />);
+      const user = userEvent.setup();
+      const input = screen.getByRole("textbox", { name: /message/i });
+      await user.type(input, "/design");
+      await user.keyboard("{Enter}");
+      expect(await screen.findByTestId("create-chip")).toHaveTextContent("Create: Design");
+      expect(send).not.toHaveBeenCalled();
+      await user.type(input, "a login screen{Enter}");
+      await waitFor(() =>
+        expect(send).toHaveBeenCalledWith(roomId, null, "m.room.message", {
+          msgtype: "m.text",
+          body: "Create: Design\n\na login screen",
+          "dev.fabrium.artifact_hint": { type: "design" },
+        }),
+      );
+      expect(screen.queryByTestId("create-chip")).toBeNull();
+    });
+
+    it("the Create menu picks the kind", async () => {
+      const { send } = setup();
+      render(<Composer roomId={roomId} />);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Create" }));
+      await user.click(await screen.findByRole("menuitem", { name: /Whiteboard/ }));
+      expect(screen.getByTestId("create-chip")).toHaveTextContent("Create: Whiteboard");
+      await user.type(screen.getByRole("textbox", { name: /message/i }), "our roadmap{Enter}");
+      await waitFor(() =>
+        expect(send).toHaveBeenCalledWith(roomId, null, "m.room.message", expect.objectContaining({
+          body: "Create: Whiteboard\n\nour roadmap",
+          "dev.fabrium.artifact_hint": { type: "whiteboard" },
+        })),
+      );
     });
   });
 });

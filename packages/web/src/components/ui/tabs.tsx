@@ -1,19 +1,26 @@
 import { type ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 export function Tabs({
   value,
   onValueChange,
   tabs,
   children,
+  className,
+  listClassName,
+  panelClassName,
 }: {
   value: string;
   onValueChange: (v: string) => void;
   tabs: { value: string; label: ReactNode }[];
   children: ReactNode;
+  className?: string;
+  listClassName?: string;
+  panelClassName?: string;
 }) {
   return (
-    <div className="flex flex-col">
-      <div role="tablist" className="mb-4 flex gap-1 border-b border-border">
+    <div className={cn("flex flex-col", className)}>
+      <div role="tablist" className={cn("mb-4 flex gap-1 border-b border-border", listClassName)}>
         {tabs.map((t) => (
           <button
             key={t.value}
@@ -31,7 +38,9 @@ export function Tabs({
           </button>
         ))}
       </div>
-      <div role="tabpanel">{children}</div>
+      <div role="tabpanel" className={panelClassName}>
+        {children}
+      </div>
     </div>
   );
 }

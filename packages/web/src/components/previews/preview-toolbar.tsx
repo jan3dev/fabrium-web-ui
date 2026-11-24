@@ -2,10 +2,10 @@ import { useState } from "react";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
+  CommentIcon,
   ExternalLinkIcon,
   MonitorIcon,
   PhoneIcon,
-  PointerClickIcon,
   ReloadIcon,
   TabletIcon,
 } from "@/components/icons";
@@ -86,8 +86,8 @@ export function PreviewToolbar({
       {onAnnotatingChange ? (
         <IconButton
           size="small"
-          icon={<PointerClickIcon />}
-          label={annotating ? "Stop annotating" : "Annotate"}
+          icon={<CommentIcon />}
+          label={annotating ? "Stop commenting" : "Comment"}
           aria-pressed={annotating}
           tone={annotating ? "brand" : "default"}
           disabled={disabled}

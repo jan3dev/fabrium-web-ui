@@ -17,6 +17,7 @@ import {
   setFrameNotes,
   setFrameSkip,
   setOverview,
+  setSlideSize,
   setTokenField,
   slideLayouts,
   readLayouts,
@@ -82,6 +83,18 @@ describe("frame edits", () => {
     const design = `<body><section data-name="Home" data-width="1440"><p>x</p></section></body>`;
     expect(renameFrame(design, "design", 0, "Start")).toContain(`data-name="Start"`);
     expect(readFrames("design", resizeFrame(design, 0, 390, 99999))[0]).toMatchObject({ width: 390, height: 10000 });
+  });
+
+  it("sets the size of every slide on the body, and removes it for 16:9", () => {
+    const narrow = setSlideSize(DECK, "4:3");
+    expect(readFrames("slides", narrow).map((f) => [f.width, f.height])).toEqual(Array(3).fill([1440, 1080]));
+    expect(changed(DECK, narrow)).toBe(2);
+    expect(setSlideSize(narrow, "16:9")).toBe(DECK);
+    // A `<body` in a comment is not the tag; a source without one is re-serialized.
+    const odd = setSlideSize(`<!-- <body> --><body class="a"><section></section></body>`, "4:3");
+    expect(odd).toBe(`<!-- <body> --><body class="a" data-size="4:3"><section></section></body>`);
+    expect(readFrames("slides", setSlideSize("<section></section>", "4:3"))[0]).toMatchObject({ width: 1440 });
+    expect(readFrames("slides", `<body data-size="toString"><section></section></body>`)[0]).toMatchObject({ width: 1920 });
   });
 
   it("adds a given section after a frame, and blank artboards of a size", () => {

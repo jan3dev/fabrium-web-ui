@@ -295,6 +295,8 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         const name = nameByUserId.get(uid)
         if (name && cursors) cursors.saveSince(name, since)
       },
+      // The agent cursor lasts one turn (DESIGN_MODES_SPEC.md §6.8); `previews` is set below.
+      onTurnEnd: (uid, threadRoot) => previews?.clearFocus(uid, threadRoot),
     })
     contextSpawnRegistry.setTaskActions(transport.taskActions)
 
@@ -321,6 +323,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         onState: (preview) => tunnel?.send({ t: 'state', preview }),
         onLog: (agent_id, name, text) => tunnel?.send({ t: 'log', agent_id, name, text }),
         onRemove: (agent_id, name) => tunnel?.send({ t: 'remove', agent_id, name }),
+        onFocus: (agent_id, focus) => tunnel?.send({ t: 'focus', agent_id, focus }),
       })
       previews = supervisor
       // The model's raw arguments; the supervisor validates every field.
@@ -328,6 +331,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         start: (caller, input) => supervisor.start(caller, input as unknown as PreviewStartInput),
         stop: (caller, input) => supervisor.stop(caller, input as { name: string }),
         logs: (caller, input) => supervisor.logs(caller, input as { name: string; lines?: number }),
+        focus: (caller, input) => supervisor.focus(caller, input as Parameters<PreviewSupervisor['focus']>[1]),
       })
     }
 

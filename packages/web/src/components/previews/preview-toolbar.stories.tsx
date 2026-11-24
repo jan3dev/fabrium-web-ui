@@ -30,5 +30,5 @@ export const Annotating: Story = { args: { annotating: true } };
 export const PhoneWidth: Story = { args: { device: "phone" } };
 /** The app is not running: everything but the device width is off. */
 export const NotRunning: Story = { args: { disabled: true, path: "/" } };
-/** An agent viewing: no Annotate button. */
+/** An agent viewing: no Comment button. */
 export const NoAnnotate: Story = { args: { onAnnotatingChange: undefined } };

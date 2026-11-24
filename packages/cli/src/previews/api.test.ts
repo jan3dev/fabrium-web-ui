@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { previewApi } from './api.js'
 import type { PreviewHub } from './hub.js'
-import type { PreviewState } from './protocol.js'
+import type { AgentFocus, PreviewState } from './protocol.js'
 
 const AGENT = '@ws.coder:test'
 const PREVIEW: PreviewState = {
@@ -16,6 +16,13 @@ const PREVIEW: PreviewState = {
   since: '2026-11-09T00:00:00.000Z',
   exit_code: null,
   web: true,
+}
+const FOCUS: AgentFocus = {
+  agent_id: AGENT,
+  room_id: '!room:test',
+  thread_root: '$root',
+  identifier: 'deck',
+  selector: 'section:nth-of-type(2) > h1',
 }
 // OpenID token → user; alice is in the room, mallory is not, the agent is.
 const USERS: Record<string, string> = { alice: '@alice:test', mallory: '@mallory:test', agent: AGENT }
@@ -36,6 +43,8 @@ function setup() {
     list: (room: string) => (room === PREVIEW.room_id ? [PREVIEW] : []),
     log: () => ({ offset: 5, text: 'ready' }),
     isMember: async (userId: string) => JOINED.has(userId),
+    focusIn: (room: string) => (room === FOCUS.room_id ? [FOCUS] : []),
+    previewFocus: () => ({ path: '/', selector: 'main' }),
     command: vi.fn(() => true),
     createSession: vi.fn(() => ({ url: 'http://abc.preview.localhost:9000/', expires_at: 'x' })),
   }
@@ -58,9 +67,16 @@ describe('preview API', () => {
     expect(await (await call('GET', '/?room=!room:test', 'alice')).json()).toEqual([PREVIEW])
     expect(await (await call('GET', '/?room=!room:test', 'mallory')).json()).toEqual([])
     const one = await call('GET', `${ONE}?log_offset=0`, 'alice')
-    expect(await one.json()).toEqual({ ...PREVIEW, log: { offset: 5, text: 'ready' } })
+    expect(await one.json()).toEqual({ ...PREVIEW, log: { offset: 5, text: 'ready' }, focus: { path: '/', selector: 'main' } })
     expect((await call('GET', ONE, 'mallory')).status).toBe(404)
     expect((await call('GET', ONE, 'nobody')).status).toBe(401)
+  })
+
+  it('shows the agent cursor to room members only', async () => {
+    const { call } = setup()
+    expect(await (await call('GET', '/focus?room=!room:test', 'alice')).json()).toEqual([FOCUS])
+    expect(await (await call('GET', '/focus?room=!room:test', 'mallory')).json()).toEqual([])
+    expect((await call('GET', '/focus?room=!room:test', 'nobody')).status).toBe(401)
   })
 
   it('opens sessions and runs commands for humans only', async () => {

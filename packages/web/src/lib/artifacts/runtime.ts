@@ -1,3 +1,4 @@
+import { SLIDE_SIZES, type SlideSize } from "./frames";
 import type { RuntimeModule } from "./srcdoc";
 
 // The frame cannot fetch, so the parent loads runtimes from its own origin
@@ -57,4 +58,10 @@ export function composeFixRequest(
 ): string {
   const list = errors.map((e) => `- ${e}`).join("\n");
   return `The preview of artifact \`${identifier}\` throws ${errors.length === 1 ? "an error" : `${errors.length} errors`}:\n${list}\nCan you fix it?`;
+}
+
+/** As `composeFixRequest`, after the user changed the deck's slide size. */
+export function composeFitRequest(identifier: string, size: SlideSize): string {
+  const [width, height] = SLIDE_SIZES[size];
+  return `I changed the slides of artifact \`${identifier}\` to ${size} (${width}x${height} px). Can you check every slide and fit its content to the new size?`;
 }

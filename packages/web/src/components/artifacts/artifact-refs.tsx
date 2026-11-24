@@ -1,7 +1,7 @@
 import { CloseIcon, CommentIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { MAX_NOTE, type ArtifactRef, type ArtifactRefTarget } from "@/lib/artifacts/refs";
+import { MAX_NOTE, type ArtifactRef, type ArtifactRefDraft, type ArtifactRefTarget } from "@/lib/artifacts/refs";
 
 /** One line naming what an annotation points at. */
 export function describeTarget(t: ArtifactRefTarget): string {
@@ -28,13 +28,18 @@ function RefBody({ item: r }: { item: ArtifactRef }) {
   );
 }
 
-/** Annotations waiting in the composer. */
+/**
+ * Annotations waiting in the composer. "Send to agent" (spec §6.6, on by default): the checked ones
+ * go in the reply to the agent, the others in a quiet message that wakes no agent.
+ */
 export function ArtifactRefChips({
   refs,
   onRemove,
+  onSendToAgent,
 }: {
-  refs: readonly ArtifactRef[];
+  refs: readonly ArtifactRefDraft[];
   onRemove: (index: number) => void;
+  onSendToAgent?: (index: number, on: boolean) => void;
 }) {
   if (refs.length === 0) return null;
   return (
@@ -46,6 +51,17 @@ export function ArtifactRefChips({
         >
           <CommentIcon className="mt-0.5 size-3.5 shrink-0 text-text-tertiary" />
           <RefBody item={r} />
+          {onSendToAgent ? (
+            <label className="flex shrink-0 cursor-pointer items-center gap-1 text-caption1 text-text-secondary">
+              <input
+                type="checkbox"
+                checked={!r.quiet}
+                onChange={(e) => onSendToAgent(i, e.target.checked)}
+                className="size-3.5 cursor-pointer accent-accent-brand"
+              />
+              Send to agent
+            </label>
+          ) : null}
           <button
             type="button"
             aria-label={`Remove annotation ${i + 1}`}

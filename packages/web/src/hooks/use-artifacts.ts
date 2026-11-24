@@ -3,8 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { MatrixClientPeg } from "@/client/peg";
 import { MAX_ARTIFACT_BYTES, sha256Hex } from "@/events/fabrium-artifact";
 import { fetchAuthedMedia } from "@/lib/matrix/authed-media";
-import type { ArtifactVersion } from "@/model/types";
-import { useThreadEntries } from "./use-timeline-entries";
+import type { ArtifactVersion, TimelineMessage } from "@/model/types";
 
 /** The side panels beside a thread: an artifact or a preview, one at a time. */
 const PANEL_KEYS = ["artifact", "version", "preview"];
@@ -67,13 +66,8 @@ export function useArtifactRoute() {
   };
 }
 
-/** Every artifact version in a thread, oldest first. */
-export function useThreadArtifacts(
-  roomId: string,
-  threadRootId: string,
-  workforceSpaceId: string | null,
-): ArtifactVersion[] {
-  const { replies } = useThreadEntries(roomId, threadRootId, workforceSpaceId);
+/** Every artifact version among a thread's replies (`useThreadEntries`), oldest first. */
+export function useThreadArtifacts(replies: readonly TimelineMessage[]): ArtifactVersion[] {
   return useMemo(
     () =>
       replies

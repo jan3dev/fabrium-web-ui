@@ -125,3 +125,6 @@ export const restartPreview = (agentId: string, name: string) =>
   call<void>("POST", previewPath(agentId, name, "/restart"));
 export const stopPreview = (agentId: string, name: string) =>
   call<void>("POST", previewPath(agentId, name, "/stop"));
+/** Where the room's agents work now (the agent cursor); untrusted, read with `readAgentFocus`. */
+export const listAgentFocus = (roomId: string) =>
+  call<unknown>("GET", `/previews/focus?room=${encodeURIComponent(roomId)}`);

@@ -62,7 +62,8 @@ import { toMatrixHtml } from './markdown-to-matrix-html.js'
 import { PendingMediaStore, type PendingMediaItem } from './pending-media.js'
 import { MediaClient, MAX_INLINE_IMAGE_BYTES, INLINE_IMAGE_MIMES } from './media-client.js'
 import { writeAttachment } from './attachments.js'
-import { userEditedArtifactLines } from './artifacts.js'
+import { artifactHintLine, userEditedArtifactLines } from './artifacts.js'
+import { designSystemChoiceLine } from './design-systems.js'
 import { SyncLoop } from './sync-loop.js'
 import { NO_PENDING_INPUT } from '@zooid/core'
 import { TaskRegistry, MAX_OPEN_TASKS_PER_ROOM, type TaskJournal, type TaskRecord } from './task-registry.js'
@@ -145,6 +146,8 @@ export interface CreateMatrixTransportOptions {
   returnGraceMs?: number
   /** Fallback for a hold on a callee on another workstation ([[ZOD092]] §5). Defaults to `REMOTE_RETURN_GRACE_MS`. */
   remoteReturnGraceMs?: number
+  /** An agent's turn ended (also on error): the daemon clears its live cursor (DESIGN_MODES_SPEC.md §6.8). */
+  onTurnEnd?: (agentUserId: string, threadRoot: string) => void
 }
 
 interface SessionContext {
@@ -1495,7 +1498,11 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           return [] as string[]
         }),
       ])
-      const fullPromptText = [promptText, ...pathLines, ...editedLines].filter(Boolean).join('\n')
+      // Design modes §6.8: the kind the user picked in the composer.
+      const hintLine = artifactHintLine(input.event?.content)
+      // Design modes §5.6: the sender's own design system, or off.
+      const dsLine = designSystemChoiceLine(input.event?.content)
+      const fullPromptText = [promptText, hintLine, dsLine, ...pathLines, ...editedLines].filter(Boolean).join('\n')
       const promptResult = await agents.prompt(agent.name, {
         threadId: sessionKey,
         channelId: roomId,
@@ -1539,6 +1546,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       throw err
     } finally {
       await typing.exit(roomId, agent, sessionId)
+      opts.onTurnEnd?.(agent.userId, threadRoot)
       // Wait for every queued send (mid-turn flushes, tool/plan events, final
       // flush) to settle before announcing the turn's end — and run this even
       // when the turn above threw, so the room never hangs on a spinner.

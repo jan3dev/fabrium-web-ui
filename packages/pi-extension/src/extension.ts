@@ -4,6 +4,7 @@ import {
   ARTIFACT_KINDS,
   ARTIFACT_INSTRUCTIONS,
   callDaemon,
+  DESIGN_SYSTEM_DESCRIPTION,
   HANDOFF_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
   type DaemonRequest,
@@ -218,6 +219,17 @@ export default function createExtension(pi: ExtensionAPI, deps: Deps = {}): void
       required: ['identifier'],
     },
     execute: (_id, params, _signal, _update, ctx) => call('sendArtifact', params, ctx, true),
+  })
+
+  pi.registerTool({
+    name: 'zooid_design_system',
+    label: 'Read design systems',
+    description: DESIGN_SYSTEM_DESCRIPTION,
+    parameters: {
+      type: 'object',
+      properties: { identifier: { type: 'string' }, room_id: { type: 'string' }, component: { type: 'string' } },
+    },
+    execute: (_id, params, _signal, _update, ctx) => call('designSystem', params, ctx, true),
   })
 
   // Role-conditional gating ([[ZOD084]]). Fail open on any error — the read

@@ -205,6 +205,7 @@ export type PresentMode = "current" | "start" | "notes";
  */
 export function FrameControls({
   zoom = null,
+  scale = null,
   onZoom,
   grid = false,
   onGrid,
@@ -215,6 +216,8 @@ export function FrameControls({
 }: {
   /** null fits the frame to the stage. */
   zoom?: number | null;
+  /** The scale the frame is drawn at, once it is known: what a fitted frame shows as its zoom. */
+  scale?: number | null;
   onZoom?: (zoom: number | null) => void;
   grid?: boolean;
   onGrid?: (grid: boolean) => void;
@@ -225,13 +228,14 @@ export function FrameControls({
   onEnd?: () => void;
 }) {
   const zoomValue = zoom === null ? "fit" : String(zoom);
-  const zoomLabel = ZOOMS.find((z) => z.value === zoomValue)?.label ?? `${Math.round((zoom ?? 1) * 100)}%`;
+  const percent = zoom ?? scale;
+  const zoomLabel = percent ? `${Math.round(percent * 100)}%` : "Fit";
   return (
     <>
       {onZoom && !grid ? (
         <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
-            <Button size="xs" variant="utility" data-testid="frame-zoom" aria-label={`Zoom: ${zoomLabel}`}>
+            <Button size="xs" variant="utility" data-testid="frame-zoom" aria-label={`Zoom: ${zoom === null && percent ? "Fit, " : ""}${zoomLabel}`}>
               {zoomLabel}
               <ChevronDownIcon />
             </Button>
