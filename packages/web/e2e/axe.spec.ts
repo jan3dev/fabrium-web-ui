@@ -109,6 +109,21 @@ for (const theme of ["light", "dark"] as const) {
       "Deploy notes for the **payments** release",
     );
     await daemon.sendThreadReply(roomId, rootId, "Staging is green");
+    // A motion artifact with two scenes and a tweak: the scene list, the transport and the Tweaks tab.
+    // Sent before the approval: the inbox reads approvals from the room's first sync window.
+    const motionRoot = await daemon.sendText(roomId, "Animate the intro");
+    await (
+      daemon.agentClient.sendEvent as (r: string, t: string, c: Record<string, unknown>) => Promise<unknown>
+    )(roomId, "dev.fabrium.artifact.version", {
+      identifier: "intro",
+      type: "motion",
+      title: "Intro",
+      body:
+        '<!doctype html><html><head><script type="application/json" data-tweaks>[{"name":"headline","label":"Headline","type":"text","value":"Hello"}]</script>' +
+        "<style>h1{animation:rise 1s both}@keyframes rise{from{opacity:0}}</style></head>" +
+        '<body><section data-name="Intro" data-duration="2000"><h1 data-tweak="headline">Hello</h1></section><section data-name="Outro"><h1>Bye</h1></section></body></html>',
+      "m.relates_to": { rel_type: "m.thread", event_id: motionRoot },
+    });
     await daemon.sendApprovalRequest(roomId, {
       sessionId: "s-axe",
       toolCallId: "tc-axe",
@@ -162,6 +177,36 @@ for (const theme of ["light", "dark"] as const) {
       title: "Checkout",
       body: '<!doctype html><html><body><section data-name="Cart"><h1>Cart</h1></section><section data-name="Phone" data-width="390" data-height="844"><h1>Phone cart</h1></section></body></html>',
       "m.relates_to": { rel_type: "m.thread", event_id: designRoot },
+    });
+    // A whiteboard with every note color, a shape, a section and an edge: text on each color in both themes.
+    const boardRoot = await daemon.sendText(roomId, "Map the launch");
+    await (
+      daemon.agentClient.sendEvent as (r: string, t: string, c: Record<string, unknown>) => Promise<unknown>
+    )(roomId, "dev.fabrium.artifact.version", {
+      identifier: "board",
+      type: "whiteboard",
+      title: "Board",
+      body: JSON.stringify({
+        nodes: [
+          { id: "s", type: "section", x: 0, y: 0, w: 900, h: 200, text: "Launch" },
+          ...["yellow", "orange", "red", "pink", "purple", "blue", "green", "gray"].map((color, i) => ({
+            id: color,
+            type: "note",
+            x: 20 + i * 110,
+            y: 60,
+            w: 100,
+            h: 100,
+            text: `A ${color} note`,
+            color,
+          })),
+          { id: "d", type: "shape", shape: "diamond", x: 20, y: 260, w: 160, h: 100, text: "Decide" },
+        ],
+        edges: [
+          { from: "yellow", to: "d", label: "then" },
+          { from: "blue", to: "d", label: "maybe", style: "dashed", color: "blue", arrow: "both" },
+        ],
+      }),
+      "m.relates_to": { rel_type: "m.thread", event_id: boardRoot },
     });
     // A design system, in its own thread too.
     const tokensRoot = await daemon.sendText(roomId, "Write down our tokens");
@@ -305,6 +350,11 @@ for (const theme of ["light", "dark"] as const) {
       if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
       await page.getByRole("tab", { name: new RegExp(`^${name}`) }).click();
     };
+    // Level 5: the Export menu with the agent's formats.
+    await sweep(`${room}?thread=${encodeURIComponent(deckRoot)}&artifact=deck`, async () => {
+      await page.getByTestId("artifact-export").click();
+      await page.getByRole("menuitem", { name: "Google Slides" }).waitFor();
+    });
     // Level 4: comment mode, the side panel's Comments tab with the list of open comments.
     await sweep(`${room}?thread=${encodeURIComponent(deckRoot)}&artifact=deck`, async () => {
       await sideTab("Comments");
@@ -332,6 +382,34 @@ for (const theme of ["light", "dark"] as const) {
       await page.getByRole("navigation", { name: "Design system sections" }).getByRole("button", { name: /Colors/ }).click();
       await page.getByRole("button", { name: "Edit" }).click();
       await page.getByLabel("Value of brand").waitFor();
+    });
+    // The whiteboard, drawn in the app, with a note selected and the agent's actions open.
+    await sweep(`${room}?thread=${encodeURIComponent(boardRoot)}&artifact=board`, async () => {
+      await page.getByRole("group", { name: /^A gray note/ }).click();
+      await page.getByRole("button", { name: "Ask agent" }).click();
+      await page.getByRole("menuitem", { name: "Find the gaps" }).waitFor();
+    });
+    // A connection selected: its controls in the toolbar.
+    await sweep(`${room}?thread=${encodeURIComponent(boardRoot)}&artifact=board`, async () => {
+      await page.getByRole("button", { name: /^Connection from A blue note/ }).click();
+      await page.getByRole("button", { name: "Reverse direction" }).waitFor();
+    });
+    // Comment mode on the board: the note box beside a node.
+    await sweep(`${room}?thread=${encodeURIComponent(boardRoot)}&artifact=board`, async () => {
+      const toggle = page.getByRole("button", { name: "Side panel" });
+      if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
+      await page.getByRole("tab", { name: /^Comments/ }).click();
+      await page.getByRole("group", { name: /^Decide/ }).click();
+      await page.getByTestId("comment-popover").waitFor();
+    });
+    // Motion: the scene list with duration fields, the transport, and the Tweaks tab.
+    await sweep(`${room}?thread=${encodeURIComponent(motionRoot)}&artifact=intro`, async () => {
+      await page.getByLabel("Duration of scene 2 in seconds").waitFor();
+      await page.getByTestId("motion-transport").getByRole("slider", { name: "Time" }).waitFor();
+      const toggle = page.getByRole("button", { name: "Side panel" });
+      if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
+      await page.getByRole("tab", { name: /^Tweaks/ }).click();
+      await page.getByTestId("tweaks-panel").waitFor();
     });
     await sweep(`${room}?pane=members`, text(human.username));
     await sweep(`${room}?pane=info`, text("Room info"));

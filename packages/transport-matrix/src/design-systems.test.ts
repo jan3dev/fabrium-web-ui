@@ -21,7 +21,7 @@ describe('parseDesignSystemList', () => {
     expect(
       parseDesignSystemList({
         systems: [
-          entry('brand', { default: true, for: ['slides', 'whiteboard'] }),
+          entry('brand', { default: true, for: ['slides', 'whiteboard', 'motion'] }),
           { ...entry('a'), room_id: '!with`tick' },
           { ...entry('b'), thread_id: undefined },
           { ...entry('c'), identifier: 'has space' },
@@ -30,7 +30,7 @@ describe('parseDesignSystemList', () => {
         ],
       }),
     ).toEqual([
-      { room_id: '!design:hs', thread_id: '$thread', identifier: 'brand', name: 'BRAND', default: true, for: ['slides'] },
+      { room_id: '!design:hs', thread_id: '$thread', identifier: 'brand', name: 'BRAND', default: true, for: ['slides', 'motion'] },
       { room_id: '!design:hs', thread_id: '$thread', identifier: 'plain', name: 'X y' },
     ])
     expect(parseDesignSystemList(undefined)).toEqual([])
@@ -41,7 +41,7 @@ describe('parseDesignSystemList', () => {
     const workspace = parseDesignSystemList({ systems: [entry('brand', { default: true }), entry('deck')] })
     expect(mergeDesignSystemLists([project, workspace])).toEqual([
       { ...project[0], default_for: ['slides'] },
-      { ...workspace[0], default_for: ['design'] },
+      { ...workspace[0], default_for: ['design', 'motion'] },
     ])
   })
 })
@@ -141,7 +141,7 @@ describe('MatrixContextProvider.designSystem', () => {
   it('reads a listed system and refuses an unlisted one', async () => {
     const { p, client } = provider({ '!room:hs': [], '!workspace:hs': [listed] })
     const read = await p.designSystem('!room:hs', { identifier: 'brand' })
-    expect(read).toMatchObject({ identifier: 'brand', default_for: ['slides', 'design'], overview: '# Brand' })
+    expect(read).toMatchObject({ identifier: 'brand', default_for: ['slides', 'design', 'motion'], overview: '# Brand' })
     expect(client.fetchThreadRelations).toHaveBeenCalledWith(expect.objectContaining({ roomId: '!design:hs', rootEventId: '$thread' }))
     await expect(p.designSystem('!room:hs', { identifier: 'other' })).rejects.toThrow(/not_found: no listed design system "other"/)
   })

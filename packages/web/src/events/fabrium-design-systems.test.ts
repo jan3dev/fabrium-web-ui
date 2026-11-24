@@ -22,7 +22,7 @@ describe("decodeDesignSystems", () => {
   it("keeps well-formed entries and drops the rest", () => {
     const systems = decodeDesignSystems({
       systems: [
-        entry("brand", { default: true, for: ["slides", "whiteboard", 3] }),
+        entry("brand", { default: true, for: ["slides", "motion", "whiteboard", 3] }),
         entry("brand"), // duplicate
         entry("no thread", {}),
         { ...entry("x"), room_id: "room" },
@@ -32,7 +32,7 @@ describe("decodeDesignSystems", () => {
       ],
     });
     expect(systems).toEqual([
-      { roomId: "!room:example.org", threadId: "$thread", identifier: "brand", name: "BRAND", isDefault: true, for: ["slides"] },
+      { roomId: "!room:example.org", threadId: "$thread", identifier: "brand", name: "BRAND", isDefault: true, for: ["slides", "motion"] },
       { roomId: "!room:example.org", threadId: "$thread", identifier: "plain", name: "Evil name", isDefault: false },
     ]);
   });

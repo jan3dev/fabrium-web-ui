@@ -17,6 +17,7 @@ import {
   setFrameNotes,
   setFrameSkip,
   setOverview,
+  setSceneDuration,
   setSlideSize,
   setTokenField,
   slideLayouts,
@@ -24,6 +25,7 @@ import {
   withFrames,
 } from "./edit";
 import { readFrames } from "./frames";
+import { readScenes } from "./motion";
 
 const DECK = `<!DOCTYPE html>
 <html lang="en">
@@ -127,6 +129,18 @@ describe("frame edits", () => {
     const html = `<body><div><section>nested</section></div><section><p>A</p></section><section><p>B</p></section></body>`;
     expect(frameSources(moveFrame(html, 1, 0))).toEqual(["<section><p>B</p></section>", "<section><p>A</p></section>"]);
     expect(moveFrame(html, 1, 0)).toContain("<div><section>nested</section></div>");
+  });
+
+  it("sets a motion scene's duration, clamped, rewriting only its start tag; moves scenes", () => {
+    const motion = `<body>\n<section data-name="Intro" data-duration="2000"><h1>Hi</h1></section>\n<section><h1>Bye</h1></section>\n</body>`;
+    const longer = setSceneDuration(motion, 1, 4500.4);
+    expect(readScenes(longer).map((s) => s.duration)).toEqual([2000, 4500]);
+    expect(longer).toContain(`<section data-duration="4500"><h1>Bye</h1></section>`);
+    expect(changed(motion, longer)).toBe(2);
+    expect(readScenes(setSceneDuration(motion, 0, 1e9))[0]!.duration).toBe(600_000);
+    expect(readScenes(setSceneDuration(motion, 0, NaN))[0]!.duration).toBe(3000);
+    expect(setSceneDuration(motion, 5, 1000)).toBe(motion);
+    expect(readScenes(moveFrame(longer, 1, 0)).map((s) => s.name)).toEqual(["Bye", "Intro"]);
   });
 
   it("finds the changed frames of a new version", () => {

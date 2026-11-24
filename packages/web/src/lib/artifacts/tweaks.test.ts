@@ -88,6 +88,17 @@ describe("writeTweaks", () => {
     expect(writeTweaks(out, "slides", {})).toBe(out);
   });
 
+  it("keeps motion timing and text, scene by scene", () => {
+    const json = JSON.stringify([
+      { name: "speed", label: "Speed", type: "range", var: "--speed", min: 200, max: 2000, step: 100, unit: "ms", value: 800 },
+      { name: "headline", label: "Headline", type: "text", value: "Hello" },
+    ]);
+    const body = '<section data-duration="2000"><h1 data-tweak="headline">Hello</h1></section><section data-duration="1000"><p>Bye</p></section>';
+    const out = writeTweaks(doc(json, body), "motion", { speed: 1200, headline: "Hi" });
+    expect(out).toContain("<style>:root { --speed: 1200ms; }</style></head>");
+    expect(out).toContain('<section data-duration="2000"><h1 data-tweak="headline">Hi</h1></section><section data-duration="1000"><p>Bye</p></section>');
+  });
+
   it("adds a :root rule for a variable no rule declares", () => {
     const json = JSON.stringify([{ name: "r", type: "range", var: "--radius", min: 0, max: 20, value: 4, unit: "px" }]);
     const out = writeTweaks(doc(json), "design", { r: 8 });

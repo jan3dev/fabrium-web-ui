@@ -246,6 +246,62 @@ describe("validateArtifactContent", () => {
     }
   });
 
+  it("wants a <section> per scene in motion", () => {
+    expect(() =>
+      validateArtifactContent("motion", '<body><section data-duration="3000"><h1 style="animation: in 1s">Hi</h1></section></body>'),
+    ).not.toThrow();
+    expect(() => validateArtifactContent("motion", "<body><div>a</div></body>")).toThrow(
+      'invalid_content: a "motion" artifact needs one <section> per scene as direct children of <body>.',
+    );
+  });
+
+  it("checks a whiteboard against the contract (spec §6.10)", () => {
+    const node = (id: string, extra: Record<string, unknown> = {}) => ({ id, type: "note", x: 0, y: 0, w: 200, h: 120, ...extra });
+    const board = (nodes: unknown[], edges: unknown[] = []) => JSON.stringify({ nodes, edges });
+    const ok = board(
+      [
+        node("a", { text: "Idea", color: "yellow" }),
+        node("b", { type: "shape", shape: "diamond", x: -100000, w: 8, h: 10000 }),
+        node("s", { type: "section", text: "Group" }),
+        node("img", { type: "image", mxc: "mxc://hs/abc" }),
+      ],
+      [
+        { from: "a", to: "b", label: "leads to", arrow: "both" },
+        { from: "b", to: "a", style: "dotted", color: "blue" },
+      ],
+    );
+    expect(() => validateArtifactContent("whiteboard", ok)).not.toThrow();
+    expect(() => validateArtifactContent("whiteboard", '{"nodes":[]}')).not.toThrow();
+    const bad: Array<[string, RegExp]> = [
+      ["not json", /whiteboard is one JSON object .*this is not JSON/],
+      ["[]", /`nodes` must be a list/],
+      ['{"edges":[]}', /`nodes` must be a list/],
+      [JSON.stringify({ nodes: [], edges: {} }), /`edges` must be a list/],
+      [board(Array.from({ length: 501 }, (_, i) => node(`n${i}`))), /has 501 nodes, the limit is 500/],
+      [board([node("a"), node("b")], Array.from({ length: 1001 }, () => ({ from: "a", to: "b" }))), /has 1001 edges, the limit is 1000/],
+      [board([node("a"), node("a")]), /node 2 \("a"\): duplicate id/],
+      [board([node("a b")]), /node 1 \("a b"\): `id` is 1-64/],
+      [board([node("a", { type: "sticky" })]), /`type` is one of note, text, shape, section, image, video/],
+      [board([node("a", { x: 100001 })]), /`x` and `y` are numbers within ±100000/],
+      [board([node("a", { y: Infinity })]), /`x` and `y`/],
+      [board([node("a", { w: 7 })]), /`w` and `h` are numbers from 8 to 10000/],
+      [board([node("a", { text: "x".repeat(2001) })]), /`text` is plain text up to 2000/],
+      [board([node("a", { color: "#ff0000" })]), /`color` is one of yellow/],
+      [board([node("a", { type: "shape", shape: "star" })]), /`shape` is one of rectangle, oval, diamond/],
+      [board([node("a", { type: "image", mxc: "https://x/y.png" })]), /`mxc` is an mxc:\/\/ URI/],
+      [board([node("a", { type: "image", mxc: "mxc://hs/a b" })]), /`mxc` is an mxc:\/\/ URI/],
+      [board([node("a")], [{ from: "a", to: "missing" }]), /edge 1: `from` and `to` must be node ids/],
+      [board([node("a")], [{ from: "a", to: "a" }]), /edge 1: `from` and `to` must be two different nodes/],
+      [board([node("a")], [{ from: "a", to: "a", label: "x".repeat(201) }]), /edge 1: `label` is plain text up to 200/],
+      [board([node("a")], [{ from: "a", to: "a", arrow: "start" }]), /edge 1: `arrow` is one of none, end, both/],
+      [board([node("a")], [{ from: "a", to: "a", style: "wavy" }]), /edge 1: `style` is one of solid, dashed, dotted/],
+      [board([node("a")], [{ from: "a", to: "a", color: "#00f" }]), /edge 1: `color` is one of yellow, .*leave it out for the neutral line/],
+    ];
+    for (const [content, message] of bad) {
+      expect(() => validateArtifactContent("whiteboard", content)).toThrow(message);
+    }
+  });
+
   it("leaves the other kinds alone", () => {
     expect(() => validateArtifactContent("html", "<p>x</p>")).not.toThrow();
     expect(() => validateArtifactContent("markdown", "")).not.toThrow();
@@ -673,8 +729,12 @@ describe("artifactHintLine (design modes §6.8)", () => {
       /^The user chose "design-system" in the composer: answer with a zooid_artifact of type "design-system"/,
     );
   });
-  it("tells the agent whiteboard and motion are not available yet", () => {
-    expect(artifactHintLine({ "dev.fabrium.artifact_hint": { type: "motion" } })).toMatch(/cannot show motion artifacts yet/);
+  it("names whiteboard and motion like the other kinds (level 5)", () => {
+    for (const type of ["whiteboard", "motion"]) {
+      expect(artifactHintLine({ "dev.fabrium.artifact_hint": { type } })).toBe(
+        `The user chose "${type}" in the composer: answer with a zooid_artifact of type "${type}" (or update this thread's ${type} artifact).`,
+      );
+    }
   });
   it("ignores a missing or unknown hint", () => {
     expect(artifactHintLine({ body: "hi" })).toBeNull();

@@ -14,7 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { CREATE_TYPES, type CreateType, createLabel } from "@/lib/artifacts/hint";
+import { CREATE_EXAMPLES, CREATE_TYPES, type CreateType, createLabel } from "@/lib/artifacts/hint";
 
 const ICON: Record<CreateType, typeof FrameIcon> = {
   slides: PresentationIcon,
@@ -26,8 +26,7 @@ const ICON: Record<CreateType, typeof FrameIcon> = {
 
 /**
  * The composer's Create menu (spec §6.8): the next message asks the agent for this kind
- * of artifact. Whiteboard and Motion are listed but marked "Not available yet": the
- * request still goes out and the agent answers that it cannot make them yet.
+ * of artifact.
  */
 export function CreateMenu({ value, onPick }: { value: CreateType | null; onPick: (type: CreateType) => void }) {
   return (
@@ -80,5 +79,24 @@ export function CreateChip({ type, onRemove }: { type: CreateType; onRemove: () 
         <CloseIcon className="size-3.5" />
       </button>
     </div>
+  );
+}
+
+/** Example prompts for the picked kind, while the field is empty; a pick fills the field, it does not send. */
+export function CreateExamples({ type, onPick }: { type: CreateType; onPick: (prompt: string) => void }) {
+  return (
+    <ul aria-label={`Examples for ${createLabel(type)}`} className="mb-2 flex flex-col items-start gap-1">
+      {CREATE_EXAMPLES[type].map((prompt) => (
+        <li key={prompt} className="max-w-full">
+          <button
+            type="button"
+            onClick={() => onPick(prompt)}
+            className="max-w-full truncate rounded-pill border border-border px-2.5 py-0.5 text-left text-caption1 text-text-secondary hover:bg-surface-secondary hover:text-text-primary"
+          >
+            {prompt}
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }

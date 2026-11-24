@@ -1,5 +1,5 @@
 import type { DesignSystemRef } from "@zooid/core";
-import { IDENTIFIER, record } from "./artifacts.js";
+import { IDENTIFIER, MXC, record } from "./artifacts.js";
 
 /**
  * Design systems across threads (design modes spec §5.6). A workspace or project space
@@ -21,8 +21,8 @@ const MAX_MARKUP = 20_000;
 /** Printable ASCII without a backtick: IDs end up in a line of the agent's prompt. */
 const ROOM_ID = /^![\x21-\x5f\x61-\x7e]{1,254}$/;
 const EVENT_ID = /^\$[^\s]{1,254}$/;
-const MXC = /^mxc:\/\/[A-Za-z0-9.:[\]-]{1,255}\/[A-Za-z0-9_-]{1,255}$/;
-const KINDS = ["slides", "design"] as const;
+/** A whiteboard takes no CSS, so no design system applies to it. */
+const KINDS = ["slides", "design", "motion"] as const;
 
 type Raw = Record<string, unknown>;
 const list = (v: unknown): Raw[] => (Array.isArray(v) ? v.slice(0, MAX_ITEMS).map(record) : []);

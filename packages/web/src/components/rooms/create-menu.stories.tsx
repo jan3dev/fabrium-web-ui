@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { CreateType } from "@/lib/artifacts/hint";
-import { CreateChip, CreateMenu } from "./create-menu";
+import { CreateChip, CreateExamples, CreateMenu } from "./create-menu";
 
 const meta = {
   title: "Rooms/CreateMenu",
@@ -13,6 +13,7 @@ const meta = {
     return (
       <div className="flex max-w-xl flex-col items-start rounded-card border border-border p-3">
         {value ? <CreateChip type={value} onRemove={() => setValue(null)} /> : null}
+        {value ? <CreateExamples type={value} onPick={() => setValue(null)} /> : null}
         <CreateMenu {...args} value={value} onPick={setValue} />
       </div>
     );

@@ -60,7 +60,7 @@ export function listSlashCommands(ctx: { threadScoped: boolean } = { threadScope
   // Explicit mode (spec §6.8): the composer sends these as a message with an artifact hint.
   const create = CREATE_TYPES.map((t) => ({
     name: t.type,
-    description: `Ask the agent for ${t.label.toLowerCase()}${"later" in t ? " (not available yet)" : ""}`,
+    description: `Ask the agent for ${t.label.toLowerCase()}`,
     source: "client" as const,
   }));
   return [...commands, ...create];

@@ -45,7 +45,7 @@ export interface SendMessageResult {
   thread_id?: string
 }
 
-export const ARTIFACT_KINDS = ['html', 'svg', 'react', 'markdown', 'code', 'slides', 'design', 'design-system'] as const
+export const ARTIFACT_KINDS = ['html', 'svg', 'react', 'markdown', 'code', 'slides', 'design', 'design-system', 'whiteboard', 'motion'] as const
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number]
 
 export interface ArtifactEdit {
@@ -93,9 +93,9 @@ export interface DesignSystemRef {
   name: string
   default?: true
   /** Only for these kinds; absent = every kind. */
-  for?: Array<'slides' | 'design'>
+  for?: Array<'slides' | 'design' | 'motion'>
   /** The kinds this system is the default for, after merging every list. */
-  default_for?: Array<'slides' | 'design'>
+  default_for?: Array<'slides' | 'design' | 'motion'>
 }
 
 /** No `identifier`: list the systems. With it: read one; with `component` too, that component's markup. */

@@ -6,6 +6,7 @@ import {
   callDaemon,
   DESIGN_SYSTEM_DESCRIPTION,
   HANDOFF_DESCRIPTION,
+  SEND_ATTACHMENT_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
   type DaemonRequest,
 } from '@zooid/context-mcp'
@@ -143,6 +144,21 @@ export default function createExtension(pi: ExtensionAPI, deps: Deps = {}): void
     async execute(_id, params, _signal, _update, ctx) {
       return call('sendMessage', { room: params.room, thread_id: params.thread_id, text: params.text }, ctx)
     },
+  })
+
+  // Exports go back as files (design modes spec §6.9). The daemon scopes it to this thread
+  // and refuses it where the transport cannot send attachments.
+  pi.registerTool({
+    name: 'zooid_send_attachment',
+    label: 'Attach a file',
+    description: SEND_ATTACHMENT_DESCRIPTION,
+    parameters: {
+      type: 'object',
+      properties: { path: { type: 'string' }, name: { type: 'string' }, caption: { type: 'string' } },
+      required: ['path'],
+    },
+    execute: (_id, params, _signal, _update, ctx) =>
+      call('sendAttachment', { path: params.path, name: params.name, caption: params.caption }, ctx, true),
   })
 
   pi.registerTool({

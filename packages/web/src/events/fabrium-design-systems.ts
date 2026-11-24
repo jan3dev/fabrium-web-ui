@@ -18,7 +18,7 @@ const ROOM_ID = /^![^\s]{1,254}$/;
 const EVENT_ID = /^\$[^\s]{1,254}$/;
 /** The daemon's artifact identifier rule (`transport-matrix/src/artifacts.ts`). */
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
-const SCOPES: readonly DesignSystemScope[] = ["slides", "design"];
+const SCOPES: readonly DesignSystemScope[] = ["slides", "design", "motion"];
 
 /** One system's identity: its room and identifier. */
 export const designSystemKey = (s: { roomId: string; identifier: string }) => `${s.roomId} ${s.identifier}`;

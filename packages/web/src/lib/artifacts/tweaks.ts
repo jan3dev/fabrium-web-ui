@@ -233,11 +233,11 @@ function setTexts(root: Element, texts: Readonly<Record<string, string>>): boole
 
 /**
  * The source with `values` kept (spec §6.7 "Keep"): the JSON's `value`s, the `:root`
- * declarations of the custom properties, and the text of the `data-tweak` elements. Slides
- * and designs re-serialize only the sections whose text changed; an `html` document is
+ * declarations of the custom properties, and the text of the `data-tweak` elements. Slides,
+ * designs and motion re-serialize only the sections whose text changed; an `html` document is
  * re-serialized whole, as the canvas editor does.
  */
-export function writeTweaks(html: string, kind: "slides" | "design" | "html", values: TweakValues): string {
+export function writeTweaks(html: string, kind: "slides" | "design" | "motion" | "html", values: TweakValues): string {
   const controls = readTweaks(html);
   const m = SCRIPT.exec(html);
   if (!m || controls.length === 0) return html;

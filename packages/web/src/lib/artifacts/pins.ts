@@ -15,6 +15,8 @@ const LIMIT = 100_000;
 export const CURSOR_PIN = "agent-cursor";
 /** The pin id of the element being commented on: its note popover opens beside it. */
 export const PICK_PIN = "comment-pick";
+/** The pin id of the active slide or artboard while markups are drawn on it (spec §3.8 Draw). */
+export const SKETCH_PIN = "sketch-frame";
 
 export interface PinRequest {
   id: string;

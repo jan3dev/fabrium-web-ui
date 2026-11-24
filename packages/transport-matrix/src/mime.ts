@@ -20,6 +20,7 @@ const MIME_BY_EXT: Record<string, string> = {
   json: 'application/json',
   html: 'text/html',
   zip: 'application/zip',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 }
 
 /** Content type by lowercase extension; unknown or missing extension → octet-stream. */

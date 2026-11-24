@@ -112,16 +112,19 @@ export function useArtifactDraft(
     [roomId, threadRootId],
   );
 
-  const flush = useCallback(() => {
+  /** Sends the collected edits now. Resolves once every save is done: false when edits are still unsaved. */
+  const flush = useCallback((): Promise<boolean> => {
     const st = s.current;
     clearTimeout(st.timer);
-    if (st.unsent.length === 0 || st.text === null) return;
-    const summaries = st.unsent;
-    st.unsent = [];
-    // A failed send keeps the edits: they go out with the next flush.
-    send({ summary: summarize(summaries), text: st.text }).catch(() => {
-      st.unsent = [...summaries, ...st.unsent];
-    });
+    if (st.unsent.length > 0 && st.text !== null) {
+      const summaries = st.unsent;
+      st.unsent = [];
+      // A failed send keeps the edits: they go out with the next flush.
+      send({ summary: summarize(summaries), text: st.text }).catch(() => {
+        st.unsent = [...summaries, ...st.unsent];
+      });
+    }
+    return st.queue.then(() => st.unsent.length === 0);
   }, [send]);
 
   const change = useCallback(

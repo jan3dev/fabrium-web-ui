@@ -36,20 +36,27 @@ describe("artifact srcdoc", () => {
     expect(src.replace(strip, "").trim()).toBe("const importance = 1;");
   });
 
-  it("adds the frames runtime for slides and design only, after the CSP", () => {
+  it("adds the frames runtime for slides, design and motion only, after the CSP", () => {
     const deck = "<!doctype html><html><body><section><h1>A</h1></section></body></html>";
-    for (const kind of ["slides", "design"] as const) {
+    for (const kind of ["slides", "design", "motion"] as const) {
       const doc = buildArtifactSrcdoc(kind, deck, "c1");
       expect(doc.startsWith('<!doctype html><head><meta http-equiv="Content-Security-Policy"')).toBe(true);
       expect(doc).toContain("body > section");
-      expect(doc).toContain(`var SLIDES = ${kind === "slides"}, PRINT = false;`);
+      expect(doc).toContain(`var SLIDES = ${kind === "slides"}, PRINT = false,`);
     }
     expect(buildArtifactSrcdoc("html", deck, "c1")).not.toContain("body > section");
   });
 
-  it("emits a hook script that parses, also for print", () => {
-    for (const print of [false, true]) {
-      const doc = buildArtifactSrcdoc("slides", "<section></section>", "c1", print);
+  it("adds the motion runtime for motion only, with scenes 1920×1080 by default", () => {
+    const doc = buildArtifactSrcdoc("motion", "<section></section>", "c1");
+    expect(doc).toContain("onSeek = function(d)");
+    expect(doc).toContain("var DEFAULT = [1920,1080];");
+    expect(buildArtifactSrcdoc("design", "<section></section>", "c1")).not.toContain("onSeek = function(d)");
+  });
+
+  it("emits a hook script that parses, also for print and motion", () => {
+    for (const [kind, print] of [["slides", false], ["slides", true], ["motion", false]] as const) {
+      const doc = buildArtifactSrcdoc(kind, "<section></section>", "c1", print);
       const script = /<script>([\s\S]*?)<\/script>/.exec(doc)![1]!;
       expect(() => new Function(script)).not.toThrow();
       expect(doc).toContain(`PRINT = ${print}`);
