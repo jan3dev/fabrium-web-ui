@@ -223,6 +223,7 @@ export class PreviewHub {
         status: ['starting', 'running', 'crashed', 'stopped'].includes(s.status) ? s.status : 'offline',
         since: String(s.since ?? new Date(this.now()).toISOString()),
         exit_code: typeof s.exit_code === 'number' ? s.exit_code : null,
+        web: s.web !== false,
       }
       // A new connection resends the whole log once, with its first state. It replaces the old
       // one; the skipped offset puts every reader's offset outside the window, so they reset.

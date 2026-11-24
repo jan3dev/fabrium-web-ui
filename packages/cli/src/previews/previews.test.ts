@@ -1,5 +1,5 @@
 import { createServer, request, type IncomingMessage, type Server } from 'node:http'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connect, type AddressInfo, type Socket } from 'node:net'
@@ -9,7 +9,7 @@ import { createGateway, frameAncestors, hostOnlyCookies } from './gateway.js'
 import { PreviewHub } from './hub.js'
 import { PreviewSupervisor } from './supervisor.js'
 import { startTunnelClient, type TunnelClient } from './tunnel-client.js'
-import { heartbeat, type PreviewState } from './protocol.js'
+import { heartbeat, previewOriginProblem, type PreviewState } from './protocol.js'
 
 const AGENT = '@ws.coder:test'
 const TOKEN = 'as-token'
@@ -150,6 +150,7 @@ describe('preview tunnel and gateway', () => {
       status: 'running',
       since: new Date().toISOString(),
       exit_code: null,
+      web: true,
     }
     const restarts: string[] = []
     const tunnel: TunnelClient = startTunnelClient({
@@ -294,8 +295,25 @@ describe('PreviewSupervisor', () => {
     expect(expo.logs_tail).toContain('ci=1')
     expect(events.at(-1)?.['dev.fabrium.preview']).toMatchObject({ name: 'phone', kind: 'expo' })
     await expect(supervisor.start(caller, { name: 'x', kind: 'ios' as never, command: 'true' })).rejects.toThrow(/invalid_kind/)
+    // An Expo app has a web build only with react-native-web.
+    const webOf = (name: string) => supervisor.snapshot().find((p) => p.preview.name === name)?.preview.web
+    expect(webOf('phone')).toBe(true)
+    mkdirSync(join(dir, 'native'))
+    writeFileSync(join(dir, 'native', 'package.json'), JSON.stringify({ dependencies: { expo: '54.0.0' } }))
+    await supervisor.start(caller, { name: 'native', kind: 'expo', command: 'true', cwd: 'native' })
+    expect(webOf('native')).toBe(false)
+    // A restart from the web UI rechecks it.
+    writeFileSync(join(dir, 'native', 'package.json'), JSON.stringify({ dependencies: { 'react-native-web': '0.21.0' } }))
+    await supervisor.restartById(AGENT, 'native')
+    expect(webOf('native')).toBe(true)
 
     await expect(supervisor.start({ ...caller, threadId: '' }, { name: 'x', command: 'true' })).rejects.toThrow(/threads/)
+    // The app runs inside the workdir, with no loader or shell variables from the model.
+    await expect(supervisor.start(caller, { name: 'x', command: 'true', cwd: '..' })).rejects.toThrow(/invalid_cwd/)
+    await expect(supervisor.start(caller, { name: 'x', command: 'true', cwd: '/' })).rejects.toThrow(/invalid_cwd/)
+    await expect(
+      supervisor.start(caller, { name: 'x', command: 'true', env: { LD_PRELOAD: '/tmp/x.so' } }),
+    ).rejects.toThrow(/invalid_env: LD_PRELOAD/)
     await expect(supervisor.start(caller, { name: 'Bad Name', command: 'true' })).rejects.toThrow(/invalid_name/)
   })
 })
@@ -330,5 +348,13 @@ describe('gateway headers', () => {
       "default-src 'self'; frame-ancestors http://app, frame-ancestors http://app",
     )
     expect(hostOnlyCookies(['a=1; Domain=preview.localhost; Path=/', 'b=2'])).toEqual(['a=1; Path=/', 'b=2'])
+  })
+})
+
+describe('previewOriginProblem', () => {
+  it('refuses a preview origin on the same site as the homeserver', () => {
+    expect(previewOriginProblem('https://*.preview.example.net', 'https://fabrium.example.net')).toMatch(/same site/)
+    expect(previewOriginProblem('https://*.fabrium-preview.net', 'https://fabrium.example.net')).toBeNull()
+    expect(previewOriginProblem('http://*.preview.localhost:9000', 'http://localhost:8448')).toBeNull()
   })
 })

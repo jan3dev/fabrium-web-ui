@@ -30,6 +30,8 @@ export interface PreviewState {
   /** RFC 3339. */
   since: string
   exit_code: number | null
+  /** The app serves a page the panel can show. False for an Expo app without react-native-web. */
+  web: boolean
 }
 
 /** Workstation → gateway. */
@@ -43,6 +45,26 @@ export type UpMessage =
 export type DownMessage =
   | { t: 'open'; stream: string; agent_id: string; name: string }
   | { t: 'restart' | 'stop'; agent_id: string; name: string }
+
+/**
+ * A naive registrable domain: the last two labels, or the whole host for an IP or `localhost`.
+ * ponytail: no public-suffix list, so `a.co.uk` and `b.co.uk` count as one site (refused: the safe side).
+ */
+export function siteOf(hostname: string): string {
+  return /^[\d.]+$|:/.test(hostname) ? hostname : hostname.split('.').slice(-2).join('.')
+}
+
+/**
+ * Why a preview origin is unsafe, or null. Previews run agent code with `allow-same-origin`,
+ * so they must be on another site than Fabrium (spec §5.2, D1), which shares the homeserver's site.
+ */
+export function previewOriginProblem(origin: string, homeserver: string): string | null {
+  const preview = siteOf(new URL(origin.replace('*', 'x')).hostname)
+  const fabrium = siteOf(new URL(homeserver).hostname)
+  return preview === fabrium
+    ? `previews.origin ${origin} is on the same site as the homeserver (${fabrium}); use a separate domain`
+    : null
+}
 
 export const previewKey = (agentId: string, name: string): string => `${agentId}\n${name}`
 

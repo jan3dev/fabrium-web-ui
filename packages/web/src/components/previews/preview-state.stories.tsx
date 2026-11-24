@@ -44,3 +44,5 @@ export const StoppedNoControls: Story = {
   args: { status: "stopped", onRestart: undefined, onStop: undefined },
 };
 export const Offline: Story = { args: { status: "offline" } };
+/** An Expo app without react-native-web: nothing to show in the frame. */
+export const PhoneOnly: Story = { args: { status: "running", phoneOnly: true } };

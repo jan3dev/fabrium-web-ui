@@ -282,8 +282,12 @@ else
   done
   # shellcheck disable=SC2090
   export AGENT_ROOMS
+  # Live app previews follow the central box (deploy/README.md).
+  AGENT_PREVIEWS=false
+  [ -z "${PREVIEW_DOMAIN:-}" ] || AGENT_PREVIEWS=true
+  export AGENT_PREVIEWS
   render_template "$REPO_DIR/deploy/agent-vm/zooid.yaml.example" "$WS_YAML" \
-    WORKSTATION SERVER_NAME WORKFORCE_SPACE AGENT_NAME AGENT_ACP AGENT_ROOMS
+    WORKSTATION SERVER_NAME WORKFORCE_SPACE AGENT_NAME AGENT_ACP AGENT_ROOMS AGENT_PREVIEWS
 fi
 
 # --- 4. registration -------------------------------------------------------

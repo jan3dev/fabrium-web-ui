@@ -1271,7 +1271,7 @@ function parseRuntime(raw: unknown): RuntimeKind {
   return parseRuntimeValue(raw ?? 'docker', 'runtime')
 }
 
-function parsePreviews(raw: unknown): PreviewsConfig | undefined {
+function parsePreviews(raw: unknown, processEnv: NodeJS.ProcessEnv): PreviewsConfig | undefined {
   if (raw === undefined || raw === null || raw === false) return undefined
   if (raw === true) raw = {}
   if (typeof raw !== 'object' || Array.isArray(raw)) {
@@ -1280,10 +1280,12 @@ function parsePreviews(raw: unknown): PreviewsConfig | undefined {
   const r = raw as Record<string, unknown>
   const out: PreviewsConfig = { max: 3 }
   if (r.origin !== undefined) {
-    if (typeof r.origin !== 'string' || !/^https?:\/\/\*\.[a-z0-9.-]+(:\d+)?$/.test(r.origin)) {
+    // `${PREVIEW_DOMAIN}` from the daemon environment: a deploy sets the domain once, in .env.
+    const origin = typeof r.origin === 'string' ? interpolateString(r.origin, processEnv) : r.origin
+    if (typeof origin !== 'string' || !/^https?:\/\/\*\.[a-z0-9.-]+(:\d+)?$/.test(origin)) {
       throw new Error('previews.origin must look like https://*.example.net (one * for the session token)')
     }
-    out.origin = r.origin
+    out.origin = origin
   }
   if (r.tunnel_url !== undefined) {
     if (typeof r.tunnel_url !== 'string' || !/^https?:\/\/[^\s/]+\/?$/.test(r.tunnel_url)) {
@@ -1296,6 +1298,12 @@ function parsePreviews(raw: unknown): PreviewsConfig | undefined {
       throw new Error('previews.max must be an integer from 1 to 20')
     }
     out.max = r.max as number
+  }
+  if (r.agents !== undefined) {
+    if (!Array.isArray(r.agents) || !r.agents.every((a) => typeof a === 'string')) {
+      throw new Error('previews.agents must be a list of agent names')
+    }
+    out.agents = r.agents as string[]
   }
   return out
 }
@@ -1390,7 +1398,10 @@ export function loadZooidConfig(
     triggers,
   }
   if (workstation !== undefined) cfg.workstation = workstation
-  const previews = parsePreviews(r.previews)
+  const previews = parsePreviews(r.previews, processEnv)
+  for (const name of previews?.agents ?? []) {
+    if (!cfg.agents[name]) throw new Error(`previews.agents: no agent "${name}"`)
+  }
   if (previews) cfg.previews = previews
   if (r.container !== undefined && r.container !== null) {
     if (engines.size === 0) {

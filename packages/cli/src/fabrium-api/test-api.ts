@@ -168,6 +168,7 @@ export function createTestApi(overrides: Partial<FabriumApiDeps> = {}) {
     zooidCommit: COMMIT,
     homeserverUrl: 'https://chat.example.org',
     zooidHome,
+    previews: false,
     conn: { homeserver, fetch: fetchAll },
     asToken: fake.centralToken,
     asUserId: '@zooid:example.org',

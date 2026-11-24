@@ -39,3 +39,6 @@
 		file_server
 	}
 }
+
+# Optional sites baked into the image: live app previews (Caddyfile.previews, see deploy/Dockerfile).
+import /etc/caddy/sites/*.caddy

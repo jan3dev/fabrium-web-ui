@@ -47,6 +47,8 @@ export interface AdmissionDeps {
   getSpaceRoomId(): string | undefined
   /** Rooms of a new agent: FABRIUM_VM_ROOMS. */
   rooms: string[]
+  /** Live app previews are on: the bundle turns them on for the VM. */
+  previews?: boolean
   workstationsDir: string
   registrationsDir: string
   whoamiTimeoutMs?: number
@@ -260,6 +262,7 @@ export function createAdmission(deps: AdmissionDeps): {
         serverName: deps.serverName,
         homeserverUrl: deps.homeserverUrl,
         space: deps.workforceSpace,
+        previews: deps.previews,
       }
       const step = stepsOf('admission', ws)
       const bundle = await step('bundle', async () => {
