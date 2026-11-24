@@ -1,6 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
-import { PROFILE, makeAgent } from "../../../test/vm-fixtures";
+import {
+  MARKETING,
+  PAYMENTS,
+  PROFILE,
+  PROJECTS,
+  PROJECT_AGENT,
+  makeAgent,
+} from "../../../test/vm-fixtures";
 import { FabriumApiError } from "../../client/fabrium-api";
 import { AgentDialog } from "./agent-dialog";
 
@@ -11,13 +18,20 @@ const meta = {
     open: true,
     onOpenChange: () => {},
     agent: null,
-    vms: [{ name: "lima", state: "running" }],
+    vms: [
+      { name: "lima", state: "running", project_id: null },
+      { name: "kilo", state: "running", project_id: PAYMENTS.id },
+    ],
     models: { models: [{ id: "glm-5-3" }, { id: "qwen-3" }], default: "glm-5-3" },
     modelsError: null,
     members: [
       { userId: "@ann:example.org", name: "Ann" },
       { userId: "@luis:example.org", name: "Luis" },
     ],
+    projects: PROJECTS,
+    projectsError: null,
+    canManageProjects: true,
+    onCreateProject: async (name) => ({ id: "0f0e0d0c0b0a09080706050403020100", name, in_use: false }),
     onSubmit: async () => {},
   },
 } satisfies Meta<typeof AgentDialog>;
@@ -78,3 +92,24 @@ export const RequestError: Story = {
     await userEvent.click(body().getByRole("button", { name: "Create agent" }));
   },
 };
+
+/** A new agent in a project: the VM list has only project VMs. */
+export const NewProjectAgent: Story = {
+  async play() {
+    await userEvent.type(await body().findByLabelText("Name"), "scout");
+    await userEvent.click(body().getByRole("combobox", { name: "Project" }));
+    await userEvent.click(await body().findByRole("option", { name: "Payments" }));
+  },
+};
+
+/** An admin takes a project agent out of its project: the Owner field asks who owns it. */
+export const TakeOut: Story = {
+  args: { agent: PROJECT_AGENT },
+  async play() {
+    await userEvent.click(await body().findByRole("combobox", { name: "Project" }));
+    await userEvent.click(await body().findByRole("option", { name: "No project" }));
+  },
+};
+
+/** Another admin deleted the project of the agent: Save stays off. */
+export const ProjectGone: Story = { args: { agent: PROJECT_AGENT, projects: [MARKETING] } };

@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
-import { makeVm } from "../../../test/vm-fixtures";
+import { PAYMENTS, makeVm } from "../../../test/vm-fixtures";
 import { VmView } from "./vm-view";
 
 const lima = makeVm();
@@ -37,6 +37,13 @@ const vms = [
     name: "victor",
     state: "shutting-down",
     public_ip: null,
+  }),
+  // A project VM: Project in the Owner column, and the name of its project.
+  makeVm({
+    id: "i-0123456789abcdef6",
+    name: "sierra",
+    project_id: PAYMENTS.id,
+    project: PAYMENTS.name,
   }),
 ];
 

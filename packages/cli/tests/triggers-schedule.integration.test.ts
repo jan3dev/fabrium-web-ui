@@ -42,7 +42,12 @@ const scheduler = (over: Record<string, unknown> = {}) => {
 }
 
 describe('trigger scheduler', () => {
-  beforeEach(() => vi.useFakeTimers())
+  beforeEach(() => {
+    vi.useFakeTimers()
+    // The cron fires on wall-clock minutes. Start on a minute boundary: a start
+    // at :59.x would put two boundaries inside the 61 s window.
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+  })
   afterEach(() => vi.useRealTimers())
 
   it('fires once per due tick and stops cleanly', async () => {

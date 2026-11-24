@@ -73,3 +73,18 @@ it('a delete of a missing record is done', async () => {
   await expect(removeRecord(cp, made.id)).resolves.toBeUndefined()
   expect(api.controlPlane.requests.at(-1)).toMatchObject({ method: 'DELETE', path: `/v1/agents/${made.id}` })
 })
+
+it('keeps project_id, and reads an absent one as null', async () => {
+  const record = { id: 'x', name: 'reviewer', owner: ANA, description: '', model: 'm', tag: null, project: null, vm: null, rooms: [] }
+  api.controlPlane.on('GET', '/v1/agents', jsonResponse(200, [record, { ...record, id: 'y', project_id: 'pr1' }]))
+  expect((await fetchRecords(cp)).map((r) => r.project_id)).toEqual([null, 'pr1'])
+})
+
+it('answers 502 for a project_id that is not a string or null', async () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const record = { id: 'x', name: 'reviewer', owner: ANA, description: '', model: 'm', tag: null, project: null, vm: null, rooms: [] }
+  for (const projectId of [5, {}, ['pr1']]) {
+    api.controlPlane.on('GET', '/v1/agents', jsonResponse(200, [{ ...record, project_id: projectId }]))
+    await expect(fetchRecords(cp), JSON.stringify(projectId)).rejects.toMatchObject({ status: 502 })
+  }
+})

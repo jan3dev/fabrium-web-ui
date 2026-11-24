@@ -17,9 +17,17 @@ const DEFAULT_IMAGE = 'ghcr.io/matrix-construct/tuwunel:v1.9.3'
 
 export function buildRunArgs(opts: TuwunelOpts): string[] {
   const image = opts.image ?? DEFAULT_IMAGE
+  // Docker runs the container as root, so Tuwunel would leave root-owned files
+  // in the bind-mounted data dir that the host user cannot delete. Rootless
+  // podman already maps container root to the host user.
+  const user =
+    opts.engine === 'docker' && process.getuid && process.getgid
+      ? ['--user', `${process.getuid()}:${process.getgid()}`]
+      : []
   return [
     'run',
     '--rm',
+    ...user,
     '--name',
     opts.name,
     '-p',

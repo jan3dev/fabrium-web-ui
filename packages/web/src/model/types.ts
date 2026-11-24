@@ -120,6 +120,10 @@ export interface Vm {
   creator?: string | null;
   /** False for a VM from before the registry: its auto-stop hours cannot change. */
   registered?: boolean;
+  /** The project of the VM, and its name; null and null for a personal VM. */
+  project_id: string | null;
+  project: string | null;
+  can: { set_project: boolean };
 }
 
 export interface VmInstanceType {
@@ -141,6 +145,7 @@ export interface FabriumAccess {
 export interface AgentCan {
   edit: boolean;
   set_owner: boolean;
+  set_project: boolean;
   assign: boolean;
   create_vm: boolean;
   delete: boolean;
@@ -153,6 +158,8 @@ export interface AgentVm {
   id?: string;
   state?: VmState;
   owner?: string | null;
+  /** The project of the live VM, or null. Absent without a live VM. */
+  project_id?: string | null;
 }
 
 export interface Agent {
@@ -164,6 +171,9 @@ export interface Agent {
   description: string | null;
   model: string | null;
   tag: string | null;
+  /** Null for a personal agent. */
+  project_id: string | null;
+  /** The name of the project of `project_id`, or null. */
   project: string | null;
   /** Null for a profile. */
   vm: AgentVm | null;
@@ -182,18 +192,18 @@ export interface Person {
 export interface AgentList {
   agents: Agent[];
   /** The live VMs that the caller can assign an agent to. */
-  vms: { name: string; state: VmState }[];
+  vms: { name: string; state: VmState; project_id: string | null }[];
   /** Every person, sorted by the daemon. */
   people: Person[];
 }
 
-/** The body of a create or an edit. An edit sends only the fields that changed; "" clears tag and project. */
+/** The body of a create or an edit. An edit sends only the fields that changed; "" clears tag and project_id. */
 export interface AgentInput {
   name?: string;
   description?: string;
   model?: string;
   tag?: string;
-  project?: string;
+  project_id?: string;
   owner?: string;
   vm?: string;
 }
@@ -215,4 +225,26 @@ export interface CreateVmRequest extends VmCredentials {
   instance_type?: string;
   /** Integer from 1 to 168. */
   auto_stop_hours?: number;
+  /** The VM is a project VM. Without it, the VM is personal. */
+  project_id?: string;
+}
+
+/** The body of `PUT /vms/:id/owner`. `project_id` "" takes the VM out of its project. */
+export interface VmOwnerInput {
+  project_id?: string;
+  owner?: string;
+}
+
+/** A project, as `GET /projects` lists it. */
+export interface Project {
+  id: string;
+  name: string;
+  /** An agent or a VM has the project: it cannot be deleted. */
+  in_use: boolean;
+}
+
+export interface ProjectList {
+  /** Sorted by name, without regard to ASCII case. */
+  projects: Project[];
+  can: { manage: boolean };
 }

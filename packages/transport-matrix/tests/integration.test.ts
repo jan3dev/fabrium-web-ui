@@ -76,10 +76,14 @@ describe.skipIf(!dockerAvailable())('matrix transport against tuwunel', () => {
     // declined and kick the bot back out (→ 403 on send). The binding carries
     // the room id, so bootstrap joins it directly.
 
+    // One node process with the tsx loader, so the SIGTERM in afterAll reaches
+    // the daemon itself. Through `pnpm exec tsx` it hit only the pnpm wrapper
+    // and left the daemon running on AS_PORT.
     daemon = spawn(
-      'pnpm',
-      ['-C', resolve(here, '..'), 'exec', 'tsx', 'tests/fixtures/echo-daemon.ts'],
+      process.execPath,
+      ['--import', 'tsx', 'tests/fixtures/echo-daemon.ts'],
       {
+        cwd: resolve(here, '..'),
         env: {
           ...process.env,
           MATRIX_HS: HS,
