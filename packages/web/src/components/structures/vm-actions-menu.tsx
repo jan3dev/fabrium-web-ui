@@ -10,28 +10,29 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Vm, VmState } from "../../model/types";
 
-export type VmAction = "start" | "stop" | "reboot" | "credentials" | "delete";
+export type VmAction = "start" | "stop" | "reboot" | "credentials" | "project" | "delete";
 
 const LABEL: Record<VmAction, string> = {
   start: "Start",
   stop: "Stop",
   reboot: "Reboot",
   credentials: "Update credentials",
+  project: "Move to project",
   delete: "Delete",
 };
 
-// Update credentials and Delete are always offered. The other actions depend on the EC2 state.
-// Delete is last in each list: the menu sets it apart, in the danger tone.
+// Update credentials, Move to project, and Delete are always offered. The other actions depend
+// on the EC2 state. Delete is last in each list: the menu sets it apart, in the danger tone.
 const ACTIONS: Record<VmState, VmAction[]> = {
-  stopped: ["start", "credentials", "delete"],
-  running: ["stop", "reboot", "credentials", "delete"],
-  pending: ["credentials", "delete"],
-  stopping: ["credentials", "delete"],
-  "shutting-down": ["credentials", "delete"],
+  stopped: ["start", "credentials", "project", "delete"],
+  running: ["stop", "reboot", "credentials", "project", "delete"],
+  pending: ["credentials", "project", "delete"],
+  stopping: ["credentials", "project", "delete"],
+  "shutting-down": ["credentials", "project", "delete"],
 };
 
 export interface VmActionsMenuProps {
-  vm: Pick<Vm, "name" | "state">;
+  vm: Pick<Vm, "name" | "state" | "can">;
   /** An action of this VM is in flight: the trigger is disabled. */
   busy: boolean;
   onSelect: (action: VmAction) => void;
@@ -39,7 +40,10 @@ export interface VmActionsMenuProps {
 
 /** The actions that the state of a VM allows, in one menu. Delete comes last. */
 export function VmActionsMenu({ vm, busy, onSelect }: VmActionsMenuProps) {
-  const actions = ACTIONS[vm.state] ?? ["credentials", "delete"];
+  // Move to project only with can.set_project: the web holds no rule of its own.
+  const actions = (ACTIONS[vm.state] ?? ["credentials", "project", "delete"]).filter(
+    (action) => action !== "project" || vm.can.set_project,
+  );
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
