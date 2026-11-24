@@ -36,6 +36,7 @@ const VMS = [
 const AGENTS = {
   agents: [makeAgent(), PROFILE, INSTANCE_AGENT],
   vms: [{ name: "lima", state: "running" }],
+  people: [],
 };
 
 // The homeserver answers on another origin, so a stubbed answer needs CORS headers.
