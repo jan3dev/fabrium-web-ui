@@ -30,6 +30,10 @@ export interface FrameView {
   index: number;
   zoom: number | null;
   transition?: FrameTransition;
+  /** Presenting: notes for the builder (`aside[data-note]`) hide. */
+  present?: boolean;
+  /** Design: every artboard in a row (spec §6.3); `index` is centred. */
+  canvas?: boolean;
 }
 
 export const MAX_FRAMES = 200;
@@ -38,12 +42,21 @@ export const FRAME_SIZE = { min: 100, max: 10000, slides: [1920, 1080], design: 
 /** A frame's name and its speaker notes, read and written. */
 export const MAX_NAME = 120;
 export const MAX_NOTES = 5000;
-const TRANSITIONS: readonly FrameTransition[] = ["none", "fade", "slide"];
+export const TRANSITIONS: readonly FrameTransition[] = ["none", "fade", "slide"];
 
 const size = (v: string | null, fallback: number) => {
   const n = parseFloat(v ?? "");
   return Number.isFinite(n) ? Math.min(FRAME_SIZE.max, Math.max(FRAME_SIZE.min, n)) : fallback;
 };
+/** The canvas size of a `body > section`: fixed for slides, `data-width`/`data-height` for design. */
+export function frameSize(kind: FrameKind, el: Element): { width: number; height: number } {
+  return kind === "slides"
+    ? { width: FRAME_SIZE.slides[0], height: FRAME_SIZE.slides[1] }
+    : {
+        width: size(el.getAttribute("data-width"), FRAME_SIZE.design[0]),
+        height: size(el.getAttribute("data-height"), FRAME_SIZE.design[1]),
+      };
+}
 const transition = (v: string | null) => TRANSITIONS.find((t) => t === v?.trim().toLowerCase());
 const text = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
 /** Speaker notes as read back from the source: runs of spaces and blank lines collapsed. */
@@ -62,8 +75,7 @@ export function readFrames(kind: FrameKind, html: string): FrameInfo[] {
     const name = text(el.getAttribute(slides ? "data-title" : "data-name") || heading?.textContent).slice(0, MAX_NAME);
     return {
       name: name || `${slides ? "Slide" : "Screen"} ${i + 1}`,
-      width: slides ? FRAME_SIZE.slides[0] : size(el.getAttribute("data-width"), FRAME_SIZE.design[0]),
-      height: slides ? FRAME_SIZE.slides[1] : size(el.getAttribute("data-height"), FRAME_SIZE.design[1]),
+      ...frameSize(kind, el),
       notes: notes
         .map((n) => cleanNotes(n.textContent ?? ""))
         .filter(Boolean)

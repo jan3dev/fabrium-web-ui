@@ -29,7 +29,7 @@ import {
   MAX_REFS,
   type ArtifactRefTarget,
 } from "@/lib/artifacts/refs";
-import { annotationNote } from "@/lib/artifacts/styles";
+import { annotationNote, PREVIEW_STYLE_PROPS } from "@/lib/artifacts/styles";
 import { copyToClipboard } from "@/lib/browser-actions";
 import { setComposerFill } from "@/lib/quote-draft-store";
 import { cn } from "@/lib/utils";
@@ -393,7 +393,12 @@ export function PreviewPanel({
           </div>
           {/* ponytail: desktop only; on a phone the panel has no room beside the app. Add a sheet when asked. */}
           {annotating && live && !isMobile && target?.target.kind === "element" ? (
-            <StyleInspector selector={target.target.selector} values={draft.values} onChange={draft.change} />
+            <StyleInspector
+              selector={target.target.selector}
+              values={draft.values}
+              onChange={draft.change}
+              props={PREVIEW_STYLE_PROPS}
+            />
           ) : null}
         </div>
         {annotating && live ? (

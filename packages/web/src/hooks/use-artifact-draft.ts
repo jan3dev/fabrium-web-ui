@@ -137,9 +137,13 @@ export function useArtifactDraft(
     [flush],
   );
 
-  /** Applies one edit to what the panel shows; false when it changed nothing or was refused. */
+  /**
+   * Applies one edit to what the panel shows; false when it changed nothing or was refused.
+   * `coalesce` folds it into the edit before when that one has the same summary and is not
+   * sent yet: a colour dragged across the picker is one undo step, not fifty.
+   */
   const apply = useCallback(
-    (edit: (text: string) => string, summary: string): boolean => {
+    (edit: (text: string) => string, summary: string, coalesce = false): boolean => {
       const st = s.current;
       const cur = st.text ?? st.base?.text;
       if (cur == null) return false;
@@ -155,6 +159,10 @@ export function useArtifactDraft(
       if (tooLarge) {
         toast.error(tooLarge);
         return false;
+      }
+      if (coalesce && st.undo.at(-1)?.summary === summary && st.unsent.at(-1) === summary) {
+        change(next, null);
+        return true;
       }
       st.undo.push({ text: cur, summary });
       st.redo = [];
@@ -208,5 +216,5 @@ export function useArtifactDraft(
     [step],
   );
 
-  return { text, generation, apply, flush, send, onKey };
+  return { text, generation, apply, flush, send, onKey, step };
 }

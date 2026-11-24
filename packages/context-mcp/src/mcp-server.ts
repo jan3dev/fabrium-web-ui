@@ -246,6 +246,10 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
         .optional()
         .describe('find/replace pairs against the latest version from any author'),
       read: z.boolean().optional().describe('true: return the latest version; pass only identifier'),
+      assets: z
+        .array(z.string())
+        .optional()
+        .describe('workspace paths of images, video or fonts to upload; returns their mxc:// URIs; pass only identifier'),
     },
     async (input) => {
       const provider = await opts.resolve()

@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { blurOf, readColor, readStyles, shadowOf, shadows, styleNote, withBlur } from "./styles";
+import {
+  blurOf,
+  contrast,
+  flipScale,
+  layoutOf,
+  NO_SHADOW,
+  readColor,
+  readStyles,
+  shadowOf,
+  shadows,
+  skewOf,
+  styleNote,
+  withBlur,
+  withSkew,
+  writeLayout,
+} from "./styles";
 
 describe("inspector styles", () => {
   it("keeps only known properties from a frame, on one short line", () => {
@@ -29,15 +44,34 @@ describe("inspector styles", () => {
     expect(withBlur("url(#none-x)", 2)).toBe("url(#none-x) blur(2px)");
   });
 
-  it("round-trips drop and inner shadows through box-shadow", () => {
-    const computed = "rgba(0, 0, 0, 0.3) 0px 4px 8px 0px, rgba(0, 0, 0, 0.3) 0px 0px 3px 0px inset";
-    expect(shadowOf(computed, false)).toBe(8);
-    expect(shadowOf(computed, true)).toBe(3);
-    expect(shadowOf("none", false)).toBe(0);
-    const made = shadows(12, 5);
-    expect(shadowOf(made, false)).toBe(12);
-    expect(shadowOf(made, true)).toBe(5);
-    expect(shadows(0, 0)).toBe("none");
+  it("round-trips drop and inner shadows with offset, spread and colour", () => {
+    const computed = "rgba(0, 0, 0, 0.3) 0px 4px 8px 0px, rgb(255, 0, 0) 1px 2px 3px 4px inset";
+    expect(shadowOf(computed, false)).toEqual({ x: 0, y: 4, blur: 8, spread: 0, color: "rgba(0, 0, 0, 0.3)" });
+    expect(shadowOf(computed, true)).toEqual({ x: 1, y: 2, blur: 3, spread: 4, color: "rgb(255, 0, 0)" });
+    expect(shadowOf("none", false)).toEqual(NO_SHADOW);
+    const made = shadows({ ...NO_SHADOW, y: 2, blur: 12 }, { ...NO_SHADOW, spread: 5, color: "#ff0000" });
+    expect(made).toBe("0px 2px 12px 0px rgba(0, 0, 0, 0.3), inset 0px 0px 0px 5px #ff0000");
+    expect(shadowOf(made, true)).toMatchObject({ spread: 5, color: "#ff0000" });
+    expect(shadows(NO_SHADOW, NO_SHADOW)).toBe("none");
+  });
+
+  it("reads and writes skew, flips and layout direction", () => {
+    expect(skewOf("skew(10deg, -5deg)")).toEqual([10, -5]);
+    expect(skewOf("matrix(1, 0, 0.176327, 1, 0, 0)")).toEqual([10, 0]);
+    expect(withSkew(0, 0)).toBe("none");
+    expect(flipScale("none", "h")).toBe("-1 1");
+    expect(flipScale("-1 1", "h")).toBe("none");
+    expect(flipScale("2", "v")).toBe("2 -2");
+    expect(layoutOf({ display: "flex", "flex-direction": "column" })).toBe("column");
+    expect(layoutOf({ display: "inline-grid" })).toBe("grid");
+    expect(writeLayout("row")).toEqual({ display: "flex", "flex-direction": "row" });
+  });
+
+  it("checks text contrast against WCAG AA, with 3:1 for large text", () => {
+    expect(contrast({ color: "rgb(0, 0, 0)" }, "rgb(255, 255, 255)")).toBe("good");
+    expect(contrast({ color: "rgb(150, 150, 150)", "font-size": "16px" }, "rgb(255, 255, 255)")).toBe("poor");
+    expect(contrast({ color: "rgb(130, 130, 130)", "font-size": "32px" }, "rgb(255, 255, 255)")).toBe("good");
+    expect(contrast({ color: "rgba(0, 0, 0, 0)" }, "rgb(255, 255, 255)")).toBeNull();
   });
 
   it("writes the changed properties as the note, skipping cleared ones", () => {

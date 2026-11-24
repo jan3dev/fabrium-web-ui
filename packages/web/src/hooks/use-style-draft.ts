@@ -3,7 +3,8 @@ import type { StyleEdit, StyleProp, Styles } from "@/lib/artifacts/styles";
 
 /**
  * The style inspector's draft for a picked element: its CSS values and the user's edits on top.
- * Edits go to the frame through `send` as they happen; they stay a draft until added to the reply.
+ * Edits go out through `send` as they happen: to the frame (annotate, where they stay a draft
+ * until added to the reply) or as canvas ops that save.
  */
 export function useStyleDraft(send: (edit: StyleEdit) => void) {
   const [styles, setStyles] = useState<Styles>({});
@@ -16,9 +17,13 @@ export function useStyleDraft(send: (edit: StyleEdit) => void) {
       setStyles(computed);
       setChanges({});
     },
-    change(prop: StyleProp, value: string) {
-      setChanges((c) => ({ ...c, [prop]: value }));
-      send({ prop, value });
+    /** New values for the same element; the edits stay on top. */
+    refresh(computed: Styles) {
+      setStyles(computed);
+    },
+    change(next: Styles) {
+      setChanges((c) => ({ ...c, ...next }));
+      for (const [prop, value] of Object.entries(next)) send({ prop: prop as StyleProp, value });
     },
     /** Drops the edits from the frame, or leaves them there (`keep`, once added to the reply). */
     reset(keep = false) {

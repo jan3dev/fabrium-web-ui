@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   applyArtifactEdits,
@@ -64,6 +67,19 @@ describe("validateArtifactInput", () => {
       validateArtifactInput({ identifier: "a", read: true, type: "html", content: "x" }),
     ).toThrow(/drop `type`, `content`/);
     expect(() => validateArtifactInput({ identifier: "bad id", read: true })).toThrow(/identifier/);
+  });
+
+  it("takes `assets` with the identifier alone, 1 to 100 paths", () => {
+    expect(() => validateArtifactInput({ identifier: "a", assets: ["x.png"] })).not.toThrow();
+    expect(() => validateArtifactInput({ identifier: "a", assets: ["x.png"], type: "html", content: "x" })).toThrow(
+      "invalid_input: `assets` takes only `identifier`; drop `type`, `content`, or drop `assets` to send a version.",
+    );
+    expect(() => validateArtifactInput({ identifier: "a", read: true, assets: ["x.png"] })).toThrow(/drop `assets`/);
+    for (const assets of [[], [""], Array(101).fill("x.png"), "x.png", [1]]) {
+      expect(() => validateArtifactInput({ identifier: "a", assets } as never)).toThrow(
+        "invalid_input: `assets` is a list of 1 to 100 file paths.",
+      );
+    }
   });
 });
 
@@ -211,6 +227,14 @@ describe("validateArtifactContent", () => {
     expect(() => validateArtifactContent("slides", `<html>${layouts}<body></body></html>`)).toThrow(/invalid_content/);
   });
 
+  it("allows at most 100 distinct mxc:// assets in a version", () => {
+    const refs = (n: number) => Array.from({ length: n }, (_, i) => `<img src="mxc://hs/m${i}">`).join("");
+    expect(() => validateArtifactContent("html", refs(100) + refs(100))).not.toThrow();
+    expect(() => validateArtifactContent("html", refs(101))).toThrow(
+      "invalid_content: 101 mxc:// assets, the limit is 100 per artifact.",
+    );
+  });
+
   it("wants a design system to be one JSON object", () => {
     expect(() => validateArtifactContent("design-system", '{"colors":[]}')).not.toThrow();
     expect(() => validateArtifactContent("design-system", "{}")).not.toThrow();
@@ -230,7 +254,11 @@ describe("validateArtifactContent", () => {
 describe("MatrixContextProvider.sendArtifact", () => {
   const me = "@ws.coder:hs";
   const human = "@human:hs";
-  function setup(chunk: Array<Record<string, unknown>> = [], state: RoomState = roomState([me, human])) {
+  function setup(
+    chunk: Array<Record<string, unknown>> = [],
+    state: RoomState = roomState([me, human]),
+    workspace?: { hostDir: string; agentPath: string; confined: boolean },
+  ) {
     const sendCustomEvent = vi.fn().mockResolvedValue({ event_id: "$new" });
     const fetchThreadRelations = vi.fn().mockResolvedValue({ chunk });
     const fetchRoomState = vi.fn().mockResolvedValue(state);
@@ -247,6 +275,7 @@ describe("MatrixContextProvider.sendArtifact", () => {
       asUserId: me,
       agentBots: new Map(),
       media: { upload, download },
+      workspace,
     });
     return { provider, sendCustomEvent, fetchThreadRelations, fetchRoomState, getJoinedMembers, upload, download };
   }
@@ -421,6 +450,65 @@ describe("MatrixContextProvider.sendArtifact", () => {
     download.mockResolvedValue({ data: new TextEncoder().encode("anything") });
     await expect(provider.sendArtifact("!r:hs", "$root", { identifier: "big", read: true })).rejects.toThrow(/media_mismatch/);
     expect(download).not.toHaveBeenCalled();
+  });
+
+  describe("assets", () => {
+    const dir = mkdtempSync(join(tmpdir(), "zooid-assets-"));
+    mkdirSync(join(dir, "img"));
+    writeFileSync(join(dir, "img/logo.png"), "png");
+    writeFileSync(join(dir, "Inter.woff2"), "font");
+    writeFileSync(join(dir, "big.woff2"), Buffer.alloc(2_000_001));
+    writeFileSync(join(dir, "notes.html"), "<p>");
+    const outside = mkdtempSync(join(tmpdir(), "zooid-outside-"));
+    writeFileSync(join(outside, "secret.png"), "secret");
+    symlinkSync(join(outside, "secret.png"), join(dir, "link.png"));
+    const local = { hostDir: dir, agentPath: dir, confined: false };
+
+    it("uploads each file and maps its path to the mxc URI, sending nothing", async () => {
+      const { provider, upload, sendCustomEvent, fetchThreadRelations } = setup([], undefined, local);
+      upload.mockResolvedValueOnce({ content_uri: "mxc://hs/logo" }).mockResolvedValueOnce({ content_uri: "mxc://hs/font" });
+      await expect(
+        provider.sendArtifact("!r:hs", "$root", { identifier: "deck", assets: ["img/logo.png", `${dir}/Inter.woff2`, "img/logo.png"] }),
+      ).resolves.toEqual({ identifier: "deck", assets: { "img/logo.png": "mxc://hs/logo", [`${dir}/Inter.woff2`]: "mxc://hs/font" } });
+      expect(upload).toHaveBeenCalledTimes(2);
+      expect(upload.mock.calls[0]![0]).toMatchObject({ contentType: "image/png", filename: "logo.png", asUserId: me });
+      expect(upload.mock.calls[1]![0]).toMatchObject({ contentType: "font/woff2", filename: "Inter.woff2" });
+      expect(sendCustomEvent).not.toHaveBeenCalled();
+      expect(fetchThreadRelations).not.toHaveBeenCalled();
+    });
+
+    it("maps a container path under /workspace", async () => {
+      const { provider } = setup([], undefined, { hostDir: dir, agentPath: "/workspace", confined: true });
+      const result = await provider.sendArtifact("!r:hs", "$root", { identifier: "deck", assets: ["/workspace/img/logo.png"] });
+      expect(result.assets).toEqual({ "/workspace/img/logo.png": "mxc://hs/big" });
+    });
+
+    it("refuses files outside the workspace, even for a local agent, and uploads nothing", async () => {
+      for (const path of ["../x.png", `${outside}/secret.png`, "link.png"]) {
+        const { provider, upload } = setup([], undefined, local);
+        await expect(
+          provider.sendArtifact("!r:hs", "$root", { identifier: "deck", assets: ["img/logo.png", path] }),
+        ).rejects.toThrow(`invalid_asset: ${path} is outside your workspace.`);
+        expect(upload).not.toHaveBeenCalled();
+      }
+    });
+
+    it("refuses other types, missing files and files over the cap for their type", async () => {
+      const { provider, upload } = setup([], undefined, local);
+      const send = (path: string) => provider.sendArtifact("!r:hs", "$root", { identifier: "deck", assets: [path] });
+      await expect(send("notes.html")).rejects.toThrow(/^invalid_asset: notes.html: use png, jpg/);
+      await expect(send("img")).rejects.toThrow(/invalid_asset: img: use/);
+      await expect(send("gone.png")).rejects.toThrow("invalid_asset: no file gone.png in your workspace.");
+      await expect(send("big.woff2")).rejects.toThrow("too_large: big.woff2 is 2000001 bytes, the limit for its type is 2000000.");
+      expect(upload).not.toHaveBeenCalled();
+    });
+
+    it("needs a workspace and media", async () => {
+      const { provider } = setup();
+      await expect(provider.sendArtifact("!r:hs", "$root", { identifier: "deck", assets: ["a.png"] })).rejects.toThrow(
+        "assets_unavailable",
+      );
+    });
   });
 
   it("refuses to read an artifact that has no version", async () => {

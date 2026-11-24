@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { FrameAsset } from "@/hooks/use-artifact-assets";
 import type { FrameInfo, FrameTransition } from "@/lib/artifacts/frames";
 import { PREVIEW_SANDBOX, PreviewMessage } from "@/lib/artifacts/srcdoc";
 import { cn } from "@/lib/utils";
@@ -18,6 +19,7 @@ export function FrameThumb({
   width,
   live = true,
   transition,
+  assets,
 }: {
   srcdoc: string;
   /** Baked into `srcdoc`. */
@@ -29,6 +31,8 @@ export function FrameThumb({
   live?: boolean;
   /** How a change of `index` enters (the presenter view's current slide). */
   transition?: FrameTransition;
+  /** Images and fonts the document names (spec §5.4); the frame ignores ones it has. */
+  assets?: readonly FrameAsset[];
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const height = Math.round((width * 9) / 16);
@@ -39,7 +43,11 @@ export function FrameThumb({
       "*",
     );
   };
+  const sendAssets = () => {
+    if (assets?.length) ref.current?.contentWindow?.postMessage({ type: PreviewMessage.assets, channel, detail: { assets } }, "*");
+  };
   useEffect(show, [index]);
+  useEffect(sendAssets, [assets]);
   return (
     <div className="relative shrink-0 overflow-hidden rounded-utility bg-surface-secondary" style={{ width, height }}>
       {live ? (
@@ -51,7 +59,10 @@ export function FrameThumb({
           sandbox={PREVIEW_SANDBOX}
           referrerPolicy="no-referrer"
           srcDoc={srcdoc}
-          onLoad={show}
+          onLoad={() => {
+            show();
+            sendAssets();
+          }}
           className="pointer-events-none absolute top-0 left-0 origin-top-left border-0"
           style={{
             width: frame.width,
@@ -86,6 +97,7 @@ export function FrameCard({
   changed,
   onKeyDown,
   onContextMenu,
+  assets,
 }: {
   srcdoc: string;
   channel: string;
@@ -99,6 +111,7 @@ export function FrameCard({
   changed?: ActorKind;
   onKeyDown?: React.KeyboardEventHandler<HTMLButtonElement>;
   onContextMenu?: React.MouseEventHandler<HTMLDivElement>;
+  assets?: readonly FrameAsset[];
 }) {
   return (
     <div
@@ -109,7 +122,7 @@ export function FrameCard({
       )}
     >
       <div className={cn("rounded-utility", active && "ring-2 ring-accent-brand", frame.skip && "opacity-40")}>
-        <FrameThumb srcdoc={srcdoc} channel={channel} index={index} frame={frame} width={width} live={live} />
+        <FrameThumb srcdoc={srcdoc} channel={channel} index={index} frame={frame} width={width} live={live} assets={assets} />
       </div>
       {/* Above the select button's ::after, so it takes its own clicks. */}
       {menu ? <div className="absolute top-2.5 right-2.5 z-10">{menu}</div> : null}
