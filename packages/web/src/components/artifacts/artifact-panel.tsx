@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { MatrixClientPeg } from "@/client/peg";
 import {
@@ -12,7 +13,6 @@ import {
   FileDiffIcon,
   InfoIcon,
   PanelRightIcon,
-  PointerClickIcon,
   PrinterIcon,
   WarningIcon,
 } from "@/components/icons";
@@ -31,6 +31,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Tabs } from "@/components/ui/tabs";
 import { Spinner } from "@/components/ui/spinner";
 import {
   useArtifactRoute,
@@ -38,6 +39,8 @@ import {
   useThreadArtifacts,
 } from "@/hooks/use-artifacts";
 import { useActor } from "@/hooks/use-actor";
+import { useAgentFocus } from "@/hooks/use-agent-focus";
+import { useArtifactComments } from "@/hooks/use-artifact-comments";
 import { assetDataUrls, useArtifactAssets } from "@/hooks/use-artifact-assets";
 import { headAuthor, useArtifactDraft } from "@/hooks/use-artifact-draft";
 import { type EditorMode, useCanvasEditor } from "@/hooks/use-canvas-editor";
@@ -45,14 +48,19 @@ import { useDebounce } from "@/hooks/use-debounce";
 import { useGuestIds } from "@/hooks/use-member-roles";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMyPowerLevel } from "@/hooks/use-my-power-level";
+import { useDesignSystems } from "@/hooks/use-design-systems";
 import { useStyleDraft } from "@/hooks/use-style-draft";
+import { useThreadEntries } from "@/hooks/use-timeline-entries";
 import {
   addArtifactRefDraft,
   type ArtifactRefTarget,
   MAX_REFS,
 } from "@/lib/artifacts/refs";
 import { inlineAssets } from "@/lib/artifacts/assets";
-import { canStructure, editKeyOf, isCanvasKind, type KeyLike } from "@/lib/artifacts/canvas";
+import { type Box, canStructure, editKeyOf, isCanvasKind, type KeyLike } from "@/lib/artifacts/canvas";
+import { type ArtifactComment, RESOLVE_KEY } from "@/lib/artifacts/comments";
+import { CURSOR_PIN, PICK_PIN, type PinRequest } from "@/lib/artifacts/pins";
+import { sendReaction } from "@/lib/matrix/reactions";
 import {
   addValueRef,
   cssValue,
@@ -76,6 +84,7 @@ import {
   pasteFrame,
   renameFrame,
   resizeFrame,
+  setSlideSize,
   setComponentDescription,
   setFrameNotes,
   setFrameSkip,
@@ -86,6 +95,7 @@ import {
 } from "@/lib/artifacts/edit";
 import {
   FRAME_SIZE,
+  type SlideSize,
   type FrameKind,
   isFrameKind,
   MAX_NAME,
@@ -94,10 +104,12 @@ import {
   readFrames,
   stepFrame,
   stepZoom,
+  clampZoom,
   ZOOM_KEYS,
 } from "@/lib/artifacts/frames";
-import { addPreviewError, composeFixRequest } from "@/lib/artifacts/runtime";
+import { addPreviewError, composeFitRequest, composeFixRequest } from "@/lib/artifacts/runtime";
 import { buildArtifactSrcdoc } from "@/lib/artifacts/srcdoc";
+import { clampTweak, readTweaks, tweakMessage, type TweakValue, writeTweaks } from "@/lib/artifacts/tweaks";
 import { annotationNote } from "@/lib/artifacts/styles";
 import { copyToClipboard, downloadBlob } from "@/lib/browser-actions";
 import { isEditableKeyboardTarget } from "@/lib/keyboard-shortcuts";
@@ -115,6 +127,7 @@ import {
   VersionMenu,
 } from "./artifact-menus";
 import { ArtifactPreview, type ArtifactPreviewHandle, PrintFrame } from "./artifact-preview";
+import { CommentList, FramePins } from "./artifact-comments";
 import { AnnotationForm } from "./artifact-refs";
 import { ArtifactTextView } from "./artifact-text-view";
 import { CanvasToolbar } from "./canvas-toolbar";
@@ -126,8 +139,12 @@ import { DesignSystemNav } from "./design-system-nav";
 import { LayoutPicker } from "./layout-picker";
 import { FrameControls, FrameRail, type PresentMode } from "./frame-rail";
 import { FrameProperties, type PaletteColor, StyleInspector } from "./style-inspector";
+import { TweaksPanel } from "./tweaks-panel";
 
 type Tab = "preview" | "code" | "changes";
+/** The side panel's tabs, in their order. */
+const SIDE_TABS = { properties: "Properties", tweaks: "Tweaks", comments: "Comments" } as const;
+type SideTab = keyof typeof SIDE_TABS;
 
 const DEFAULT_ARTBOARD = { width: FRAME_SIZE.design[0], height: FRAME_SIZE.design[1] };
 
@@ -147,6 +164,8 @@ const EXTENSION: Record<ArtifactKind, string> = {
  * version. Annotate mode turns clicks and selections into annotations that
  * wait in the thread composer until the user sends them.
  */
+const NO_TWEAKS: Record<string, TweakValue> = {};
+
 export function ArtifactPanel({
   roomId,
   threadRootId,
@@ -158,7 +177,9 @@ export function ArtifactPanel({
 }) {
   const isMobile = useIsMobile();
   const route = useArtifactRoute();
-  const all = useThreadArtifacts(roomId, threadRootId, workforceSpaceId);
+  // One pass over the thread for the versions and the comments.
+  const thread = useThreadEntries(roomId, threadRootId, workforceSpaceId);
+  const all = useThreadArtifacts(thread.replies);
   const versions = useMemo(
     () => all.filter((v) => v.identifier === route.identifier),
     [all, route.identifier],
@@ -236,7 +257,24 @@ export function ArtifactPanel({
     [frameKind, previous, prevState.text, versionText],
   );
 
+  // Comment mode (spec §3.8, §6.6): the side panel's Comments tab. While it shows, a click picks an
+  // element to comment on and open comments have markers. Comments are thread messages with
+  // references to this artifact.
   const [annotating, setAnnotating] = useState(false);
+  const [, setSearchParams] = useSearchParams();
+  const openComments = useArtifactComments(
+    roomId,
+    thread,
+    workforceSpaceId,
+    current?.identifier,
+    latest ? { eventId: latest.eventId, kind: latest.kind, text: latestState.text } : undefined,
+  );
+  // The agent cursor (spec §6.8): where an agent works in the latest version while its turn runs.
+  const cursor = useAgentFocus(roomId, threadRootId, workforceSpaceId).find(
+    (f) => f.identifier === current?.identifier,
+  );
+  // Pin boxes go straight to PinOverlay: they change on every scroll of the frame.
+  const pinSink = useRef<((boxes: Map<string, Box>) => void) | null>(null);
   const [target, setTarget] = useState<ArtifactRefTarget | null>(null);
   const [note, setNote] = useState("");
   const preview = useRef<ArtifactPreviewHandle>(null);
@@ -265,7 +303,15 @@ export function ArtifactPanel({
     };
   }, [dsText]);
   // Images, videos and fonts the document names, downloaded for the frame (spec §5.4).
-  const media = useArtifactAssets(canvasKind ? text : null);
+  // A design system's Fonts page names its uploaded fonts the same way (spec §5.1).
+  const dsPage = useMemo(
+    () => (system && section && section !== "overview" ? designSystemSectionPage(system, section) : null),
+    [system, section],
+  );
+  const media = useArtifactAssets(canvasKind ? text : section === "fonts" ? dsPage : null);
+  // Spec §5.6: owners and admins list a design system for the whole workspace.
+  const designSystems = useDesignSystems(workforceSpaceId);
+  const listed = designSystems.workspace.some((s) => s.roomId === roomId && s.identifier === current?.identifier);
   const cardAssets = useMemo(() => media.assets.filter((a) => a.kind !== "video"), [media.assets]);
   const fileInput = useRef<HTMLInputElement>(null);
   const [dropping, setDropping] = useState(false);
@@ -285,6 +331,22 @@ export function ArtifactPanel({
     post: (type, detail) => preview.current?.post(type, detail),
     me,
   });
+  // Tweaks (spec §6.7): the document's controls; changed values are kept per version until Keep or Reset.
+  const tweaks = useMemo(() => (canvasKind && text !== null ? readTweaks(text) : []), [canvasKind, text]);
+  const [tweakState, setTweakState] = useState<{ id: string; open: boolean; values: Record<string, TweakValue> }>({
+    id: "",
+    open: false,
+    values: {},
+  });
+  const tweakOwn = tweakState.id === current?.eventId;
+  const tweakValues = tweakOwn ? tweakState.values : NO_TWEAKS;
+  const tweaksOpen = tweakOwn && tweakState.open && tweaks.length > 0 && framed;
+  const tweakFrame = useMemo(
+    () => (tweaks.length > 0 ? tweakMessage(tweaks, tweakValues) : null),
+    [tweaks, tweakValues],
+  );
+  const setTweaks = (next: { open?: boolean; values?: Record<string, TweakValue> }) =>
+    current && setTweakState((prev) => ({ ...(prev.id === current.eventId ? prev : { open: false, values: {} }), ...next, id: current.eventId }));
   // The doc is edited in place, so its text is part of the key.
   const canvasText = canvas.doc?.text;
   const layers = useMemo(
@@ -295,12 +357,12 @@ export function ArtifactPanel({
     () =>
       !framed || text === null
         ? null
-        : system && section && section !== "overview"
-          ? buildArtifactSrcdoc("html", designSystemSectionPage(system, section), channel)
+        : dsPage !== null
+          ? buildArtifactSrcdoc("html", dsPage, channel)
           : // The stamped copy while one is kept: canvas edits then reach the frame as patches, not a reload.
             buildArtifactSrcdoc(current.kind, canvas.doc ? canvas.doc.stamped() : text, channel),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `text` only when no stamped copy is kept
-    [framed, current?.kind, canvas.doc ?? text, channel, system, section],
+    [framed, current?.kind, canvas.doc ?? text, channel, dsPage],
   );
   // The rail's cards: the plain source, settled, so a drag does not reload every card.
   const railText = useDebounce(text, 400);
@@ -309,6 +371,8 @@ export function ArtifactPanel({
     [frameKind, railText, channel],
   );
   const [zoom, setZoom] = useState<number | null>(null);
+  // The scale the frame reports: the percentage a fitted frame shows, and where a wheel zoom starts.
+  const [scale, setScale] = useState<number | null>(null);
   const [grid, setGrid] = useState(false);
   const [dsEditing, setDsEditing] = useState(false);
   const [dialog, setDialog] = useState<
@@ -383,6 +447,7 @@ export function ArtifactPanel({
     setPresenting(false);
     setPresenter(null);
     setZoom(null);
+    setScale(null);
     setGrid(false);
     if (document.fullscreenElement) void document.exitFullscreen();
   }, [artifactId]);
@@ -433,11 +498,24 @@ export function ArtifactPanel({
   const canAnnotate =
     tab !== "changes" && text !== null && !dsInvalid && !dsEmpty && !(framing && grid) && dsEditor === null;
   const deckNotes = frameKind === "slides" && frames.some((f) => f.notes);
+  // Pins: a marker per open comment on an element (comment mode), and the agent cursor on the latest version.
+  const commenting = annotating && canAnnotate && !presenting;
+  const markers = commenting ? openComments.filter((c) => c.ref.target.kind === "element") : [];
+  const cursorShown = cursor !== undefined && onLatest && !presenting;
+  // A picked element's note is written in a popover beside it. On a phone, and for a line or a
+  // paragraph, the form is in the Comments tab.
+  const pickSelector = commenting && !isMobile && srcdoc !== null && target?.kind === "element" ? target.selector : null;
+  const pins: PinRequest[] = [
+    ...(pickSelector ? [{ id: PICK_PIN, selector: pickSelector }] : []),
+    ...markers.flatMap((c) => (c.ref.target.kind === "element" ? [{ id: c.id, selector: c.ref.target.selector }] : [])),
+    ...(cursorShown ? [{ id: CURSOR_PIN, selector: cursor.selector }] : []),
+  ];
   // The canvas editor (spec §6.4): on by default for an editor of slides and design; for html
   // (style and text only, D3) and for viewers (inspect) while Properties is open. On a phone,
   // retype and delete only.
-  const canvasOn =
-    canvas.doc !== null && tab === "preview" && srcdoc !== null && !annotating && !presenting && !grid && (frameKind === null || framing);
+  const canvasReady =
+    canvas.doc !== null && tab === "preview" && srcdoc !== null && !presenting && !grid && (frameKind === null || framing);
+  const canvasOn = canvasReady && !annotating;
   const canvasMode: EditorMode = !canvasOn
     ? "off"
     : editable && frameKind && !isMobile
@@ -449,6 +527,20 @@ export function ArtifactPanel({
           : "off";
   // On a phone Properties is a sheet (spec §6.1).
   const showProperties = canvasMode !== "off" && canvas.properties;
+  // The side panel (spec §6.1): one button in the toolbar opens it, a tab per tool. Properties
+  // stays the remembered choice; Tweaks and Comments show over it while they are open.
+  const sideTabs = (["properties", "tweaks", "comments"] as const).filter((t) =>
+    t === "properties" ? canvasKind && framed && canvasReady : t === "tweaks" ? tweaks.length > 0 && framed : canAnnotate,
+  );
+  const sideTab: SideTab | null = presenting
+    ? null
+    : commenting
+      ? "comments"
+      : tweaksOpen
+        ? "tweaks"
+        : showProperties
+          ? "properties"
+          : null;
   /** Canvas keys; on a phone only delete, undo and redo (direct editing is retype, delete and the slide menu). */
   const canvasKey = (k: KeyLike) => {
     const a = editKeyOf(k);
@@ -530,6 +622,22 @@ export function ArtifactPanel({
       (t) => resizeFrame(t, i, size.width, size.height),
       `Resized ${frameUnit(kind)} ${i + 1} to ${size.width}×${size.height}`,
     );
+  }
+
+  /** Every slide at `size`. The content is not refitted: the toast offers to ask for that in the thread. */
+  function setDeckSize(size: SlideSize) {
+    if (!current || !edits.apply((t) => setSlideSize(t, size), `Changed the slides to ${size}`)) return;
+    const body = composeFitRequest(current.identifier, size);
+    toast(`Slides are now ${size}. Check that everything still fits.`, {
+      action: {
+        label: "Ask Fabrium to fit",
+        onClick: () => {
+          // The request names the artifact: its new size is saved first.
+          edits.flush();
+          void ask(body).then((sent) => sent && toast("Request sent"));
+        },
+      },
+    });
   }
 
   function addArtboard(i: number, size: FrameSize) {
@@ -686,6 +794,16 @@ export function ArtifactPanel({
     setNote("");
   }
 
+  /** Shows a tab of the side panel; null closes it. Leaving Comments drops a half-made comment. */
+  function showSide(next: SideTab | null) {
+    resetAnnotation();
+    setAnnotating(next === "comments");
+    setTweaks({ open: next === "tweaks" });
+    if (next === "properties") canvas.setProperties(true);
+    // Closed for good, not only until Tweaks or Comments close. Where Properties is no tab, the choice stays.
+    else if (next === null && sideTabs.includes("properties")) canvas.setProperties(false);
+  }
+
   function selectTab(next: Tab) {
     edits.flush();
     resetAnnotation();
@@ -702,15 +820,52 @@ export function ArtifactPanel({
       event_id: current.eventId,
       target: refTarget,
       note: refNote,
+      // A comment sent to the agent mentions it (spec §6.6).
+      ...(current.author.kind === "agent" ? { agent: current.author.id } : {}),
     });
     if (!added) toast.error(`A reply holds at most ${MAX_REFS} annotations. Send it first.`);
     return added;
   }
 
+  /** Scrolls the thread to the comment's message (`?event=`). */
+  function showComment(c: ArtifactComment) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("event", c.messageId);
+      return next;
+    });
+  }
+
+  /** The ✓ reaction resolves a comment (spec §6.6): every reference in its message. */
+  function resolveComment(c: ArtifactComment) {
+    const client = MatrixClientPeg.safeGet();
+    if (!client) return;
+    sendReaction(client, roomId, c.messageId, RESOLVE_KEY).catch(() => toast.error("Could not resolve the comment"));
+  }
+
+  function addToWorkspace() {
+    if (!current) return;
+    void designSystems
+      .saveWorkspace([
+        ...designSystems.workspace,
+        {
+          roomId,
+          threadId: threadRootId,
+          identifier: current.identifier,
+          name: current.title,
+          isDefault: designSystems.workspace.length === 0,
+        },
+      ])
+      .then(
+        () => toast.success("Added to the workspace design systems."),
+        () => toast.error("Could not add the design system."),
+      );
+  }
+
   function addAnnotation() {
     if (!target || !addRef(target, annotationNote(draft.changes, note))) return;
     resetAnnotation(true);
-    toast("Annotation added to your reply");
+    toast("Comment added. Send your reply to post it.");
   }
 
   function addValue(s: TokenSection, name: string, value: string) {
@@ -742,23 +897,21 @@ export function ArtifactPanel({
     );
   }
 
+  /** `body` as a message in this thread; false, with a toast, when it was not sent. */
+  async function ask(body: string): Promise<boolean> {
+    try {
+      await MatrixClientPeg.get().sendMessage(roomId, threadRootId, { msgtype: "m.text", body } as never);
+      return true;
+    } catch {
+      toast.error("Could not send the request");
+      return false;
+    }
+  }
+
   async function askToFix() {
     if (!current) return;
-    const client = MatrixClientPeg.safeGet();
-    if (!client) {
-      toast.error("Could not send the request");
-      return;
-    }
     setFixSent(current.eventId);
-    try {
-      await client.sendMessage(roomId, threadRootId, {
-        msgtype: "m.text",
-        body: composeFixRequest(current.identifier, frameErrors),
-      } as never);
-    } catch {
-      setFixSent(null);
-      toast.error("Could not send the request");
-    }
+    if (!(await ask(composeFixRequest(current.identifier, frameErrors)))) setFixSent(null);
   }
 
   const tabs = [
@@ -769,12 +922,11 @@ export function ArtifactPanel({
 
   const nextTab = tabs.length > 1 ? tabs[(tabs.findIndex((t) => t.value === tab) + 1) % tabs.length] : undefined;
 
-  // Beside the canvas, or on a phone in a sheet under it (spec §6.1).
   const propertiesPanel =
     showProperties && canvas.doc ? (
       <StyleInspector
         title="Properties"
-        sheet={isMobile}
+        sheet
         selector={canvas.primary?.name ?? null}
         values={canvas.draft.values}
         onChange={canvas.draft.change}
@@ -810,6 +962,7 @@ export function ArtifactPanel({
                 edit((t) => renameFrame(t, frameKind, frameIndex, name), `Renamed ${frameUnit(frameKind)} ${frameIndex + 1}`)
               }
               onSize={(size) => resize(frameKind, frameIndex, size)}
+              onDeckSize={setDeckSize}
               onTransition={canvas.frameTransition}
               onBackground={(v) => canvas.frameStyle({ "background-color": v })}
             />
@@ -819,6 +972,94 @@ export function ArtifactPanel({
       />
     ) : null;
 
+  const tweaksPanel = tweaksOpen ? (
+    <TweaksPanel
+      controls={tweaks}
+      values={tweakValues}
+      onChange={(name, v) => {
+        const c = tweaks.find((t) => t.name === name);
+        if (c) setTweaks({ values: { ...tweakValues, [name]: clampTweak(c, v) } });
+      }}
+      onReset={() => setTweaks({ values: {} })}
+      onKeep={
+        editable && canvasKind
+          ? () => {
+              edit((t) => writeTweaks(t, canvasKind, tweakValues), "Kept tweaks");
+              setTweaks({ values: {} });
+            }
+          : undefined
+      }
+    />
+  ) : null;
+
+  const annotationForm = target ? (
+    <AnnotationForm
+      target={target}
+      note={note}
+      onNoteChange={setNote}
+      onAdd={addAnnotation}
+      onCancel={() => resetAnnotation()}
+    />
+  ) : null;
+
+  const commentsPanel = (
+    <div data-testid="artifact-comments-panel">
+      <div className="p-3">
+        {annotationForm && !pickSelector ? (
+          annotationForm
+        ) : (
+          <p className="text-caption1 text-text-tertiary">
+            {srcdoc !== null
+              ? "Click an element in the preview to comment on it."
+              : tab === "code"
+                ? "Click a line or select code to comment on it."
+                : "Click a paragraph or select text to comment on it."}
+          </p>
+        )}
+      </div>
+      {/* ponytail: annotation styles are desktop only; a phone's sheet has no room for them. */}
+      {srcdoc !== null && !isMobile && target?.kind === "element" ? (
+        <StyleInspector sheet selector={target.selector} values={draft.values} onChange={draft.change} />
+      ) : null}
+      <div className="border-t border-border p-3">
+        <CommentList
+          comments={openComments}
+          onShow={showComment}
+          onResolve={viewer.kind === "human" ? resolveComment : undefined}
+        />
+      </div>
+    </div>
+  );
+
+  // Beside the artifact, or on a phone in a sheet under it (spec §6.1).
+  const sidePanel = sideTab ? (
+    <div
+      data-testid="artifact-side-panel"
+      className={cn("flex min-h-0 flex-col bg-background", isMobile ? "w-full" : "w-64 shrink-0 border-l border-border")}
+    >
+      <Tabs
+        value={sideTab}
+        onValueChange={(v) => showSide(v as SideTab)}
+        tabs={sideTabs.map((t) => ({
+          value: t,
+          label:
+            t === "comments" && openComments.length > 0 ? (
+              <>
+                Comments <span className="text-text-secondary">{openComments.length}</span>
+              </>
+            ) : (
+              SIDE_TABS[t]
+            ),
+        }))}
+        className="min-h-0 flex-1"
+        listClassName="mb-0 shrink-0 px-2"
+        panelClassName="min-h-0 flex-1 overflow-y-auto"
+      >
+        {sideTab === "comments" ? commentsPanel : sideTab === "tweaks" ? tweaksPanel : propertiesPanel}
+      </Tabs>
+    </div>
+  ) : null;
+
   return (
     <PanelShell
       mobile={isMobile}
@@ -826,9 +1067,9 @@ export function ArtifactPanel({
       // Undo and redo of the user's edits, outside text fields (they keep their own). Canvas
       // keys while focus is on the stage; Cmd+\ toggles Properties anywhere in the panel.
       onKeyDown={(e) => {
-        if (canvasKind && framed && editKeyOf(e) === "properties") {
+        if (sideTabs.includes("properties") && editKeyOf(e) === "properties") {
           e.preventDefault();
-          canvas.setProperties(!canvas.properties);
+          showSide(sideTab === "properties" ? null : "properties");
           return;
         }
         if (editable && !isEditableKeyboardTarget(e.target) && edits.onKey(e)) e.preventDefault();
@@ -846,6 +1087,9 @@ export function ArtifactPanel({
               onRename={() => setDialog({ type: "rename" })}
               onDuplicate={duplicate}
               onRestore={restore}
+              onAddToWorkspace={
+                current.kind === "design-system" && designSystems.canManage ? (listed ? null : addToWorkspace) : undefined
+              }
             />
           ) : undefined
         }
@@ -954,6 +1198,7 @@ export function ArtifactPanel({
             {framing ? (
               <FrameControls
                 zoom={zoom}
+                scale={scale}
                 onZoom={presenting ? undefined : setZoom}
                 grid={grid}
                 onGrid={presenting ? undefined : toggleGrid}
@@ -975,28 +1220,26 @@ export function ArtifactPanel({
             ) : null}
             {presenting ? null : (
               <>
-                {canvasKind && framed ? (
+                <span className="relative inline-flex">
                   <IconButton
                     size="small"
                     icon={<PanelRightIcon />}
-                    label="Properties"
-                    aria-pressed={canvas.properties}
-                    tone={canvas.properties ? "brand" : "default"}
-                    onClick={() => canvas.setProperties(!canvas.properties)}
+                    label={openComments.length > 0 ? `Side panel, ${openComments.length} open comments` : "Side panel"}
+                    aria-pressed={sideTab !== null}
+                    tone={sideTab !== null ? "brand" : "default"}
+                    disabled={sideTabs.length === 0}
+                    onClick={() => showSide(sideTab === null ? sideTabs[0]! : null)}
                   />
-                ) : null}
-                <IconButton
-                  size="small"
-                  icon={<PointerClickIcon />}
-                  label={annotating ? "Stop annotating" : "Annotate"}
-                  aria-pressed={annotating}
-                  disabled={!canAnnotate}
-                  tone={annotating ? "brand" : "default"}
-                  onClick={() => {
-                    resetAnnotation();
-                    setAnnotating((a) => !a);
-                  }}
-                />
+                  {openComments.length > 0 ? (
+                    <span
+                      aria-hidden
+                      data-testid="artifact-comment-count"
+                      className="pointer-events-none absolute -top-1 -right-1 min-w-4 rounded-pill bg-surface-tertiary px-1 text-center text-caption2 font-medium text-text-primary"
+                    >
+                      {openComments.length}
+                    </span>
+                  ) : null}
+                </span>
                 <IconButton
                   size="small"
                   icon={<CopyIcon />}
@@ -1133,6 +1376,8 @@ export function ArtifactPanel({
                     : undefined
                 }
                 onKey={frameKey}
+                onScale={setScale}
+                onZoom={(factor) => presenting || setZoom((z) => clampZoom((z ?? scale ?? 1) * factor))}
                 editor={{
                   mode: canvasMode,
                   onSelection: canvas.onSelection,
@@ -1140,7 +1385,10 @@ export function ArtifactPanel({
                   onKey: (k) => void canvasKey(k),
                 }}
                 assets={media.assets}
+                pins={pins}
+                onPinned={(boxes) => pinSink.current?.(boxes)}
                 onDragFiles={() => canvasMode === "full" && setDropping(true)}
+                tweaks={tweakFrame}
               />
             ) : (
               <ArtifactTextView
@@ -1152,6 +1400,16 @@ export function ArtifactPanel({
                 onPicked={setTarget}
               />
             )}
+            {srcdoc !== null && pins.length > 0 ? (
+              <PinOverlay
+                sink={pinSink}
+                markers={markers}
+                cursorLabel={cursorShown ? cursor.label : null}
+                onSelect={showComment}
+                draft={pickSelector ? annotationForm : null}
+                onCloseDraft={() => resetAnnotation()}
+              />
+            ) : null}
             {(canvasMode === "full" || canvasMode === "style") &&
             !canvas.properties &&
             canvas.selection?.rect &&
@@ -1233,15 +1491,9 @@ export function ArtifactPanel({
             </details>
           ) : null}
         </div>
-        {/* ponytail: annotation styles are desktop only; on a phone the panel has no room beside the frame. */}
-        {annotating && srcdoc !== null && !isMobile && target?.kind === "element" ? (
-          <StyleInspector selector={target.selector} values={draft.values} onChange={draft.change} />
-        ) : !isMobile ? (
-          propertiesPanel
-        ) : null}
-        {propertiesPanel && isMobile ? (
-          // Not modal: the canvas above stays usable, so a tap there selects.
-          <Sheet open modal={false} onOpenChange={(open) => !open && canvas.setProperties(false)}>
+        {sideTab && isMobile ? (
+          // Not modal: the artifact above stays usable, so a tap there selects or picks.
+          <Sheet open modal={false} onOpenChange={(open) => !open && showSide(null)}>
             <SheetContent
               side="bottom"
               aria-describedby={undefined}
@@ -1249,11 +1501,13 @@ export function ArtifactPanel({
               onInteractOutside={(e) => e.preventDefault()}
               onOpenAutoFocus={(e) => e.preventDefault()}
             >
-              <SheetTitle className="sr-only">Properties</SheetTitle>
-              {propertiesPanel}
+              <SheetTitle className="sr-only">{SIDE_TABS[sideTab]}</SheetTitle>
+              {sidePanel}
             </SheetContent>
           </Sheet>
-        ) : null}
+        ) : (
+          sidePanel
+        )}
       </div>
 
       {frameErrors.length > 0 && tab === "preview" ? (
@@ -1278,31 +1532,6 @@ export function ArtifactPanel({
         </div>
       ) : null}
 
-      {annotating && canAnnotate ? (
-        <div
-          className="shrink-0 border-t border-border p-3"
-          data-testid="artifact-annotation-bar"
-        >
-          {target ? (
-            <AnnotationForm
-              target={target}
-              note={note}
-              onNoteChange={setNote}
-              onAdd={addAnnotation}
-              onCancel={() => resetAnnotation()}
-            />
-          ) : (
-            <p className="text-caption1 text-text-tertiary">
-              {srcdoc !== null
-                ? "Click an element in the preview to annotate it."
-                : tab === "code"
-                  ? "Click a line or select code to annotate it."
-                  : "Click a paragraph or select text to annotate it."}
-            </p>
-          )}
-        </div>
-      ) : null}
-
       {printDoc !== null ? (
         <PrintFrame srcdoc={printDoc} channel={channel} onDone={() => setPrintDoc(null)} />
       ) : null}
@@ -1313,6 +1542,7 @@ export function ArtifactPanel({
           layouts={layoutChoice.layouts}
           srcdoc={layoutChoice.srcdoc}
           channel={channel}
+          frame={frames[0] ?? { width: FRAME_SIZE.slides[0], height: FRAME_SIZE.slides[1] }}
           onPick={(name) =>
             edit(
               (t) => addFrame(t, picker, slideLayouts(t, picker).find((l) => l.name === name)!.section),
@@ -1468,3 +1698,41 @@ const RING: Record<ActorKind, string> = {
   human: "ring-actor-human",
   system: "ring-actor-system",
 };
+
+/** The pins over the frame. Owns the measured boxes, so a scroll in the frame re-renders only this. */
+function PinOverlay({
+  sink,
+  markers,
+  cursorLabel,
+  onSelect,
+  draft,
+  onCloseDraft,
+}: {
+  sink: { current: ((boxes: Map<string, Box>) => void) | null };
+  markers: readonly ArtifactComment[];
+  cursorLabel: string | null;
+  onSelect: (c: ArtifactComment) => void;
+  /** The note form for the picked element (`PICK_PIN`), or null. */
+  draft: ReactNode;
+  onCloseDraft: () => void;
+}) {
+  const [boxes, setBoxes] = useState<ReadonlyMap<string, Box>>(() => new Map());
+  useEffect(() => {
+    sink.current = setBoxes;
+    return () => {
+      sink.current = null;
+    };
+  }, [sink]);
+  const cursorBox = cursorLabel === null ? undefined : boxes.get(CURSOR_PIN);
+  const pickBox = draft ? boxes.get(PICK_PIN) : undefined;
+  return (
+    <FramePins
+      draft={pickBox ? { box: pickBox, form: draft, onClose: onCloseDraft } : null}
+      comments={markers.flatMap((c) => {
+        const box = boxes.get(c.id);
+        return box ? [{ id: c.id, box, author: c.author.displayName, onSelect: () => onSelect(c) }] : [];
+      })}
+      cursor={cursorBox && cursorLabel !== null ? { box: cursorBox, label: cursorLabel } : null}
+    />
+  );
+}

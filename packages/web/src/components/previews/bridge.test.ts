@@ -43,6 +43,11 @@ describe("preview bridge", () => {
     expect(msg({ type: "picked", href: `${ORIGIN}/`, html: "<li/>" })).toBeNull();
   });
 
+  it("passes the cursor boxes on raw, for readPinBoxes", () => {
+    const boxes = [{ id: "agent-cursor", x: 1, y: 2, w: 3, h: 4 }];
+    expect(msg({ type: "pinned", boxes })).toEqual({ type: "pinned", raw: { source: "fabrium-preview", type: "pinned", boxes } });
+  });
+
   it("navigates typed paths only on the session origin", () => {
     expect(frameUrl("/todos?x=1", ORIGIN)).toBe(`${ORIGIN}/todos?x=1`);
     expect(frameUrl("todos", ORIGIN)).toBe(`${ORIGIN}/todos`);

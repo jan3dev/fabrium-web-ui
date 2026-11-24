@@ -11,10 +11,15 @@ export const MAX_CONSOLE_ENTRIES = 50;
 export type BridgeMessage =
   | { type: "location"; path: string }
   | { type: "console"; message: string }
-  | { type: "picked"; path: string; target: Extract<ArtifactRefTarget, { kind: "element" }>; styles: Styles };
+  | { type: "picked"; path: string; target: Extract<ArtifactRefTarget, { kind: "element" }>; styles: Styles }
+  /** Boxes of the elements the parent follows (`pins`); read with `readPinBoxes`. */
+  | { type: "pinned"; raw: unknown };
 
-/** `style` sets one property on the picked element; `style-reset` drops the edits, `style-keep` leaves them in the page. */
-export type BridgeCommand = "back" | "forward" | "reload" | "pick" | "style" | "style-reset" | "style-keep";
+/**
+ * `style` sets one property on the picked element; `style-reset` drops the edits, `style-keep` leaves them in the page.
+ * `pins` names elements to follow (the agent cursor); the bridge answers with `pinned`.
+ */
+export type BridgeCommand = "back" | "forward" | "reload" | "pick" | "style" | "style-reset" | "style-keep" | "pins";
 
 /** The page path of an href on the session origin, or null. */
 export function pathOn(href: unknown, origin: string): string | null {
@@ -39,6 +44,7 @@ export function readBridgeMessage(data: unknown, origin: string): BridgeMessage 
   if (d.type === "console" && typeof d.message === "string" && d.message.trim()) {
     return { type: "console", message: d.message.slice(0, MAX_CONSOLE_ENTRY) };
   }
+  if (d.type === "pinned") return { type: "pinned", raw: d };
   if (d.type === "picked") {
     const path = pathOn(d.href, origin);
     const target = readTarget({ ...d, kind: "element" });

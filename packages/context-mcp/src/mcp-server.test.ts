@@ -44,6 +44,7 @@ describe('buildContextMcpServer', () => {
     const list = await client.listTools()
     expect(list.tools.map((t) => t.name).sort()).toEqual([
       'zooid_artifact',
+      'zooid_design_system',
       'zooid_get_history',
       'zooid_get_members',
       'zooid_get_recent_threads',
@@ -83,6 +84,24 @@ describe('buildContextMcpServer', () => {
     expect(calls).toHaveLength(4)
     expect(calls[2]).toEqual({ identifier: 'page', read: true })
     expect(calls[3]).toEqual({ identifier: 'page', assets: ['img/logo.png'] })
+  })
+
+  it('zooid_design_system forwards to designSystem as-is', async () => {
+    const calls: unknown[] = []
+    const server = buildContextMcpServer({
+      resolve: async () =>
+        makeProvider({
+          designSystem: async (_c, input) => {
+            calls.push(input)
+            return input.identifier ? { identifier: input.identifier, css: ':root {}' } : { systems: [] }
+          },
+        }),
+    })
+    const client = await connect(server)
+    const list = await client.callTool({ name: 'zooid_design_system', arguments: {} })
+    expect(JSON.parse((list.content as Array<{ text: string }>)[0]!.text)).toEqual({ systems: [] })
+    await client.callTool({ name: 'zooid_design_system', arguments: { identifier: 'brand', component: 'Button' } })
+    expect(calls).toEqual([{}, { identifier: 'brand', component: 'Button' }])
   })
 
   it('renames the two tools that did not name Matrix primitives', async () => {

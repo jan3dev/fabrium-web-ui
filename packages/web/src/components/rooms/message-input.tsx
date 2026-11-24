@@ -133,6 +133,10 @@ export interface MessageInputProps {
   onError?: (message: string | null) => void;
   /** Rendered between the error and the field, e.g. a quote chip. */
   header?: ReactNode;
+  /** Extra controls in the toolbar after the formatting toggle, e.g. the Create menu. */
+  tools?: ReactNode;
+  /** Rendered under the field, e.g. the design-system chip. */
+  footer?: ReactNode;
   className?: string;
   /** Positioning for the suggestion list, which opens above the root. */
   suggestionsClassName?: string;
@@ -165,6 +169,8 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
       error = null,
       onError,
       header,
+      footer,
+      tools,
       className,
       suggestionsClassName = "left-0 right-0",
     },
@@ -604,6 +610,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
             onEmoji={(emoji) =>
               editor.editor?.chain().focus().insertContent(emoji).run()
             }
+            tools={tools}
             sendButton={sendButton}
             sendDisabled={
               disabled ||
@@ -612,6 +619,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
             onSend={() => void submit()}
           />
         </div>
+        {footer}
         {attachmentsEnabled && (
           <input
             ref={attachInputRef}

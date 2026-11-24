@@ -6,6 +6,7 @@ import {
   stopPreview,
 } from "@/client/fabrium-api";
 import { MatrixClientPeg } from "@/client/peg";
+import { FramePins } from "@/components/artifacts/artifact-comments";
 import { AnnotationForm } from "@/components/artifacts/artifact-refs";
 import { StyleInspector } from "@/components/artifacts/style-inspector";
 import { AppWindowIcon, CloseIcon, EllipsisIcon } from "@/components/icons";
@@ -29,6 +30,8 @@ import {
   MAX_REFS,
   type ArtifactRefTarget,
 } from "@/lib/artifacts/refs";
+import type { Box } from "@/lib/artifacts/canvas";
+import { CURSOR_PIN, oneSelector, readPinBoxes } from "@/lib/artifacts/pins";
 import { annotationNote, PREVIEW_STYLE_PROPS } from "@/lib/artifacts/styles";
 import { copyToClipboard } from "@/lib/browser-actions";
 import { setComposerFill } from "@/lib/quote-draft-store";
@@ -47,6 +50,8 @@ import { DEVICE_WIDTH, PreviewToolbar, type PreviewDevice } from "./preview-tool
 const PREVIEW_FRAME_SANDBOX = "allow-scripts allow-forms allow-same-origin allow-popups allow-downloads";
 
 const DEVICE_KEY = "fabrium:preview-device:v1";
+/** A page path without its query and hash: the agent names the page, not its state. */
+const pagePath = (p: string) => p.split(/[?#]/)[0] || "/";
 
 function loadDevice(): PreviewDevice {
   try {
@@ -126,6 +131,12 @@ export function PreviewPanel({
   const frame = useRef<HTMLIFrameElement>(null);
   const annotatingRef = useRef(annotating);
   annotatingRef.current = annotating;
+  // The agent cursor (plan P6): the element the agent works on, when it is on the page shown.
+  const focus = info?.focus;
+  const cursorSelector = focus && pagePath(focus.path) === pagePath(path) ? oneSelector(focus.selector) : null;
+  const cursorRef = useRef(cursorSelector);
+  cursorRef.current = cursorSelector;
+  const [cursorBox, setCursorBox] = useState<Box | null>(null);
 
   // A session for each run: a stop or restart ends the old one on the gateway.
   useEffect(() => {
@@ -174,10 +185,13 @@ export function PreviewPanel({
         setTarget(null);
         setNote("");
         draft.picked({});
-        // The new bridge also starts out of pick mode.
+        // The new bridge also starts out of pick mode, and follows nothing.
         if (annotatingRef.current) postToBridge(frame.current, origin!, "pick", { on: true });
+        if (cursorRef.current) postToBridge(frame.current, origin!, "pins", { pins: [{ id: CURSOR_PIN, selector: cursorRef.current }] });
       } else if (m?.type === "console") {
         setErrors((list) => addConsoleEntry(list, m.message));
+      } else if (m?.type === "pinned") {
+        setCursorBox(readPinBoxes(m.raw, new Set([CURSOR_PIN])).get(CURSOR_PIN) ?? null);
       } else if (m?.type === "picked" && annotatingRef.current) {
         setTarget({ path: m.path, target: m.target });
         draft.picked(m.styles);
@@ -191,6 +205,10 @@ export function PreviewPanel({
   useEffect(() => {
     if (origin) postToBridge(frame.current, origin, "pick", { on: annotating });
   }, [annotating, origin]);
+
+  useEffect(() => {
+    if (origin) postToBridge(frame.current, origin, "pins", { pins: cursorSelector ? [{ id: CURSOR_PIN, selector: cursorSelector }] : [] });
+  }, [cursorSelector, origin]);
 
   const act = (label: string, call: (a: string, n: string) => Promise<void>) => () =>
     call(agentId, name).catch((err: unknown) =>
@@ -229,6 +247,7 @@ export function PreviewPanel({
       target: t,
       note: refNote,
       preview: { agent: agentId, path: at },
+      agent: agentId,
     });
     if (!added) toast.error(`A reply holds at most ${MAX_REFS} annotations. Send it first.`);
     return added;
@@ -237,7 +256,7 @@ export function PreviewPanel({
   function addAnnotation() {
     if (!target || !addRef(target.target, target.path, annotationNote(draft.changes, note))) return;
     resetAnnotation(true);
-    toast("Annotation added to your reply");
+    toast("Comment added. Send your reply to post it.");
   }
 
   /** Spec §3.1 step 5: the composer gets an @mention of the agent and the error; the user sends it. */
@@ -374,6 +393,12 @@ export function PreviewPanel({
                 ) : running ? (
                   <div className="flex h-full items-center justify-center">
                     <Spinner size="medium" className="text-text-tertiary" />
+                  </div>
+                ) : null}
+                {live && !phoneOnly && cursorSelector && cursorBox ? (
+                  // Over the frame, which is centered at the device width.
+                  <div className="pointer-events-none absolute inset-0 mx-auto max-w-full" style={width ? { width } : undefined}>
+                    <FramePins comments={[]} cursor={{ box: cursorBox, label: agent.displayName }} />
                   </div>
                 ) : null}
                 <PreviewState

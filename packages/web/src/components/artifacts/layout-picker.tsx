@@ -1,10 +1,8 @@
 import { useRef } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { FRAME_SIZE } from "@/lib/artifacts/frames";
+import type { FrameInfo } from "@/lib/artifacts/frames";
 import type { SlideLayout } from "@/lib/artifacts/edit";
 import { FrameThumb } from "./frame-card";
-
-const SLIDE = { width: FRAME_SIZE.slides[0], height: FRAME_SIZE.slides[1] };
 
 /**
  * Add slide (spec §6.2): the layouts to choose from, each a live preview in the deck's
@@ -17,6 +15,7 @@ export function LayoutPicker({
   layouts,
   srcdoc,
   channel,
+  frame,
   onPick,
   onOpenChange,
 }: {
@@ -25,6 +24,8 @@ export function LayoutPicker({
   srcdoc: string;
   /** Baked into `srcdoc`. */
   channel: string;
+  /** The deck's slide size. */
+  frame: Pick<FrameInfo, "width" | "height">;
   onPick: (layout: SlideLayout) => void;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -63,7 +64,7 @@ export function LayoutPicker({
               className="relative flex flex-col gap-1.5 rounded-card p-1.5 hover:bg-surface-secondary has-[button:focus-visible]:bg-surface-selected has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-accent-brand"
             >
               <span className="rounded-utility ring-1 ring-border">
-                <FrameThumb srcdoc={srcdoc} channel={channel} index={i} frame={SLIDE} width={128} />
+                <FrameThumb srcdoc={srcdoc} channel={channel} index={i} frame={frame} width={128} />
               </span>
               <button
                 type="button"

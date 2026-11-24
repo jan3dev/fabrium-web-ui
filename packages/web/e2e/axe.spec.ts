@@ -298,10 +298,21 @@ for (const theme of ["light", "dark"] as const) {
       await page.getByTestId("artifact-versions").click();
       await page.getByRole("menuitemradio").first().waitFor();
     });
-    // Level 3: the canvas tools and the Properties panel with its layers list.
-    await sweep(`${room}?thread=${encodeURIComponent(deckRoot)}&artifact=deck`, async () => {
+    // The deck's side panel on a tab. It may be open already: Properties is remembered across sweeps.
+    const sideTab = async (name: string) => {
       await page.getByRole("toolbar", { name: "Canvas tools" }).waitFor();
-      await page.getByRole("button", { name: "Properties" }).click();
+      const toggle = page.getByRole("button", { name: "Side panel" });
+      if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
+      await page.getByRole("tab", { name: new RegExp(`^${name}`) }).click();
+    };
+    // Level 4: comment mode, the side panel's Comments tab with the list of open comments.
+    await sweep(`${room}?thread=${encodeURIComponent(deckRoot)}&artifact=deck`, async () => {
+      await sideTab("Comments");
+      await page.getByText("No open comments.").waitFor();
+    });
+    // Level 3: the canvas tools and the Properties tab with its layers list.
+    await sweep(`${room}?thread=${encodeURIComponent(deckRoot)}&artifact=deck`, async () => {
+      await sideTab("Properties");
       await page.getByTestId("layers-list").waitFor();
     });
     // The design canvas: every artboard in a row, with Properties (open since the sweep above).

@@ -414,6 +414,30 @@ describe('matrix transport /transactions', () => {
     expect(content.at(-1)!.text).toBe('tighten slide 2\nThe user edited artifact `deck`: Moved slide 3')
   })
 
+  it('tells the agent which kind the user chose in the composer (design modes §6.8)', async () => {
+    const { transport, agents } = makeTransport()
+    agents.prompt.mockResolvedValue({ stopReason: 'end_turn' as const })
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$ask',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'Create: Slides\n\nour Q3 numbers',
+            'dev.fabrium.artifact_hint': { type: 'slides' },
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+    const content = (agents.prompt.mock.calls[0][1] as { content: Array<{ text: string }> }).content
+    expect(content.at(-1)!.text).toMatch(/our Q3 numbers\nThe user chose "slides" in the composer: answer with a zooid_artifact of type "slides"/)
+  })
+
   it('attaches formatted_body when agent text contains markdown', async () => {
     const { transport, agents, client } = makeTransport()
     agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {

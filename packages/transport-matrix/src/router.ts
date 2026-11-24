@@ -78,6 +78,8 @@ interface MaybeEvent {
     msgtype?: string
     'm.relates_to'?: { rel_type?: string; event_id?: string }
     'dev.zooid.trigger'?: { name?: string; fired_at?: number; ttl_ms?: number }
+    /** A comment the user did not send to the agent (DESIGN_MODES_SPEC.md §6.6): it wakes nobody. */
+    'dev.fabrium.quiet'?: unknown
   }
 }
 
@@ -108,6 +110,7 @@ export function route(
   if (event.type !== 'm.room.message') return []
   if (!event.content?.msgtype) return []
   if (isMediaMsgtype(event.content.msgtype)) return []
+  if (event.content['dev.fabrium.quiet'] === true) return []
   if (isExpiredTrigger(event, Date.now())) {
     const stamp = event.content['dev.zooid.trigger']
     const ageMs = stamp?.fired_at !== undefined ? Date.now() - stamp.fired_at : undefined

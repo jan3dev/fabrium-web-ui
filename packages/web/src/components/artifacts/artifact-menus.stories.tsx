@@ -53,6 +53,22 @@ export const TitleMenu: Story = {
   ),
 };
 
+/** A design system, for an owner or admin: list it for the workspace (spec §5.6). */
+export const DesignSystemTitleMenu: Story = {
+  render: () => (
+    <div className="w-72 p-4">
+      <ArtifactTitleMenu
+        title="Brand 2026"
+        older={false}
+        onRename={() => {}}
+        onDuplicate={() => {}}
+        onRestore={() => {}}
+        onAddToWorkspace={() => {}}
+      />
+    </div>
+  ),
+};
+
 export const Rename: Story = {
   render: () => (
     <NameDialog open title="Rename slide 3" value="Pricing" optional maxLength={120} onSubmit={() => {}} onOpenChange={() => {}} />

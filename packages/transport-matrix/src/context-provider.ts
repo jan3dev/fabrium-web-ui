@@ -1,6 +1,9 @@
 import type {
   ArtifactInput,
   ArtifactResult,
+  DesignSystemInput,
+  DesignSystemRef,
+  DesignSystemResult,
   TransportContextProvider,
   HistoryOptions,
   HistoryPage,
@@ -25,6 +28,7 @@ import {
   applyArtifactEdits,
   artifactAuthorCheck,
   assetType,
+  projectSpaceParents,
   readStoredArtifact,
   sha256Hex,
   threadEventsNewestFirst,
@@ -33,6 +37,13 @@ import {
   type StoredArtifact,
 } from './artifacts.js'
 import type { MediaClientLike } from './transport.js'
+import {
+  DESIGN_SYSTEMS_EVENT_TYPE,
+  mergeDesignSystemLists,
+  parseDesignSystemList,
+  readDesignSystem,
+} from './design-systems.js'
+import { serverNameFromMxid } from './space-provisioner.js'
 import { INLINE_IMAGE_MIMES, MAX_DOWNLOAD_BYTES, MAX_INLINE_IMAGE_BYTES } from './media-client.js'
 import { resolveAttachmentPath } from './attachment-path.js'
 import { mimeFromFilename } from './mime.js'
@@ -96,6 +107,12 @@ export interface MatrixContextProviderOpts {
    * and artifact `assets` are refused.
    */
   workspace?: { hostDir: string; agentPath: string; confined: boolean }
+  /**
+   * Localpart of the workforce space (the workspace), `#<it>:<server>`: its
+   * `dev.fabrium.design_systems` lists the workspace's design systems.
+   * Absent = only the room's project spaces are read.
+   */
+  workspaceSpace?: string
 }
 
 /** Events fetched per round when collecting recent threads. */
@@ -114,6 +131,9 @@ function indexOfNth<T>(items: Array<T | null>, n: number): number {
 
 export class MatrixContextProvider implements TransportContextProvider {
   constructor(private readonly opts: MatrixContextProviderOpts) {}
+
+  /** The workforce space's room ID once its alias resolved (see `workspaceId`). */
+  private workspaceRoomId: string | null = null
 
   async getRoomHistory(channelId: string, hopts: HistoryOptions): Promise<HistoryPage> {
     // Server-side filter: only `m.room.message` events. Without this we'd
@@ -472,6 +492,53 @@ export class MatrixContextProvider implements TransportContextProvider {
       content,
     })
     return { event_id, identifier: input.identifier }
+  }
+
+  /**
+   * Design systems across threads (design modes spec §5.6): the room's project
+   * spaces' lists, then the workspace's. Every read is as the agent, so a list
+   * or a system in a room the agent is not in stays unreadable.
+   */
+  async designSystem(channelId: string, input: DesignSystemInput): Promise<DesignSystemResult> {
+    const systems = await this.listDesignSystems(channelId)
+    if (!input.identifier) return { systems }
+    const ref = systems.find(
+      (s) => s.identifier === input.identifier && (!input.room_id || s.room_id === input.room_id),
+    )
+    const listHint = 'Call zooid_design_system without arguments to list them.'
+    if (!ref) throw new Error(`not_found: no listed design system "${input.identifier}". ${listHint}`)
+    const latest = await this.latestArtifact(ref.room_id, ref.thread_id, ref.identifier).catch(() => {
+      throw new Error(`not_readable: you are not in the room that holds "${ref.identifier}". Ask an owner to invite you.`)
+    })
+    if (latest?.type !== 'design-system') {
+      throw new Error(`not_found: "${ref.identifier}" has no design-system version in its thread. ${listHint}`)
+    }
+    return { ...ref, ...readDesignSystem(await this.artifactBody(latest), input.component) }
+  }
+
+  private async listDesignSystems(channelId: string): Promise<DesignSystemRef[]> {
+    const { client, asUserId } = this.opts
+    // One event per space, not its whole state (a member event per member). A space the
+    // agent cannot read lists nothing for it.
+    const listIn = (roomId: string) =>
+      client.fetchStateContent(roomId, DESIGN_SYSTEMS_EVENT_TYPE, asUserId).then(parseDesignSystemList, () => [])
+    const [channelState, workspaceId] = await Promise.all([
+      // The agent works in this room: a failure here is an error, not "no systems".
+      client.fetchRoomState(channelId, asUserId),
+      this.workspaceId(),
+    ])
+    // Project spaces first, then the workspace.
+    const rooms = [...new Set([...projectSpaceParents(channelState), ...(workspaceId ? [workspaceId] : [])])]
+    return mergeDesignSystemLists(await Promise.all(rooms.map(listIn)))
+  }
+
+  /** Resolved once: the alias does not move. One that does not resolve is asked again. */
+  private async workspaceId(): Promise<string | null> {
+    const { client, asUserId, workspaceSpace } = this.opts
+    if (!workspaceSpace) return null
+    return (this.workspaceRoomId ??= await client
+      .resolveAlias(`#${workspaceSpace}:${serverNameFromMxid(asUserId)}`)
+      .catch(() => null))
   }
 
   /** The newest version by timeline order from any allowed author (decision D2). */

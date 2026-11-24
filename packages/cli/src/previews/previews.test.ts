@@ -171,6 +171,17 @@ describe('preview tunnel and gateway', () => {
     await until(() => hub.log(AGENT, 'todo-app', 17).text === 'more\n')
     expect(hub.get('@other:test', 'todo-app')).toBeUndefined()
 
+    // The agent cursor: checked like a state, kept per agent, gone with the tunnel (below).
+    const focus = { agent_id: AGENT, room_id: '!room:test', thread_root: '$root', identifier: 'deck', selector: 'h1' }
+    tunnel.send({ t: 'focus', agent_id: '@other:test', focus: { ...focus, agent_id: '@other:test' } })
+    tunnel.send({ t: 'focus', agent_id: AGENT, focus: { ...focus, selector: 'a\nb' } })
+    tunnel.send({ t: 'focus', agent_id: AGENT, focus })
+    await until(() => hub.focusIn('!room:test').length === 1)
+    expect(hub.focusIn('!room:test')).toEqual([focus])
+    tunnel.send({ t: 'focus', agent_id: AGENT, focus: { ...focus, identifier: undefined, name: 'todo-app' } })
+    await until(() => hub.previewFocus(AGENT, 'todo-app') !== undefined)
+    expect(hub.previewFocus(AGENT, 'todo-app')).toEqual({ path: '/', selector: 'h1' })
+
     // A person's own token cannot register previews as itself.
     const impostor = startTunnelClient({
       url: `http://127.0.0.1:${centralPort}`,
@@ -243,6 +254,7 @@ describe('preview tunnel and gateway', () => {
     await until(() => restarts.length === 1)
     tunnel.close()
     await until(() => hub.get(AGENT, 'todo-app')?.status === 'offline')
+    expect(hub.focusIn('!room:test')).toEqual([])
     expect((await get(centralPort, host(live.url))).res.statusCode).toBe(503)
   })
 })
@@ -317,6 +329,33 @@ describe('PreviewSupervisor', () => {
       supervisor.start(caller, { name: 'x', command: 'true', env: { LD_PRELOAD: '/tmp/x.so' } }),
     ).rejects.toThrow(/invalid_env: LD_PRELOAD/)
     await expect(supervisor.start(caller, { name: 'Bad Name', command: 'true' })).rejects.toThrow(/invalid_name/)
+  })
+
+  it('sets the agent cursor, checks it, and clears it once', () => {
+    const focus: unknown[] = []
+    const supervisor = new PreviewSupervisor({
+      agents: { coder: { userId: AGENT, workdir: tmpdir() } },
+      max: 1,
+      sendEvent: async () => {},
+      isEncrypted: async () => false,
+      onFocus: (_agent, f) => void focus.push(f),
+    })
+    const caller = { agentName: 'coder', channelId: '!room:test', threadId: '$root' }
+    expect(supervisor.focus(caller, { identifier: 'deck', selector: 'section:nth-of-type(2) h1' })).toEqual({ focus: 'set' })
+    expect(focus[0]).toMatchObject({ agent_id: AGENT, room_id: '!room:test', thread_root: '$root', identifier: 'deck' })
+    expect(() => supervisor.focus(caller, { identifier: 'deck', selector: 'a\nb' })).toThrow(/invalid_focus/)
+    expect(() => supervisor.focus(caller, { selector: 'h1' })).toThrow(/invalid_focus/)
+    expect(() => supervisor.focus(caller, { name: 'nope', selector: 'h1' })).toThrow(/not_found/)
+    expect(() => supervisor.focus({ ...caller, threadId: '' }, { identifier: 'deck', selector: 'h1' })).toThrow(/threads/)
+    // A turn end in its thread clears it, one in another thread does not; a second clear sends nothing.
+    supervisor.clearFocus(AGENT, '$other')
+    expect(focus).toHaveLength(1)
+    supervisor.clearFocus(AGENT, '$root')
+    supervisor.clearFocus(AGENT, '$root')
+    expect(focus).toHaveLength(2)
+    expect(focus[1]).toBeNull()
+    expect(supervisor.focus(caller, { identifier: 'deck' })).toEqual({ focus: 'cleared' })
+    expect(focus).toHaveLength(2)
   })
 })
 

@@ -17,7 +17,7 @@ const SRCDOC = buildArtifactSrcdoc("slides", withFrames(DECK, LAYOUTS.map((l) =>
 const meta = {
   title: "Artifacts/LayoutPicker",
   component: LayoutPicker,
-  args: { open: true, layouts: LAYOUTS, srcdoc: SRCDOC, channel: CHANNEL, onPick: () => {}, onOpenChange: () => {} },
+  args: { open: true, layouts: LAYOUTS, srcdoc: SRCDOC, channel: CHANNEL, frame: { width: 1920, height: 1080 }, onPick: () => {}, onOpenChange: () => {} },
 } satisfies Meta<typeof LayoutPicker>;
 
 export default meta;

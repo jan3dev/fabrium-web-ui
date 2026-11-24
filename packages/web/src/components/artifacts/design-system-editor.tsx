@@ -68,8 +68,8 @@ export function DesignSystemEditor({
       <OverviewField value={system.overview} onCommit={onOverview} />
     );
   }
-  if (section === "assets") {
-    return <p className="p-4 text-body2 text-text-secondary">Ask the agent to change assets.</p>;
+  if (!isTokenSection(section) && section !== "components") {
+    return <p className="p-4 text-body2 text-text-secondary">Ask the agent to change this section.</p>;
   }
   return (
     <ul className="flex h-full flex-col gap-2 overflow-y-auto p-3" aria-label="Values">

@@ -84,8 +84,33 @@ export function bridgeScript(appOrigin: string): string {
     picked = el; mark(hovered, true); mark(picked, true, 'data-fab-picked');
     post({ type: 'picked', selector: selectorOf(el), html, styles, text: String(el.innerText || el.textContent || '').trim().slice(0, 1500), href: location.href });
   }, true);
+  // Agent cursor (plan P6): the parent names an element by selector (untrusted: only queried here)
+  // and draws the cursor over the frame at the box this reports when it moves.
+  let pins = [], pinLast = '', pinTimer = 0;
+  const measure = () => {
+    const boxes = [];
+    for (const p of pins) {
+      let el = null;
+      try { el = document.querySelector(p.selector); } catch {}
+      const r = el && el.getBoundingClientRect();
+      if (r && (r.width > 0 || r.height > 0)) boxes.push({ id: p.id, x: r.left, y: r.top, w: r.width, h: r.height });
+    }
+    const key = JSON.stringify(boxes);
+    if (key !== pinLast) { pinLast = key; post({ type: 'pinned', boxes }); }
+  };
+  let pinFrame = 0;
+  addEventListener('scroll', () => {
+    if (pins.length && !pinFrame) pinFrame = requestAnimationFrame(() => { pinFrame = 0; measure(); });
+  }, true);
   addEventListener('message', (e) => {
     if (e.origin !== target || e.source !== parent || !e.data || e.data.source !== 'fabrium-preview-parent') return;
+    if (e.data.command === 'pins') {
+      pins = (Array.isArray(e.data.pins) ? e.data.pins : []).filter((p) => p && typeof p.id === 'string' && typeof p.selector === 'string').slice(0, 200);
+      clearInterval(pinTimer);
+      pinTimer = pins.length ? setInterval(measure, 250) : 0;
+      pinLast = '';
+      measure();
+    }
     if (e.data.command === 'back') history.back();
     else if (e.data.command === 'forward') history.forward();
     else if (e.data.command === 'reload') location.reload();

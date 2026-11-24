@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import type { Box } from "@/lib/artifacts/canvas";
-import { TRANSITIONS } from "@/lib/artifacts/frames";
+import { SLIDE_SIZES, type SlideSize, TRANSITIONS } from "@/lib/artifacts/frames";
 import {
   blurOf,
   contrast,
@@ -322,7 +322,7 @@ export function StyleInspector({
   frame?: ReactNode;
   /** A line under the controls; null for none. */
   note?: string | null;
-  /** In a sheet (on a phone): full width, no side border. */
+  /** In the side panel or a sheet: full width, no side border, no heading (the tab names it). */
   sheet?: boolean;
 }) {
   const has = (p: StyleProp) => props.includes(p);
@@ -348,7 +348,7 @@ export function StyleInspector({
       )}
     >
       <div>
-        <h3 className="font-heading text-body2 font-semibold">{title}</h3>
+        {sheet ? null : <h3 className="font-heading text-body2 font-semibold">{title}</h3>}
         <p className="truncate font-mono text-caption2 text-text-tertiary" title={selector ?? undefined}>
           {selector ?? "Nothing selected"}
         </p>
@@ -496,8 +496,11 @@ export function StyleInspector({
 /**
  * The open slide or artboard while nothing is selected (spec §6.5): background (the design
  * system's colours only, when it has any), size (artboards), transition (slides), name.
- * Name and size commit on Enter or when the field is left.
+ * Name and size commit on Enter or when the field is left. A deck's slide size is one
+ * choice for all its slides.
  */
+const SIZES = Object.keys(SLIDE_SIZES) as SlideSize[];
+
 export function FrameProperties({
   kind,
   name,
@@ -509,6 +512,7 @@ export function FrameProperties({
   readOnly = false,
   onName,
   onSize,
+  onDeckSize,
   onTransition,
   onBackground,
 }: {
@@ -522,6 +526,8 @@ export function FrameProperties({
   readOnly?: boolean;
   onName: (name: string) => void;
   onSize: (size: { width: number; height: number }) => void;
+  /** Slides: the size of every slide. */
+  onDeckSize?: (size: SlideSize) => void;
   onTransition: (transition: string) => void;
   onBackground: (color: string) => void;
 }) {
@@ -570,16 +576,24 @@ export function FrameProperties({
             </Row>
           </>
         ) : (
-          <>
-            <Row label="Size">
-              <span className="text-caption1 text-text-secondary tabular-nums">
-                {width} × {height}
-              </span>
-            </Row>
-            <SelectRow label="Transition" value={transition} options={TRANSITIONS} onChange={onTransition} />
-          </>
+          <SelectRow label="Transition" value={transition} options={TRANSITIONS} onChange={onTransition} />
         )}
       </Section>
+      {kind === "slides" ? (
+        <Section title="Deck" open>
+          <Row label="Slide size">
+            <NativeSelect
+              value={SIZES.find((s) => SLIDE_SIZES[s][0] === width && SLIDE_SIZES[s][1] === height)}
+              onChange={(e) => onDeckSize?.(e.target.value as SlideSize)}
+              className={FIELD}
+            >
+              {SIZES.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </NativeSelect>
+          </Row>
+        </Section>
+      ) : null}
     </fieldset>
   );
 }

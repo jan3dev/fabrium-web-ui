@@ -47,7 +47,7 @@ export function assetType(path: string): { mime: string; max: number } {
   return { mime: mimeFromFilename(path), max };
 }
 
-const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+export const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
 
 /** What a stored version carries; `body` inline or `url` + `sha256` in media. */
 export interface StoredArtifact {
@@ -136,7 +136,7 @@ export function validateArtifactContent(type: ArtifactKind, content: string): vo
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new Error(
-        'invalid_content: a "design-system" artifact is one JSON object with any of: overview, colors, spacing, typography, radius, shadows, components, assets.',
+        'invalid_content: a "design-system" artifact is one JSON object with any of: overview, colors, themes, spacing, typography, fonts, radius, shadows, layout, components, icons, logos, assets.',
       );
     }
   }
@@ -233,8 +233,8 @@ export function readStoredArtifact(content: unknown): StoredArtifact | null {
 /** The state events `canAuthorArtifact` reads, as `/state` returns them. */
 export type RoomState = Array<{ type?: string; state_key?: string; sender?: string; content?: unknown }>;
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+export function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 /**
@@ -272,6 +272,14 @@ export function canAuthorArtifact(
   return user >= needed;
 }
 
+/** The room's project spaces: its non-empty `m.space.parent` state keys, canonical first. */
+export function projectSpaceParents(state: RoomState): string[] {
+  return state
+    .filter((e) => e.type === "m.space.parent" && e.state_key && Object.keys(record(e.content)).length > 0)
+    .sort((a, b) => Number(!!record(b.content).canonical) - Number(!!record(a.content).canonical))
+    .map((e) => e.state_key!);
+}
+
 /**
  * `canAuthorArtifact` for one room: reads its state and, for the guest rule,
  * the joined members of its project space, as the web's `useGuestIds` does:
@@ -286,19 +294,33 @@ export async function artifactAuthorCheck(
   isAgent: (sender: string) => boolean = () => false,
 ): Promise<(sender: string) => boolean> {
   const state = await client.fetchRoomState(roomId, asUserId);
-  const parents = state
-    .filter((e) => e.type === "m.space.parent" && e.state_key && Object.keys(record(e.content)).length > 0)
-    .sort((a, b) => Number(!!record(b.content).canonical) - Number(!!record(a.content).canonical));
   let spaceMembers: Set<string> | null = null;
-  for (const parent of parents) {
+  for (const parent of projectSpaceParents(state)) {
     try {
-      spaceMembers = new Set(Object.keys((await client.getJoinedMembers(parent.state_key!, asUserId)).joined));
+      spaceMembers = new Set(Object.keys((await client.getJoinedMembers(parent, asUserId)).joined));
       break;
     } catch {
       // A space this agent cannot read cannot prove anyone a guest: try the next, else allow.
     }
   }
   return (sender) => canAuthorArtifact(state, sender, isAgent(sender) ? null : spaceMembers);
+}
+
+/** Design modes §6.8: the message field the composer's Create menu and `/slides`-style commands set. */
+export const ARTIFACT_HINT_FIELD = "dev.fabrium.artifact_hint";
+
+/**
+ * The per-turn line for an artifact hint on the message that started the turn, or null.
+ * Only the five known types pass; whiteboard and motion are not artifact kinds yet, so
+ * the agent is told to say so.
+ */
+export function artifactHintLine(content: unknown): string | null {
+  const type = record(record(content)[ARTIFACT_HINT_FIELD]).type;
+  if (type === "slides" || type === "design" || type === "design-system")
+    return `The user chose "${type}" in the composer: answer with a zooid_artifact of type "${type}" (or update this thread's ${type} artifact).`;
+  if (type === "whiteboard" || type === "motion")
+    return `The user chose "${type}" in the composer. Fabrium cannot show ${type} artifacts yet: say so in one sentence and offer slides or a design instead.`;
+  return null;
 }
 
 const SUMMARY_MAX = 120;

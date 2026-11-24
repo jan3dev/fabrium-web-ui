@@ -34,12 +34,60 @@ export interface PreviewState {
   web: boolean
 }
 
+/**
+ * Where an agent works right now (plan row P6 "Agent cursor", DESIGN_MODES_SPEC.md §6.8): an
+ * artifact (`identifier`) or a preview page (`name`, `path`), and a CSS selector in it. Live
+ * state, one per agent, cleared when its turn ends; never a timeline event (D10).
+ */
+export interface AgentFocus {
+  agent_id: string
+  room_id: string
+  thread_root: string
+  identifier?: string
+  name?: string
+  path?: string
+  /** Untrusted: readers only query with it. */
+  selector: string
+}
+
+const MAX_SELECTOR = 300
+/** An artifact identifier as the web UI reads one (`readArtifactRefs`): up to 80 characters, no whitespace. */
+const IDENTIFIER_RE = /^[^\s]{1,80}$/
+
+/** The focus with its fields checked, or null. The workstation is a peer: the gateway reads it this way too. */
+export function readFocus(raw: unknown): AgentFocus | null {
+  if (!raw || typeof raw !== 'object') return null
+  const f = raw as Record<string, unknown>
+  const str = (v: unknown) => (typeof v === 'string' ? v : '')
+  const selector = str(f.selector).trim()
+  if (!selector || selector.length > MAX_SELECTOR || /[\r\n]/.test(selector)) return null
+  const focus: AgentFocus = {
+    agent_id: str(f.agent_id),
+    room_id: str(f.room_id),
+    thread_root: str(f.thread_root),
+    selector,
+  }
+  if (!focus.agent_id || !focus.room_id || !focus.thread_root) return null
+  if (typeof f.identifier === 'string') {
+    if (!IDENTIFIER_RE.test(f.identifier)) return null
+    focus.identifier = f.identifier
+  } else if (typeof f.name === 'string') {
+    const path = str(f.path) || '/'
+    if (!NAME_RE.test(f.name) || !path.startsWith('/') || path.length > 500 || /\s/.test(path)) return null
+    focus.name = f.name
+    focus.path = path
+  } else return null
+  return focus
+}
+
 /** Workstation → gateway. */
 export type UpMessage =
   /** `log`: the retained output, sent once per preview on a new connection. */
   | { t: 'state'; preview: PreviewState; log?: string }
   | { t: 'log'; agent_id: string; name: string; text: string }
   | { t: 'remove'; agent_id: string; name: string }
+  /** `focus: null` clears the agent's focus. */
+  | { t: 'focus'; agent_id: string; focus: AgentFocus | null }
 
 /** Gateway → workstation. */
 export type DownMessage =

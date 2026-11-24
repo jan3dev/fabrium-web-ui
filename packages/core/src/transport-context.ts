@@ -85,6 +85,30 @@ export interface ArtifactResult {
   assets?: Record<string, string>
 }
 
+/** A design system a workspace or project lists (`dev.fabrium.design_systems`, design modes spec §5.6). */
+export interface DesignSystemRef {
+  room_id: string
+  thread_id: string
+  identifier: string
+  name: string
+  default?: true
+  /** Only for these kinds; absent = every kind. */
+  for?: Array<'slides' | 'design'>
+  /** The kinds this system is the default for, after merging every list. */
+  default_for?: Array<'slides' | 'design'>
+}
+
+/** No `identifier`: list the systems. With it: read one; with `component` too, that component's markup. */
+export interface DesignSystemInput {
+  identifier?: string
+  /** Disambiguates two listed systems with the same identifier. */
+  room_id?: string
+  component?: string
+}
+
+/** `{ systems }` for a list; for a read, the system's parts (overview, css, tokens, components, …). */
+export type DesignSystemResult = Record<string, unknown>
+
 export interface SendAttachmentInput {
   /** As the agent sees it. Relative paths resolve against the agent's workspace. */
   path: string
@@ -169,6 +193,8 @@ export interface TransportContextProvider {
   sendMessage(input: SendMessageInput): Promise<SendMessageResult>
   /** Post an artifact version into the bound thread, or with `read` return the latest. Absent = transport has no artifacts. */
   sendArtifact?(channelId: string, threadId: string, input: ArtifactInput): Promise<ArtifactResult>
+  /** List the design systems the room's project and workspace list, or read one. Absent = none on this transport. */
+  designSystem?(channelId: string, input: DesignSystemInput): Promise<DesignSystemResult>
   /**
    * Post a file to the given thread as the agent. Optional: absent = the
    * transport cannot send attachments ([[ZOD068]]).

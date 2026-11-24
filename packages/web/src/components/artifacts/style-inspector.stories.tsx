@@ -105,6 +105,7 @@ export const NothingSelected: Story = {
         palette={PALETTE}
         onName={() => {}}
         onSize={() => {}}
+        onDeckSize={() => {}}
         onTransition={() => {}}
         onBackground={() => {}}
       />
