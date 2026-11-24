@@ -5,6 +5,11 @@ services:
     # Without it tuwunel's PID 1 can end up a zombie that docker cannot kill
     # ("PID N is zombie and can not be killed"), stranding teardown.
     init: true
+    # The appservice registration points at host.docker.internal. Docker
+    # Desktop resolves that name; a Linux engine (CI runners, Linux hosts)
+    # resolves it only with this mapping.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${TUWUNEL_HOST_PORT:-8448}:8448"
     volumes:

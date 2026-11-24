@@ -99,3 +99,55 @@ jobs:
 
       - name: Infra tier tests
         run: pnpm test:infra
+
+  # Every suite of every package, integration and Docker included, plus the
+  # Playwright e2e, on each PR to main and on a manual run. This runs the
+  # suites that no tier selects yet. Suites gated on a secret
+  # (ANTHROPIC_API_KEY, ZOOID_ACP_E2E) still skip.
+  test-all:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # Without a daemon the Docker suites would only skip.
+      - name: Docker preflight
+        run: |
+          docker info > /dev/null || {
+            echo "::error title=No Docker::test-all needs a working Docker daemon"
+            exit 1
+          }
+
+      # The vitest fixtures pin v1.9.3; the e2e fixture uses latest.
+      - name: Pre-pull images
+        run: |
+          docker pull ghcr.io/matrix-construct/tuwunel:v1.9.3
+          docker pull ghcr.io/matrix-construct/tuwunel:latest
+          docker pull alpine:3
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Install the Playwright browser
+        run: pnpm -C packages/web exec playwright install --with-deps chromium
+
+      # One package at a time: several Docker suites bind fixed ports.
+      # --no-sort: in topological order, a failing package skips every package
+      # that depends on it (cli depends on transport-matrix).
+      - name: All suites
+        run: pnpm -r --workspace-concurrency=1 --no-bail --no-sort test
+
+      - name: E2E
+        if: ${{ !cancelled() }}
+        run: pnpm -C packages/web test:e2e
