@@ -39,6 +39,12 @@ export interface FrameView {
 export const MAX_FRAMES = 200;
 /** Canvas bounds and defaults; the frame runtime in srcdoc.ts embeds the same values. */
 export const FRAME_SIZE = { min: 100, max: 10000, slides: [1920, 1080], design: [1440, 900] } as const;
+/** The slide sizes of a deck, in px. `data-size` on `body` names one for every slide; 16:9 when absent. */
+export const SLIDE_SIZES = { "16:9": FRAME_SIZE.slides, "4:3": [1440, 1080] } as const;
+export type SlideSize = keyof typeof SLIDE_SIZES;
+export const DEFAULT_SLIDE_SIZE: SlideSize = "16:9";
+const slideSize = (v: string | null | undefined): SlideSize =>
+  v && Object.hasOwn(SLIDE_SIZES, v.trim()) ? (v.trim() as SlideSize) : DEFAULT_SLIDE_SIZE;
 /** A frame's name and its speaker notes, read and written. */
 export const MAX_NAME = 120;
 export const MAX_NOTES = 5000;
@@ -48,14 +54,13 @@ const size = (v: string | null, fallback: number) => {
   const n = parseFloat(v ?? "");
   return Number.isFinite(n) ? Math.min(FRAME_SIZE.max, Math.max(FRAME_SIZE.min, n)) : fallback;
 };
-/** The canvas size of a `body > section`: fixed for slides, `data-width`/`data-height` for design. */
+/** The canvas size of a `body > section`: the deck's for slides, `data-width`/`data-height` for design. */
 export function frameSize(kind: FrameKind, el: Element): { width: number; height: number } {
-  return kind === "slides"
-    ? { width: FRAME_SIZE.slides[0], height: FRAME_SIZE.slides[1] }
-    : {
-        width: size(el.getAttribute("data-width"), FRAME_SIZE.design[0]),
-        height: size(el.getAttribute("data-height"), FRAME_SIZE.design[1]),
-      };
+  const [width, height] =
+    kind === "slides"
+      ? SLIDE_SIZES[slideSize(el.parentElement?.getAttribute("data-size"))]
+      : [size(el.getAttribute("data-width"), FRAME_SIZE.design[0]), size(el.getAttribute("data-height"), FRAME_SIZE.design[1])];
+  return { width, height };
 }
 const transition = (v: string | null) => TRANSITIONS.find((t) => t === v?.trim().toLowerCase());
 const text = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
@@ -145,12 +150,14 @@ export function stepFrame(
 /** The zoom levels besides Fit; the zoom menu lists the same ones. */
 export const ZOOMS = [0.5, 1, 2] as const;
 
-/** One zoom step in or out of `zoom` (null fits): 50 %, 100 %, 200 %. */
+/** One zoom step in or out of `zoom` (null fits): the next of 50 %, 100 %, 200 %. */
 export function stepZoom(zoom: number | null, dir: 1 | -1): number {
-  const i = zoom === null ? -1 : ZOOMS.indexOf(zoom as (typeof ZOOMS)[number]);
-  if (i < 0) return dir > 0 ? 1 : 0.5;
-  return ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, i + dir))]!;
+  if (zoom === null) return dir > 0 ? 1 : 0.5;
+  return (dir > 0 ? ZOOMS.find((z) => z > zoom) : [...ZOOMS].reverse().find((z) => z < zoom)) ?? zoom;
 }
+
+/** A free zoom (Cmd/Ctrl+wheel, a pinch): whole percents from 10 % to 1000 %. */
+export const clampZoom = (zoom: number) => Math.min(10, Math.max(0.1, Math.round(zoom * 100) / 100));
 
 /** Panel ↔ presenter window, over a BroadcastChannel (same origin only). `go` asks the panel for a
  * slide; from the panel it says which slide is showing. The deck is sent on `hello` and when it changes. */

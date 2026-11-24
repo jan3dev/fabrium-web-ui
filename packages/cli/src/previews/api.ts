@@ -25,13 +25,11 @@ export function previewApi(deps: PreviewApiDeps): Hono {
     return verify(token)
   }
 
-  const member = (userId: string, preview: PreviewState) => deps.hub.isMember(userId, preview)
-
   /** The preview, when the caller may see it; 404 otherwise, so the API is no oracle. */
   async function visible(c: Context): Promise<{ userId: string; preview: PreviewState }> {
     const userId = await caller(c)
     const preview = deps.hub.get(c.req.param('agent')!, c.req.param('name')!)
-    if (!preview || !(await member(userId, preview))) throw new ApiError(404, { error: 'no such preview' })
+    if (!preview || !(await deps.hub.isMember(userId, preview))) throw new ApiError(404, { error: 'no such preview' })
     return { userId, preview }
   }
 
@@ -41,21 +39,27 @@ export function previewApi(deps: PreviewApiDeps): Hono {
     return seen
   }
 
+  /** Of `list(room)`, what the caller may see: the items in rooms they have joined. */
+  async function seen<T extends Parameters<PreviewHub['isMember']>[1]>(c: Context, list: (room: string) => T[]) {
+    const userId = await caller(c)
+    const items = list(c.req.query('room') ?? '')
+    const member = await Promise.all(items.map((p) => deps.hub.isMember(userId, p)))
+    return c.json(items.filter((_, i) => member[i]))
+  }
+
   app.onError(apiErrorHandler)
 
-  app.get('/', async (c) => {
-    const userId = await caller(c)
-    const room = c.req.query('room') ?? ''
-    const previews = deps.hub.list(room)
-    const seen = await Promise.all(previews.map((p) => member(userId, p)))
-    return c.json(previews.filter((_, i) => seen[i]))
-  })
+  app.get('/', (c) => seen(c, (room) => deps.hub.list(room)))
+
+  /** Where the room's agents work now: the agent cursor (plan P6, DESIGN_MODES_SPEC.md §6.8). */
+  app.get('/focus', (c) => seen(c, (room) => deps.hub.focusIn(room)))
 
   app.get('/:agent/:name', async (c) => {
     const { preview } = await visible(c)
     const offset = Number(c.req.query('log_offset') ?? 0)
     const log = deps.hub.log(preview.agent_id, preview.name, Number.isFinite(offset) ? offset : 0)
-    return c.json({ ...preview, log })
+    const focus = deps.hub.previewFocus(preview.agent_id, preview.name)
+    return c.json({ ...preview, log, ...(focus ? { focus } : {}) })
   })
 
   app.post('/:agent/:name/session', async (c) => {

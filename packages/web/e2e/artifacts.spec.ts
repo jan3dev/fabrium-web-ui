@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import {
   type DaemonImpersonator,
   type FreshHuman,
@@ -32,6 +32,15 @@ const cards = (rail: ReturnType<Page["getByTestId"]>) => rail.getByRole("button"
  * A rostered agent's thread, with the human signed in. `artifact` sends an artifact
  * version into the thread as the agent; `open` shows the thread.
  */
+/** A tab of the artifact's side panel (Comments is comment mode); opens the panel when it is closed. */
+async function sideTab(panel: Locator, name: "Properties" | "Tweaks" | "Comments"): Promise<Locator> {
+  const toggle = panel.getByRole("button", { name: "Side panel" });
+  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
+  const tab = panel.getByRole("tab", { name: new RegExp(`^${name}`) });
+  await tab.click();
+  return tab;
+}
+
 async function openThread({ page, human, daemon }: { page: Page; human: FreshHuman; daemon: DaemonImpersonator }) {
   const join = (roomId: string) =>
     fetch(`${HS_URL}/_matrix/client/v3/join/${encodeURIComponent(roomId)}`, {
@@ -106,11 +115,10 @@ test("an agent's artifact previews sandboxed, and an annotation reaches the agen
     "null",
   );
 
-  await panel.getByRole("button", { name: "Annotate" }).click();
+  await sideTab(panel, "Comments");
   await frame.getByRole("button", { name: "Buy" }).click();
-  await expect(page.getByTestId("artifact-annotation-bar")).toContainText(
-    "button.cta",
-  );
+  // The note is written in a popover beside the picked element.
+  await expect(page.getByTestId("comment-popover")).toContainText("button.cta");
   // A style edit shows in the frame at once; cancelling the pick would drop it.
   await page.getByTestId("style-inspector").getByLabel("Radius").fill("12");
   await expect(frame.getByRole("button", { name: "Buy" })).toHaveCSS("border-radius", "12px");
@@ -144,6 +152,69 @@ test("an agent's artifact previews sandboxed, and an annotation reaches the agen
   await expect(panel.getByRole("heading", { name: "Counter" })).toBeVisible();
   await frame.getByRole("button", { name: "Count: 0" }).click();
   await expect(frame.getByRole("button", { name: "Count: 1" })).toBeVisible();
+});
+
+test("comments: one sent to the agent and one held back, markers by author, a check reaction resolves", async ({
+  page,
+  human,
+  daemon,
+}) => {
+  const { roomId, artifact, open } = await openThread({ page, human, daemon });
+  await artifact({ identifier: "pricing-card", type: "html", title: "Pricing card", body: HTML });
+  await open();
+  await page.getByTestId("artifact-card").click();
+  const panel = page.getByTestId("artifact-panel");
+  const frame = page.frameLocator('[data-testid="artifact-preview"]');
+  await expect(frame.getByRole("button", { name: "Buy" })).toBeVisible();
+
+  // Two comments: the second with "Send to agent" off.
+  await sideTab(panel, "Comments");
+  await frame.getByRole("button", { name: "Buy" }).click();
+  await page.getByLabel("Annotation note").fill("make it blue");
+  await page.getByRole("button", { name: "Add to reply" }).click();
+  await frame.getByRole("heading", { name: "Pro" }).click();
+  await page.getByLabel("Annotation note").fill("for the next round");
+  await page.getByRole("button", { name: "Add to reply" }).click();
+  await panel.getByRole("button", { name: "Side panel" }).click();
+  const threadPane = page.getByTestId("thread-pane");
+  const boxes = threadPane.getByRole("checkbox", { name: "Send to agent" });
+  await expect(boxes).toHaveCount(2);
+  await boxes.nth(1).uncheck();
+  await threadPane.getByRole("button", { name: /send message/i }).click();
+
+  const refsOf = (e: { content?: unknown }) =>
+    (e.content as Record<string, unknown>)["dev.fabrium.artifact_refs"] as Array<{ note: string }> | undefined;
+  const quiet = await daemon.waitForMessage(
+    roomId,
+    (e) => e.sender === human.userId && (e.content as Record<string, unknown>)["dev.fabrium.quiet"] === true,
+  );
+  expect(refsOf(quiet)?.map((r) => r.note)).toEqual(["for the next round"]);
+  const sent = await daemon.waitForMessage(
+    roomId,
+    (e) => e.sender === human.userId && !!refsOf(e) && !(e.content as Record<string, unknown>)["dev.fabrium.quiet"],
+  );
+  expect(refsOf(sent)?.map((r) => r.note)).toEqual(["make it blue"]);
+  const { user_id: agent } = await daemon.agentClient.whoami();
+  expect((sent.content as { "m.mentions"?: { user_ids?: string[] } })["m.mentions"]?.user_ids).toContain(agent);
+
+  // Comment mode: a marker per open comment, with the author's name.
+  await expect(panel.getByTestId("artifact-comment-count")).toHaveText("2");
+  const tab = await sideTab(panel, "Comments");
+  await expect(tab).toHaveAccessibleName("Comments 2");
+  const markers = panel.getByTestId("comment-marker");
+  await expect(markers).toHaveCount(2);
+  await expect(markers.first()).toContainText(human.username);
+  await markers.first().click();
+  await expect(page).toHaveURL(/[?&]event=/);
+
+  // Resolve: the ✓ reaction from a human closes it and its marker.
+  const list = panel.getByRole("list", { name: "Open comments" });
+  await expect(list.getByRole("listitem")).toHaveCount(2);
+  await list.getByRole("listitem").filter({ hasText: "make it blue" }).getByRole("button", { name: "Resolve" }).click();
+  await expect(markers).toHaveCount(1);
+  await expect(tab).toHaveAccessibleName("Comments 1");
+  await expect(list.getByRole("listitem")).toHaveCount(1);
+  await expect(list).toContainText("for the next round");
 });
 
 const SLIDES = `<!doctype html><html><head><style>section{display:flex;align-items:center;justify-content:center;font:600 96px system-ui}</style></head>
@@ -262,7 +333,23 @@ test("a 30-slide deck with notes is reviewed and presented from two windows", as
   await page.keyboard.press("ControlOrMeta+=");
   await expect(panel.getByTestId("frame-zoom")).toHaveText("200%");
   await page.keyboard.press("ControlOrMeta+0");
-  await expect(panel.getByTestId("frame-zoom")).toHaveText("Fit");
+  // Fitted, the button shows the scale the slide is drawn at.
+  const zoomButton = panel.getByTestId("frame-zoom");
+  await expect(zoomButton).toHaveAccessibleName(/^Zoom: Fit, \d+%$/);
+  const percent = async () => parseInt((await zoomButton.textContent()) ?? "", 10);
+  const fitted = await percent();
+
+  // Ctrl+wheel over the slide zooms it from there, in free steps; the menu still fits it.
+  const stage = await page.getByTestId("artifact-preview").boundingBox();
+  await page.mouse.move(stage!.x + stage!.width / 2, stage!.y + stage!.height / 2);
+  await page.keyboard.down("Control");
+  await page.mouse.wheel(0, -20);
+  await page.keyboard.up("Control");
+  await expect.poll(percent).toBeGreaterThan(fitted);
+  await expect(zoomButton).toHaveAccessibleName(/^Zoom: \d+%$/);
+  await zoomButton.click();
+  await page.getByRole("menuitemradio", { name: "Fit" }).click();
+  await expect(zoomButton).toHaveAccessibleName(`Zoom: Fit, ${fitted}%`);
 
   // Present from the start: the skipped slide is left out, digits jump, Esc ends.
   await panel.getByRole("button", { name: "Present", exact: true }).click();
@@ -379,13 +466,13 @@ test("a design-system artifact shows its sections, and a member adds and edits v
   expect(await frame.locator("body").evaluate(() => window.origin)).toBe("null");
 
   // Annotate names the token by its id.
-  await panel.getByRole("button", { name: "Annotate" }).click();
+  await sideTab(panel, "Comments");
   await frame.locator("#color-brand .name").click();
-  await expect(page.getByTestId("artifact-annotation-bar")).toContainText("div#color-brand");
+  await expect(page.getByTestId("comment-popover")).toContainText("div#color-brand");
   // Another section is another document: the pick goes.
   await nav.getByRole("button", { name: /Components/ }).click();
-  await expect(page.getByTestId("artifact-annotation-bar")).not.toContainText("div#color-brand");
-  await panel.getByRole("button", { name: "Stop annotating" }).click();
+  await expect(page.getByTestId("comment-popover")).toHaveCount(0);
+  await panel.getByRole("button", { name: "Side panel" }).click();
   await expect(frame.getByRole("button", { name: "Save" })).toBeVisible();
   expect((await blockedImage).failure()?.errorText).toBe("csp");
   expect(completed).toEqual([]);
@@ -421,7 +508,44 @@ test("a design-system artifact shows its sections, and a member adds and edits v
   await expect(panel).toContainText("{not json");
 });
 
-type Event = { type: string; sender: string; event_id: string; content: Record<string, unknown> };
+test("an owner lists a design system for the workspace; the chip names it and a member turns it off", async ({
+  page,
+  human,
+  daemon,
+}) => {
+  const { roomId, artifact, open } = await openThread({ page, human, daemon });
+  await artifact({ identifier: "tokens", type: "design-system", title: "Northwind", body: DESIGN_SYSTEM });
+  await open();
+  const threadPane = page.getByTestId("thread-pane");
+  await expect(threadPane.getByTestId("design-system-chip")).toHaveText("No design system");
+
+  // The human created the workforce space: as its owner, they list the system from its title menu.
+  await page.getByTestId("artifact-card").click();
+  await page.getByTestId("artifact-title-menu").click();
+  await page.getByRole("menuitem", { name: "Add to workspace" }).click();
+  // The first system listed becomes the default.
+  await expect(threadPane.getByTestId("design-system-chip")).toHaveText("Northwind");
+
+  // Settings: the list, and the user's own choice in account data.
+  await page.getByRole("button", { name: /user menu/i }).click();
+  await page.getByRole("menuitem", { name: /settings/i }).click();
+  await page.getByRole("tab", { name: "Design systems" }).click();
+  await expect(page.getByTestId("design-system-list")).toContainText("Northwind");
+  await page.getByTestId("design-system-mine").selectOption("off");
+  await page.keyboard.press("Escape");
+  await expect(threadPane.getByTestId("design-system-chip")).toHaveText("No design system");
+
+  // The choice rides on the message, so the agent learns it.
+  await threadPane.getByRole("textbox", { name: /message/i }).fill("make a deck");
+  await threadPane.getByRole("textbox", { name: /message/i }).press("Enter");
+  const sent = await daemon.waitForMessage(
+    roomId,
+    (e) => e.sender === human.userId && (e.content as { body?: string }).body === "make a deck",
+  );
+  expect(sent.content["dev.fabrium.design_system"]).toEqual({ off: true });
+});
+
+type Event ={ type: string; sender: string; event_id: string; content: Record<string, unknown> };
 
 test("the user's edits autosave into the current version, and the agent's next version keeps them", async ({
   page,
@@ -559,6 +683,40 @@ const userVersionOf =
         (e.content as Event["content"]).identifier === identifier &&
         (e.content as Event["content"]).summary === summary,
     ) as Promise<Event>;
+
+test("the deck's slide size is set under Properties, and the toast asks in the thread to fit the slides", async ({
+  page,
+  human,
+  daemon,
+}) => {
+  const { roomId, artifact, open } = await openThread({ page, human, daemon });
+  await artifact({ identifier: "launch-deck", type: "slides", title: "Launch deck", body: SLIDES });
+  await open();
+  await page.getByTestId("artifact-card").click();
+  const panel = page.getByTestId("artifact-panel");
+  const frame = page.frameLocator('[data-testid="artifact-preview"]');
+  await expect(frame.getByText("Welcome")).toBeVisible();
+  const size = () =>
+    frame.locator("body > section:nth-of-type(1)").evaluate((el: HTMLElement) => `${el.offsetWidth}x${el.offsetHeight}`);
+  expect(await size()).toBe("1920x1080");
+
+  await sideTab(panel, "Properties");
+  await page.getByTestId("style-inspector").getByLabel("Slide size").selectOption("4:3");
+  await expect.poll(size).toBe("1440x1080");
+  await expect(page.getByText("Slides are now 4:3. Check that everything still fits.")).toBeVisible();
+
+  // The request goes out after the save it is about.
+  await page.getByRole("button", { name: "Ask Fabrium to fit" }).click();
+  const saved = await userVersionOf(daemon, roomId, human)("Changed the slides to 4:3");
+  expect((saved.content as { body: string }).body).toContain('data-size="4:3"');
+  await daemon.waitForMessage(
+    roomId,
+    (e) =>
+      e.type === "m.room.message" &&
+      e.sender === human.userId &&
+      String((e.content as { body?: unknown }).body).includes("`launch-deck` to 4:3 (1440x1080 px)"),
+  );
+});
 
 test("the slide menu renames by dialog, Shift+F10 opens it, a drag reorders, and the title menu restores and duplicates", async ({
   page,
@@ -782,7 +940,7 @@ test("a text box and an image inserted on the canvas, restyled, hold after a rel
   await expect(box).toHaveText("Hello canvas");
 
   // Properties: the layer is listed and selected; a font size restyles it in place.
-  await panel.getByRole("button", { name: "Properties" }).click();
+  await sideTab(panel, "Properties");
   const props = page.getByTestId("style-inspector");
   await expect(props.getByTestId("layers-list").getByRole("button", { name: "Text", pressed: true })).toBeVisible();
   await props.getByLabel("Font size").fill("64");
@@ -902,4 +1060,45 @@ test("a text box and an image inserted on the canvas, restyled, hold after a rel
   const bar = (await tools.boundingBox())!;
   expect(bar.x).toBeGreaterThanOrEqual(stage.x);
   expect(bar.x + bar.width).toBeLessThanOrEqual(stage.x + stage.width + 0.5);
+});
+
+const TWEAK_SLIDES = `<!doctype html><html><head><style>:root { --gap: 16px; } section{display:flex;flex-direction:column;gap:var(--gap);font:600 96px system-ui}</style>
+<script type="application/json" data-tweaks>[{"name":"gap","label":"Spacing","type":"range","var":"--gap","min":4,"max":48,"step":4,"unit":"px","value":16},{"name":"headline","label":"Headline","type":"text","value":"Welcome"}]</script></head>
+<body><section data-title="Intro"><h1 data-tweak="headline">Welcome</h1></section></body></html>`;
+
+test("tweaks apply live in the frame, and Keep writes them into the source", async ({ page, human, daemon }) => {
+  const { roomId, artifact, open } = await openThread({ page, human, daemon });
+  await artifact({ identifier: "launch-deck", type: "slides", title: "Launch deck", body: TWEAK_SLIDES });
+  await open();
+  await page.getByTestId("artifact-card").click();
+  const panel = page.getByTestId("artifact-panel");
+  const frame = page.frameLocator('[data-testid="artifact-preview"]');
+  await expect(frame.locator("h1")).toHaveText("Welcome");
+
+  await sideTab(panel, "Tweaks");
+  const tweaks = page.getByTestId("tweaks-panel");
+  await tweaks.getByLabel("Spacing").fill("32");
+  const gap = () => frame.locator("html").evaluate((el) => getComputedStyle(el).getPropertyValue("--gap").trim());
+  await expect.poll(gap).toBe("32px");
+  await tweaks.getByLabel("Headline").fill("Hello tweaks");
+  await expect(frame.locator("h1")).toHaveText("Hello tweaks");
+
+  await tweaks.getByRole("button", { name: "Keep" }).click();
+  const saved = await daemon.waitForMessage(
+    roomId,
+    (e) =>
+      e.type === "dev.fabrium.artifact.version" &&
+      e.sender === human.userId &&
+      (e.content as { summary?: unknown }).summary === "Kept tweaks",
+  );
+  const body = (saved.content as { body: string }).body;
+  expect(body).toContain(":root { --gap: 32px; }");
+  expect(body).toContain('"value":32');
+  expect(body).toContain('<h1 data-tweak="headline">Hello tweaks</h1>');
+
+  await page.reload();
+  await expect(frame.locator("h1")).toHaveText("Hello tweaks");
+  await expect.poll(gap).toBe("32px");
+  await sideTab(panel, "Tweaks");
+  await expect(page.getByTestId("tweaks-panel").getByLabel("Spacing")).toHaveValue("32");
 });

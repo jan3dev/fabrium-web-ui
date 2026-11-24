@@ -122,6 +122,27 @@ export interface ArtifactVersion {
   threadRootId: string | null;
 }
 
+/** The artifact kinds a design system can be limited to (`for`, spec §5.6). */
+export type DesignSystemScope = "slides" | "design";
+
+/** A design system a workspace or project lists (`dev.fabrium.design_systems`, spec §5.6). */
+export interface DesignSystemEntry {
+  /** The `design-system` artifact: its room, thread and identifier. */
+  roomId: string;
+  threadId: string;
+  identifier: string;
+  name: string;
+  isDefault: boolean;
+  /** Only for these kinds; absent = every kind. */
+  for?: DesignSystemScope[];
+}
+
+/** The user's own choice (account data): a default of their own, or design systems off. */
+export interface DesignSystemPrefs {
+  off: boolean;
+  default?: { roomId: string; identifier: string };
+}
+
 /** One `dev.fabrium.preview` event: an agent started or stopped a live app preview. */
 export interface PreviewEvent {
   eventId: string;
@@ -161,12 +182,24 @@ export interface PreviewDetail extends PreviewInfo {
   /** Log text after the requested offset; pass `offset` back to get only new text. */
   /** `reset`: the offset asked for is gone (a reconnect or a lost window); `text` replaces the log. */
   log: { offset: number; text: string; reset?: boolean };
+  /** Where the agent works in the app now (plan P6): a page path and an untrusted selector. */
+  focus?: { path: string; selector: string };
 }
 
 export interface PreviewSession {
   /** The only URL the preview iframe may load. */
   url: string;
   expires_at: string;
+}
+
+/** Where an agent works in an artifact right now (`GET /previews/focus`): the agent cursor (spec §6.8). */
+export interface AgentFocusInfo {
+  agent_id: string;
+  room_id: string;
+  thread_root: string;
+  identifier: string;
+  /** Untrusted: only ever queried in the frame. */
+  selector: string;
 }
 
 // Fabrium service API (VM management). Field names match the wire format.

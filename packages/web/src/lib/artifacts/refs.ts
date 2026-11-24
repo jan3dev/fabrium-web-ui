@@ -30,6 +30,24 @@ export interface ArtifactRef {
   preview?: { agent: string; path: string };
 }
 
+/**
+ * A message of comments the user did not send to the agent (spec §6.6): the daemon's router wakes
+ * no agent for it. It carries no typed text, only the references.
+ */
+export const QUIET_FIELD = "dev.fabrium.quiet";
+
+/** A reference waiting in the composer. The two extra fields stay local; `wireRef` drops them. */
+export interface ArtifactRefDraft extends ArtifactRef {
+  /** "Send to agent" is off: it goes in a quiet message of its own. */
+  quiet?: boolean;
+  /** The agent a sent comment mentions: the artifact's author or the preview's agent. */
+  agent?: string;
+}
+
+export function wireRef({ quiet: _quiet, agent: _agent, ...ref }: ArtifactRefDraft): ArtifactRef {
+  return ref;
+}
+
 const str = (v: unknown, max: number) =>
   typeof v === "string" ? v.slice(0, max) : null;
 
@@ -150,8 +168,8 @@ export function stripArtifactRefs(
 }
 
 // Annotations waiting in a thread composer, keyed like the quote drafts.
-const EMPTY: ArtifactRef[] = [];
-const drafts = keyedDraftStore<ArtifactRef[]>(EMPTY);
+const EMPTY: ArtifactRefDraft[] = [];
+const drafts = keyedDraftStore<ArtifactRefDraft[]>(EMPTY);
 
 export const getArtifactRefDrafts = drafts.get;
 export const useArtifactRefDrafts = drafts.use;
@@ -159,7 +177,7 @@ export const useArtifactRefDrafts = drafts.use;
 export function setArtifactRefDrafts(
   roomId: string,
   threadId: string | null,
-  refs: ArtifactRef[],
+  refs: ArtifactRefDraft[],
 ) {
   drafts.set(roomId, threadId, refs.length ? refs.slice(0, MAX_REFS) : EMPTY);
 }
@@ -168,7 +186,7 @@ export function setArtifactRefDrafts(
 export function addArtifactRefDraft(
   roomId: string,
   threadId: string | null,
-  ref: ArtifactRef,
+  ref: ArtifactRefDraft,
 ): boolean {
   const refs = drafts.get(roomId, threadId);
   if (refs.length >= MAX_REFS) return false;

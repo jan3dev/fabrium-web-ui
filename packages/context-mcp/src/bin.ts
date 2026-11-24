@@ -82,6 +82,12 @@ const remoteProvider: TransportContextProvider = {
       method: 'sendArtifact',
       params: input as unknown as Record<string, unknown>,
     }) as Promise<ArtifactResult>,
+  designSystem: (_channelId, input) =>
+    callDaemon(sockPath, {
+      spawnId,
+      method: 'designSystem',
+      params: input as unknown as Record<string, unknown>,
+    }) as Promise<Record<string, unknown>>,
 }
 
 const remoteTasks: TaskActions = {

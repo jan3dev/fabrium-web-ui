@@ -1,6 +1,6 @@
 import { lineDiff } from "@/lib/line-diff";
 import { isObject, LIMITS, type Raw, type TokenSection, tokenName } from "./design-system";
-import { FRAME_SIZE, type FrameKind, MAX_NAME, MAX_NOTES } from "./frames";
+import { DEFAULT_SLIDE_SIZE, FRAME_SIZE, type FrameKind, MAX_NAME, MAX_NOTES, type SlideSize } from "./frames";
 
 /**
  * User edits (spec §5.3, level 2): pure operations on the artifact source, string in,
@@ -33,8 +33,9 @@ function parseSection(raw: string): Element | null {
 const OPEN = /^<section\b(?:[^>"']|"[^"]*"|'[^']*')*>/i;
 // Comments, raw-text elements and templates (the deck's layouts) are skipped whole: a
 // `<section` inside them is no frame.
-const TOKEN =
-  /<!--[\s\S]*?(?:-->|$)|<(script|style|textarea|title|xmp|iframe|noembed|noframes|template)\b[\s\S]*?(?:<\/\1\s*>|$)|<(\/?)section\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
+const SKIP = String.raw`<!--[\s\S]*?(?:-->|$)|<(script|style|textarea|title|xmp|iframe|noembed|noframes|template)\b[\s\S]*?(?:<\/\1\s*>|$)`;
+const ATTRS = String.raw`(?:[^>"']|"[^"]*"|'[^']*')*`;
+const TOKEN = new RegExp(String.raw`${SKIP}|<(\/?)section\b${ATTRS}>`, "gi");
 
 function cutSource(html: string): Cut | null {
   const spans: [number, number][] = [];
@@ -95,15 +96,16 @@ function insert(c: Cut, after: number, section: string): string {
 }
 
 const escAttr = (v: string) => v.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+const attrsOf = (el: Element) =>
+  [...el.attributes].map((a) => (a.value === "" ? ` ${a.name}` : ` ${a.name}="${escAttr(a.value)}"`)).join("");
 
 /** The section with only its start tag rewritten after `edit` changes its attributes. */
 function withAttrs(raw: string, edit: (el: Element) => void): string {
   const el = parseSection(raw);
   if (!el) return raw;
   edit(el);
-  const attrs = [...el.attributes].map((a) => (a.value === "" ? ` ${a.name}` : ` ${a.name}="${escAttr(a.value)}"`));
   const open = OPEN.exec(raw);
-  return open ? `<section${attrs.join("")}>${raw.slice(open[0].length)}` : el.outerHTML;
+  return open ? `<section${attrsOf(el)}>${raw.slice(open[0].length)}` : el.outerHTML;
 }
 
 /** Frame `i`'s raw markup replaced by `edit`'s; the rest of the source stays as it is. */
@@ -170,6 +172,23 @@ export function renameFrame(html: string, kind: FrameKind, i: number, name: stri
 
 const clampSize = (n: number) =>
   Number.isFinite(n) ? Math.round(Math.min(FRAME_SIZE.max, Math.max(FRAME_SIZE.min, n))) : FRAME_SIZE.min;
+
+// As TOKEN: a `<body` in a comment or a raw-text element is no start tag.
+const BODY = new RegExp(String.raw`${SKIP}|(<body\b${ATTRS}>)`, "gi");
+
+/**
+ * The size of every slide: `data-size` on `body`, absent for the default. Only the body's
+ * start tag is rewritten; a source without one is re-serialized whole.
+ */
+export function setSlideSize(html: string, size: SlideSize): string {
+  const doc = parse(html);
+  if (size === DEFAULT_SLIDE_SIZE) doc.body.removeAttribute("data-size");
+  else doc.body.setAttribute("data-size", size);
+  for (const m of html.matchAll(BODY)) {
+    if (m[2]) return `${html.slice(0, m.index)}<body${attrsOf(doc.body)}>${html.slice(m.index + m[0].length)}`;
+  }
+  return `<!doctype html>\n${doc.documentElement.outerHTML}`;
+}
 
 export function resizeFrame(html: string, i: number, width: number, height: number): string {
   return editFrame(html, i, (raw) =>

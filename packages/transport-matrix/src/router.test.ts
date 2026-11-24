@@ -92,6 +92,12 @@ describe('route', () => {
     expect(matches.map((m) => m.name).sort()).toEqual(['architect', 'qa'])
   })
 
+  it('never routes a quiet comment, not even to trigger=any', () => {
+    const quiet = (m: ReturnType<typeof msg>) => ({ ...m, content: { ...m.content, 'dev.fabrium.quiet': true } })
+    expect(route(quiet(msg({ mentions: ['@architect:example.com'] })), agents)).toEqual([])
+    expect(route(quiet(msg({ room: '!alerts:example.com' })), agents)).toEqual([])
+  })
+
   it('ignores non-m.room.message events', () => {
     const stateEvent = {
       type: 'm.room.member',

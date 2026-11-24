@@ -5,7 +5,17 @@ import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join, resolve, sep } from 'node:path'
 import type { PreviewCallerRef } from '@zooid/context-mcp'
-import { LOG_LIMIT, NAME_RE, dialLoopback, previewKey, type PreviewKind, type PreviewState, type PreviewStatus } from './protocol.js'
+import {
+  LOG_LIMIT,
+  NAME_RE,
+  dialLoopback,
+  previewKey,
+  readFocus,
+  type AgentFocus,
+  type PreviewKind,
+  type PreviewState,
+  type PreviewStatus,
+} from './protocol.js'
 
 const PREVIEW_EVENT_KEY = 'dev.fabrium.preview'
 const READY_TIMEOUT_MS = 60_000
@@ -82,6 +92,8 @@ export interface SupervisorDeps {
   onLog?(agentId: string, name: string, text: string): void
   /** A preview left the registry (old stopped ones beyond the cap). */
   onRemove?(agentId: string, name: string): void
+  /** An agent's focus changed; null clears it. */
+  onFocus?(agentId: string, focus: AgentFocus | null): void
   readyTimeoutMs?: number
 }
 
@@ -127,6 +139,8 @@ export class PreviewSupervisor {
   private readonly queues = new Map<string, Promise<unknown>>()
   /** Set at shutdown: the saved registry keeps what ran, not the stops that shutdown causes. */
   private closing = false
+  /** Agent ID → the thread its focus is in: a turn end there clears it. */
+  private readonly focused = new Map<string, string>()
 
   constructor(private readonly deps: SupervisorDeps) {}
 
@@ -230,6 +244,48 @@ export class PreviewSupervisor {
   logs(caller: PreviewCallerRef, input: { name: string; lines?: number }): PreviewStartResult {
     const entry = this.own(caller.agentName, input.name)
     return { ...this.result(entry), logs_tail: tail(entry.log, Math.min(Math.max(input.lines ?? 100, 1), 1000)) }
+  }
+
+  /**
+   * Where the agent works now: an artifact or a preview page, and a selector in it (plan P6).
+   * No selector clears it; the daemon also clears it when the agent's turn ends.
+   */
+  focus(
+    caller: PreviewCallerRef,
+    input: { identifier?: string; name?: string; path?: string; selector?: string },
+  ): { focus: 'set' | 'cleared' } {
+    const agent = this.agent(caller.agentName)
+    if (!input.selector?.trim()) {
+      this.clearFocus(agent.userId)
+      return { focus: 'cleared' }
+    }
+    if (!caller.threadId.startsWith('$')) throw new Error('unsupported: the cursor shows in threads only.')
+    if (input.identifier === undefined && input.name !== undefined) this.own(caller.agentName, input.name)
+    const focus = readFocus({
+      agent_id: agent.userId,
+      room_id: caller.channelId,
+      thread_root: caller.threadId,
+      identifier: input.identifier,
+      name: input.name,
+      path: input.path,
+      selector: input.selector,
+    })
+    if (!focus) {
+      throw new Error(
+        'invalid_focus: pass `identifier` (an artifact) or `name` (a preview, with `path`), and one CSS selector on one line, at most 300 characters.',
+      )
+    }
+    this.focused.set(agent.userId, caller.threadId)
+    this.deps.onFocus?.(agent.userId, focus)
+    return { focus: 'set' }
+  }
+
+  /** The agent's turn in `threadRoot` ended (any thread when absent): its focus there goes. */
+  clearFocus(agentId: string, threadRoot?: string): void {
+    const at = this.focused.get(agentId)
+    if (at === undefined || (threadRoot !== undefined && at !== threadRoot)) return
+    this.focused.delete(agentId)
+    this.deps.onFocus?.(agentId, null)
   }
 
   /** From a human in the web UI, through the gateway. */

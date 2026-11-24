@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFrameKey, readFrames, stepFrame, stepZoom } from "./frames";
+import { clampZoom, readFrameKey, readFrames, stepFrame, stepZoom } from "./frames";
 
 describe("readFrames", () => {
   it("reads names, sizes, notes, skip and transitions from the source", () => {
@@ -69,5 +69,10 @@ describe("frame keys", () => {
     expect(stepZoom(1, 1)).toBe(2);
     expect(stepZoom(2, 1)).toBe(2);
     expect(stepZoom(0.5, -1)).toBe(0.5);
+    // From a free zoom: the next level that way.
+    expect(stepZoom(1.37, 1)).toBe(2);
+    expect(stepZoom(1.37, -1)).toBe(1);
+    expect(stepZoom(3.2, 1)).toBe(3.2);
+    expect([clampZoom(0.4166 * 1.1), clampZoom(0.01), clampZoom(99)]).toEqual([0.46, 0.1, 10]);
   });
 });

@@ -9,7 +9,8 @@ import { ActorDot } from "./artifact-menus";
 /**
  * One frame of a slides or design document, drawn small: the same srcdoc in another
  * sandboxed frame that takes no input (`inert`), laid out at its canvas size and scaled
- * down with a CSS transform into a 16:9 box. Not `live`, it shows the frame number.
+ * down with a CSS transform into a box of its shape, from 16:9 to 4:3. Not `live`, it shows the
+ * frame number.
  */
 export function FrameThumb({
   srcdoc,
@@ -35,7 +36,7 @@ export function FrameThumb({
   assets?: readonly FrameAsset[];
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
-  const height = Math.round((width * 9) / 16);
+  const height = Math.round(width * Math.min(3 / 4, Math.max(9 / 16, frame.height / frame.width)));
   const scale = Math.min(width / frame.width, height / frame.height);
   const show = () => {
     ref.current?.contentWindow?.postMessage(

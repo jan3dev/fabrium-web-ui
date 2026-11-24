@@ -161,8 +161,8 @@ test("an agent's preview opens beside its thread, shows a crash and restarts", a
     "Can you fix this error in the preview?",
   );
 
-  // Annotate: a click in the app picks the element instead of acting on it.
-  await page.getByRole("button", { name: "Annotate" }).click();
+  // Comment: a click in the app picks the element instead of acting on it.
+  await page.getByRole("button", { name: "Comment" }).click();
   await app.locator("#milk").click();
   // The style inspector edits the picked element in the app; the edit rides in the annotation's note.
   await page.getByTestId("style-inspector").getByLabel("Radius").fill("12");
@@ -172,7 +172,7 @@ test("an agent's preview opens beside its thread, shows a crash and restarts", a
   await expect(annotations.getByRole("listitem")).toHaveCount(2);
   await expect(annotations).toContainText("li#milk");
   await expect(annotations).toContainText("border-radius: 12px;");
-  await page.getByRole("button", { name: "Stop annotating" }).click();
+  await page.getByRole("button", { name: "Stop commenting" }).click();
 
   // Sent: the agent's body names the preview and the page; the timeline opens the preview again.
   await thread.getByRole("textbox", { name: "Message" }).press("Enter");

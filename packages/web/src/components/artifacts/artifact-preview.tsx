@@ -1,8 +1,9 @@
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
 import type { FrameAsset } from "@/hooks/use-artifact-assets";
 import type { EditorMode } from "@/hooks/use-canvas-editor";
-import { type CanvasSelection, gestureGate, type KeyLike, readEditKey, readSelection } from "@/lib/artifacts/canvas";
+import { type Box, type CanvasSelection, gestureGate, type KeyLike, readEditKey, readSelection } from "@/lib/artifacts/canvas";
 import { type FrameKey, type FrameView, readFrameKey } from "@/lib/artifacts/frames";
+import { type PinRequest, readPinBoxes } from "@/lib/artifacts/pins";
 import { readTarget, type ArtifactRefTarget } from "@/lib/artifacts/refs";
 import { readStyles, type StyleEdit, type Styles } from "@/lib/artifacts/styles";
 import { loadRuntimes } from "@/lib/artifacts/runtime";
@@ -46,11 +47,21 @@ export interface ArtifactPreviewProps {
   frame?: FrameView;
   /** A key from `FRAME_KEYS` pressed while focus is inside the frame. */
   onKey?: (key: FrameKey) => void;
+  /** Slides and design: the scale the open frame is drawn at, as the frame reports it. */
+  onScale?: (scale: number) => void;
+  /** Cmd/Ctrl+wheel or a pinch over the frame: zoom by this factor. */
+  onZoom?: (factor: number) => void;
   editor?: PreviewEditor;
   /** Downloaded assets the document names (spec §5.4); each is posted once per document. */
   assets?: readonly FrameAsset[];
   /** Files are dragged over the frame: the caller shows its own drop target over it. */
   onDragFiles?: () => void;
+  /** Elements to follow (pins.ts): comment markers and the agent cursor. Their boxes go to `onPinned`. */
+  pins?: readonly PinRequest[];
+  /** The followed elements' boxes in the frame's viewport, which the caller's stage matches. */
+  onPinned?: (boxes: Map<string, Box>) => void;
+  /** Tweak values to apply (tweaks.ts `tweakMessage`), sent again whenever the document loads. */
+  tweaks?: { vars: Record<string, string>; texts: Record<string, string> } | null;
 }
 
 /** The URL if it is http(s), else null: the frame is untrusted, so the parent checks too. */
@@ -73,6 +84,8 @@ function httpUrl(href: unknown): string | null {
  */
 export function ArtifactPreview({
   kind,
+  pins,
+  onPinned,
   srcdoc,
   channel,
   title,
@@ -83,13 +96,16 @@ export function ArtifactPreview({
   onOpenLink,
   frame,
   onKey,
+  onScale,
+  onZoom,
   editor,
   assets,
   onDragFiles,
+  tweaks,
 }: ArtifactPreviewProps) {
   const ref = useRef<HTMLIFrameElement>(null);
-  const handlers = useRef({ onPicked, onError, onOpenLink, onKey, editor, onDragFiles });
-  handlers.current = { onPicked, onError, onOpenLink, onKey, editor, onDragFiles };
+  const handlers = useRef({ onPicked, onError, onOpenLink, onKey, onScale, onZoom, editor, onDragFiles, onPinned });
+  handlers.current = { onPicked, onError, onOpenLink, onKey, onScale, onZoom, editor, onDragFiles, onPinned };
   const gate = useRef(gestureGate());
   const assetsRef = useRef(assets);
   assetsRef.current = assets;
@@ -100,9 +116,18 @@ export function ArtifactPreview({
   annotatingRef.current = annotating;
   const frameRef = useRef(frame);
   frameRef.current = frame;
+  const tweaksRef = useRef(tweaks);
+  tweaksRef.current = tweaks;
 
   const post = (type: string, detail: unknown) =>
     ref.current?.contentWindow?.postMessage({ type, channel, detail }, "*");
+
+  const pinsKey = JSON.stringify(pins ?? []);
+  const pinsRef = useRef(pins ?? []);
+  pinsRef.current = pins ?? [];
+  useEffect(() => {
+    post(PreviewMessage.pins, { pins: pinsRef.current });
+  }, [pinsKey]);
 
   useImperativeHandle(handle, () => ({ style: (edit) => post(PreviewMessage.style, edit), post }));
 
@@ -121,6 +146,10 @@ export function ArtifactPreview({
   useEffect(() => {
     post(PreviewMessage.pick, { on: annotating });
   }, [annotating]);
+
+  useEffect(() => {
+    if (tweaks) post(PreviewMessage.tweak, tweaks);
+  }, [tweaks]);
 
   useEffect(() => {
     if (frame) post(PreviewMessage.frame, frame);
@@ -152,6 +181,10 @@ export function ArtifactPreview({
       } else if (data.type === PreviewMessage.key) {
         const key = readFrameKey(detail);
         if (key) handlers.current.onKey?.(key);
+      } else if (data.type === PreviewMessage.scale || data.type === PreviewMessage.zoom) {
+        const scale = data.type === PreviewMessage.scale;
+        const n = scale ? detail.scale : detail.factor;
+        if (typeof n === "number" && Number.isFinite(n) && n > 0) handlers.current[scale ? "onScale" : "onZoom"]?.(n);
       } else if (data.type === PreviewMessage.selection) {
         const sel = readSelection(detail);
         if (sel && handlers.current.editor?.mode !== "off") handlers.current.editor?.onSelection(sel);
@@ -163,6 +196,8 @@ export function ArtifactPreview({
         // Delete, cut and paste (which reads the clipboard) included: the same gate.
         const key = readEditKey(detail);
         if (key && handlers.current.editor?.mode !== "off" && userActive) handlers.current.editor?.onKey(key);
+      } else if (data.type === PreviewMessage.pinned) {
+        handlers.current.onPinned?.(readPinBoxes(detail, new Set(pinsRef.current.map((p) => p.id))));
       } else if (data.type === PreviewMessage.drag) {
         handlers.current.onDragFiles?.();
       } else if (data.type === PreviewMessage.ready) {
@@ -171,8 +206,10 @@ export function ArtifactPreview({
         if (annotatingRef.current) post(PreviewMessage.pick, { on: true });
         // A new document starts at frame 0: show the one the panel has open.
         if (frameRef.current) post(PreviewMessage.frame, frameRef.current);
+        if (tweaksRef.current) post(PreviewMessage.tweak, tweaksRef.current);
         post(PreviewMessage.editor, { mode: handlers.current.editor?.mode ?? "off" });
         posted.current = new Set();
+        if (pinsRef.current.length) post(PreviewMessage.pins, { pins: pinsRef.current });
         postAssets();
         if (needs.length === 0) return;
         loadRuntimes(needs).then(

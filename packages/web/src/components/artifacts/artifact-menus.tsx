@@ -315,6 +315,7 @@ export function ArtifactTitleMenu({
   onRename,
   onDuplicate,
   onRestore,
+  onAddToWorkspace,
 }: {
   title: string;
   /** The panel shows an older version: offer Restore. */
@@ -322,6 +323,8 @@ export function ArtifactTitleMenu({
   onRename: () => void;
   onDuplicate: () => void;
   onRestore: () => void;
+  /** A design system an owner or admin may list for the workspace (spec §5.6); null = listed already. */
+  onAddToWorkspace?: (() => void) | null;
 }) {
   return (
     <DropdownMenu modal={false}>
@@ -342,6 +345,11 @@ export function ArtifactTitleMenu({
         <DropdownMenuItem onSelect={onRename}>Rename…</DropdownMenuItem>
         <DropdownMenuItem onSelect={onDuplicate}>Duplicate</DropdownMenuItem>
         {older ? <DropdownMenuItem onSelect={onRestore}>Restore this version</DropdownMenuItem> : null}
+        {onAddToWorkspace !== undefined ? (
+          <DropdownMenuItem disabled={onAddToWorkspace === null} onSelect={onAddToWorkspace ?? undefined}>
+            {onAddToWorkspace === null ? "In workspace design systems" : "Add to workspace"}
+          </DropdownMenuItem>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

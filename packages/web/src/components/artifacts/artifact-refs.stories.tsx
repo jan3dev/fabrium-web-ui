@@ -34,7 +34,13 @@ type Story = StoryObj<typeof meta>;
 /** In a sent reply. */
 export const InMessage: Story = {};
 
-/** Waiting in the composer. */
+/** Waiting in the composer; the second has "Send to agent" off. */
 export const ComposerChips: Story = {
-  render: (args) => <ArtifactRefChips refs={args.refs} onRemove={() => {}} />,
+  render: (args) => (
+    <ArtifactRefChips
+      refs={args.refs.map((r, i) => (i === 1 ? { ...r, quiet: true } : r))}
+      onRemove={() => {}}
+      onSendToAgent={() => {}}
+    />
+  ),
 };

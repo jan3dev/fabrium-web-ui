@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { FabriumApiError, getPreview } from "@/client/fabrium-api";
-import type { PreviewInfo } from "@/model/types";
+import type { PreviewDetail } from "@/model/types";
 
 const POLL_MS = 1500;
 /** The log keeps its newest 64 KB. */
@@ -12,7 +12,7 @@ export function appendLog(log: string, text: string): string {
 }
 
 export interface PreviewStatusState {
-  info: PreviewInfo | null;
+  info: Omit<PreviewDetail, "log"> | null;
   log: string;
   /** The last failed poll; 404 = previews off or unknown preview, 403 = no access. */
   error: FabriumApiError | null;

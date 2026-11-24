@@ -49,7 +49,7 @@ export const SlideControls: Story = {
     const [zoom, setZoom] = useState<number | null>(null);
     const [grid, setGrid] = useState(false);
     return bar(
-      <FrameControls zoom={zoom} onZoom={setZoom} grid={grid} onGrid={setGrid} onPresent={() => {}} notes />,
+      <FrameControls zoom={zoom} scale={0.42} onZoom={setZoom} grid={grid} onGrid={setGrid} onPresent={() => {}} notes />,
     );
   },
 };

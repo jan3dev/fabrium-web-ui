@@ -6,7 +6,9 @@ import {
   ARTIFACT_DESCRIPTION,
   ARTIFACT_INSTRUCTIONS,
   ARTIFACT_KINDS,
+  DESIGN_SYSTEM_DESCRIPTION,
   HANDOFF_DESCRIPTION,
+  PREVIEW_FOCUS_DESCRIPTION,
   PREVIEW_LOGS_DESCRIPTION,
   PREVIEW_START_DESCRIPTION,
   PREVIEW_STOP_DESCRIPTION,
@@ -48,7 +50,10 @@ export interface BuildContextMcpServerOpts {
    * Register the zooid_preview_* tools: set by the spawn (`--previews`) when
    * previews are on and the agent runs locally. Calls the daemon's supervisor.
    */
-  callPreview?: (method: 'previewStart' | 'previewStop' | 'previewLogs', params: Record<string, unknown>) => Promise<unknown>
+  callPreview?: (
+    method: 'previewStart' | 'previewStop' | 'previewLogs' | 'previewFocus',
+    params: Record<string, unknown>,
+  ) => Promise<unknown>
 }
 // The socket substitutes its authenticated spawn binding; models never supply an address.
 const CALLER_FROM_BINDING: TaskCallerRef = {
@@ -258,6 +263,21 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
       return { content: [{ type: 'text', text: JSON.stringify(result) }] }
     },
   )
+  server.tool(
+    'zooid_design_system',
+    DESIGN_SYSTEM_DESCRIPTION,
+    {
+      identifier: z.string().optional().describe('omit to list the systems'),
+      room_id: z.string().optional().describe('when two listed systems share the identifier'),
+      component: z.string().optional().describe("a component's name: return its html"),
+    },
+    async (input) => {
+      const provider = await opts.resolve()
+      if (!provider.designSystem) throw new Error('design systems unavailable on this transport')
+      const result = await provider.designSystem('', input)
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] }
+    },
+  )
   if (opts.canSendAttachment) {
     server.tool(
       'zooid_send_attachment',
@@ -307,6 +327,17 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
       PREVIEW_LOGS_DESCRIPTION,
       { name: z.string(), lines: z.number().int().optional().describe('default 100, max 1000') },
       async (input) => text(await callPreview('previewLogs', input)),
+    )
+    server.tool(
+      'zooid_preview_focus',
+      PREVIEW_FOCUS_DESCRIPTION,
+      {
+        identifier: z.string().optional().describe('the artifact you are editing'),
+        name: z.string().optional().describe('or the preview you are working on'),
+        path: z.string().optional().describe('with name: the page path, default "/"'),
+        selector: z.string().optional().describe('one CSS selector for the element; leave out to clear'),
+      },
+      async (input) => text(await callPreview('previewFocus', input)),
     )
   }
 

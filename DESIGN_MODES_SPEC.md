@@ -246,6 +246,7 @@ All are plain attributes and elements the agent writes. Unknown ones are ignored
 | `<aside data-notes>` as a child of the section | Speaker notes, plain text or simple inline markup. Never shown on the slide. | 1 |
 | `data-skip` on the section | Left out of Present and exports | 1 |
 | `data-transition="none\|fade\|slide"` on `body` or a section | Transition into that slide. Off under `prefers-reduced-motion`. | 1 |
+| `data-size="4:3"` on `body` (slides) | Every slide is 1440×1080 instead of 1920×1080. The user sets it under Properties (Deck, Slide size); the content is not refitted, a toast offers to ask the agent for that. | 1 |
 | `<template data-layout="NAME">` in `head` (slides) | A slide layout in the deck's own design: one `<section>` with placeholder text. Names: `blank`, `title`, `section`, `title-body`, `bullets`, `two-columns`, `table`, `quote`, `image-caption`, `closing`. Not a slide, never shown. Add slide offers them (§6.2). | 2 |
 | `data-layer="Name"` on any element | Its name in the layers list; else tag and first text | 3 |
 | `data-free` on an element | Free-placed: `position: absolute` with `left`, `top`, `width`, `height` in px on the canvas. Move and resize write these four. Other elements stay in the flow: a move writes a `translate` offset, so siblings keep their places. | 3 |
@@ -315,10 +316,11 @@ A design system applies to new work only when agents can find it. One state even
 
 ```
 dev.fabrium.design_systems   (state_key "")
-{ "systems": [{ "room_id", "identifier", "name", "default"?: true, "for"?: ["slides"] }] }
+{ "systems": [{ "room_id", "thread_id", "identifier", "name", "default"?: true, "for"?: ["slides"] }] }
 ```
 
-- Owners and admins write it (power level of the state event). A user's own default and "off for me" are account data.
+- Owners and admins write it (power level of the state event). A user's own default and "off for me" are account data (`dev.fabrium.design_system_prefs`); the composer copies the choice onto each message as `dev.fabrium.design_system`, because the daemon cannot read account data.
+- The workspace list is in the workforce space; a project list in the room's parent space is read first. Systems are added from the design-system artifact's title menu. The agent reads a system as itself, so it must be able to read that room.
 - The daemon gives the agent a `zooid_design_system` tool: list the systems, read one (overview, tokens, component list; one component's markup on request). The tool text tells the agent to read the default before it writes a `slides` or `design` artifact, to use the tokens as CSS variables (`--color-<name>` and so on, as the section pages do today), to read a component's `description` before using it, and to check its output against the tokens before it sends.
 - A deck or design copies the token variables into its own `<style>`, so it keeps the system as it was when it was made.
 
@@ -349,7 +351,7 @@ dev.fabrium.design_systems   (state_key "")
 - **Add slide:** opens a layout picker with ten choices, each a live preview in the deck's design: Blank, Title, Section, Title and body, Bullets, Two columns, Table, Quote, Image and caption, Closing. The layouts are the deck's `<template data-layout>` elements (§5.1), which the agent writes with every deck. For a layout the deck does not provide, the app builds the section from plain elements with the deck's slide classes. The chosen layout becomes a new `<section>` after the active one. "Add" at the end of the rail does the same.
 - **Copy and paste:** the slide's markup goes to the system clipboard as text. Paste works in any deck in Fabrium; the pasted markup is parsed into the inert source and shows only in the frame.
 - **Grid view:** a toggle beside zoom. All slides as cards; click opens one, drag moves, the slide menu works.
-- **Zoom:** Fit, 50%, 100%, 200%, and `Cmd+Plus`, `Cmd+Minus`, `Cmd+0`.
+- **Zoom:** Fit, 50%, 100%, 200%, and `Cmd+Plus`, `Cmd+Minus`, `Cmd+0`. `Cmd`/`Ctrl`+wheel or a pinch over the frame zooms freely (10%–1000%) around the pointer. The zoom button shows the current percentage, also when the frame is fitted.
 - **Notes:** a collapsible text area under the slide ("Speaker notes"). Plain text. The agent writes notes when asked ("add speaker notes").
 - **Present ▾:** Present, Present with speaker notes, Present from the start. Keys as in §3.5 including `1`–`9` and `F`. Skipped slides are left out.
 - **Presenter view:** a second window of the app on the same artifact and version. It shows the notes, a clock and a timer, the current and the next slide, and controls the first window through a `BroadcastChannel`. Shown only when the deck has notes.
@@ -395,7 +397,7 @@ A comment is a thread message with an artifact reference (as annotations are tod
 
 - Comment mode shows a marker on every element that an unresolved reference in the thread points to, with the author's name. Clicking a marker scrolls the thread to the message.
 - "Send to agent" is a checkbox on each pending comment (on by default). Checked comments go in one reply that mentions the agent. Unchecked comments are sent without a mention, so the agent's respond policy leaves them alone.
-- The header button shows the open count. "Show all comments" lists them. A comment is resolved by the ✓ reaction from a human, or automatically when a later version no longer contains its target.
+- Comments are a tab of the artifact's side panel, beside Properties and Tweaks; one header button opens the panel. The tab shows the open count and lists them. A comment is resolved by the ✓ reaction from a human, or automatically when a later version no longer contains its target.
 
 ### 6.7 Tweaks
 
@@ -533,11 +535,11 @@ Level 3:
 
 Level 4:
 
-- [ ] Composer "Create" menu, slash commands, `dev.fabrium.artifact_hint`.
-- [ ] Comment markers, list, open count, "Send to agent", resolve.
-- [ ] Tweaks reader (untrusted JSON) and panel; "Keep".
-- [ ] `dev.fabrium.design_systems` decoder, settings page for workspace owners, composer chip, design-system reader for `themes`, `fonts`, `icons`, `logos`, `layout`.
-- [ ] Agent cursor overlay.
+- [x] Composer "Create" menu, slash commands, `dev.fabrium.artifact_hint`.
+- [x] Comment markers, list, open count, "Send to agent", resolve. Editing a posted comment's note is not built (the note lives in the original event's refs).
+- [x] Tweaks reader (untrusted JSON) and panel; "Keep".
+- [x] `dev.fabrium.design_systems` decoder, settings page for workspace owners, composer chip, design-system reader for `themes`, `fonts`, `icons`, `logos`, `layout`.
+- [x] Agent cursor overlay. Drawn by the app over the frame; the frame only reports the matched element's box.
 
 Level 5:
 
@@ -549,7 +551,7 @@ Level 5:
 - [x] L1: tool text for `<aside data-notes>`, `data-skip`, `data-transition`.
 - [x] L2: `latestArtifact` resolves the newest version from any allowed author; `zooid_artifact` `read`; the "user edited" line in the next turn; `based_on` on agent versions; `started_ts` on `dev.zooid.turn.end`; tool text for `<template data-layout>`.
 - [x] L3: `assets` input on `zooid_artifact`; tool text for `data-layer`, `data-free`, `data-lock`, `data-note`.
-- [ ] L4: `zooid_design_system` tool; tool text for questions, variations, placeholders, tweaks and the conformance check; honor `dev.fabrium.artifact_hint`; `focus` live state for the cursor; confirm that thread attachments reach the agent, and add it if not.
+- [x] L4: `zooid_design_system` tool; tool text for questions, variations, placeholders, tweaks and the conformance check; honor `dev.fabrium.artifact_hint`; `focus` live state for the cursor (`zooid_preview_focus`, so only where previews are enabled); confirm that thread attachments reach the agent (they do: images inline, other files into `.zooid/attachments/`). Unchecked comments carry `dev.fabrium.quiet: true`, which the router ignores under every respond policy.
 - [ ] L5: kinds `whiteboard` and `motion` with validation; tool text for the export and build requests; render tooling on the agent VM image (headless browser, `ffmpeg`, a PPTX writer) — each needs `package-vetting`.
 
 ## 10. Open decisions

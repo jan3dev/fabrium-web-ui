@@ -36,4 +36,5 @@ export interface PreviewActions {
   start(caller: PreviewCallerRef, input: Record<string, unknown>): Promise<unknown>
   stop(caller: PreviewCallerRef, input: Record<string, unknown>): Promise<unknown>
   logs(caller: PreviewCallerRef, input: Record<string, unknown>): unknown
+  focus(caller: PreviewCallerRef, input: Record<string, unknown>): unknown
 }

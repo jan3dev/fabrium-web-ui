@@ -16,6 +16,7 @@ export interface DaemonRequest {
     | 'getRooms'
     | 'sendMessage'
     | 'sendArtifact'
+    | 'designSystem'
     | 'sendAttachment'
     | 'startTasks'
     | 'completeTask'
@@ -24,6 +25,7 @@ export interface DaemonRequest {
     | 'previewStart'
     | 'previewStop'
     | 'previewLogs'
+    | 'previewFocus'
   params: Record<string, unknown>
 }
 
@@ -49,7 +51,7 @@ export interface AgentSocketsHandle {
 
 /** Same wire error for absent and foreign bindings, so sockets are not an ID oracle. */
 const NOT_OWNED = 'binding not owned by caller'
-const PREVIEW_OPS = { previewStart: 'start', previewStop: 'stop', previewLogs: 'logs' } as const
+const PREVIEW_OPS = { previewStart: 'start', previewStop: 'stop', previewLogs: 'logs', previewFocus: 'focus' } as const
 
 /** Longest request line, in characters, the listener buffers while waiting for a newline. */
 export const MAX_LINE_LENGTH = 1024 * 1024
@@ -202,6 +204,12 @@ async function handleLine(
         channelId,
         binding.threadRef.threadId,
         req.params as unknown as Parameters<NonNullable<typeof binding.provider.sendArtifact>>[2],
+      )
+    } else if (req.method === 'designSystem') {
+      if (!binding.provider.designSystem) throw new Error('design systems unavailable on this transport')
+      result = await binding.provider.designSystem(
+        channelId,
+        req.params as unknown as Parameters<NonNullable<typeof binding.provider.designSystem>>[1],
       )
     } else if (req.method === 'sendAttachment') {
       if (!binding.provider.sendAttachment) {

@@ -14,6 +14,8 @@ import {
   heartbeat,
   lineReader,
   previewKey,
+  readFocus,
+  type AgentFocus,
   type DownMessage,
   type PreviewState,
   type UpMessage,
@@ -74,6 +76,8 @@ function accept(socket: Duplex): void {
 
 export class PreviewHub {
   private readonly previews = new Map<string, Preview>()
+  /** Agent ID → where it works now, with the tunnel that reported it (plan P6). */
+  private readonly focuses = new Map<string, { focus: AgentFocus; tunnel: Tunnel }>()
   private readonly sessions = new Map<string, Session>()
   private readonly streams = new Map<string, { tunnel: Tunnel; resolve(socket: Duplex): void }>()
   /** Upgraded sockets: http.Server.close() does not end them. */
@@ -166,6 +170,7 @@ export class PreviewHub {
     // Server sockets are half-open: the workstation's FIN only emits 'end'.
     socket.once('end', () => socket.destroy())
     socket.once('close', () => {
+      for (const [agentId, f] of this.focuses) if (f.tunnel === tunnel) this.focuses.delete(agentId)
       for (const p of this.previews.values()) {
         if (p.tunnel !== tunnel) continue
         p.tunnel = undefined
@@ -192,7 +197,8 @@ export class PreviewHub {
         .catch(() => false)
       tunnel.canActAs.set(agentId, check)
     }
-    return check
+    // A tunnel that closed during the check stays out: its close handler already ran.
+    return check.then((ok) => ok && !tunnel.socket.destroyed)
   }
 
   private async onUp(tunnel: Tunnel, line: string): Promise<void> {
@@ -202,6 +208,7 @@ export class PreviewHub {
     } catch {
       return
     }
+    if (msg.t === 'focus') return this.onFocus(tunnel, msg.agent_id, msg.focus)
     const agentId = msg.t === 'state' ? msg.preview?.agent_id : msg.agent_id
     const name = msg.t === 'state' ? msg.preview?.name : msg.name
     if (typeof agentId !== 'string' || typeof name !== 'string' || !NAME_RE.test(name)) return
@@ -248,6 +255,13 @@ export class PreviewHub {
     }
   }
 
+  private async onFocus(tunnel: Tunnel, agentId: unknown, raw: unknown): Promise<void> {
+    if (typeof agentId !== 'string' || !(await this.actsAs(tunnel, agentId))) return
+    const focus = raw === null ? null : readFocus(raw)
+    if (focus && focus.agent_id === agentId) this.focuses.set(agentId, { focus, tunnel })
+    else if (raw === null && this.focuses.get(agentId)?.tunnel === tunnel) this.focuses.delete(agentId)
+  }
+
   private down(tunnel: Tunnel, msg: DownMessage): void {
     tunnel.socket.write(JSON.stringify(msg) + '\n')
   }
@@ -260,6 +274,17 @@ export class PreviewHub {
 
   list(roomId: string): PreviewState[] {
     return [...this.previews.values()].map((p) => p.state).filter((s) => s.room_id === roomId)
+  }
+
+  /** Every agent's focus in the room. */
+  focusIn(roomId: string): AgentFocus[] {
+    return [...this.focuses.values()].map((f) => f.focus).filter((f) => f.room_id === roomId)
+  }
+
+  /** The agent's focus on this preview, as `GET /previews/<agent>/<name>` carries it (plan P6). */
+  previewFocus(agentId: string, name: string): { path: string; selector: string } | undefined {
+    const f = this.focuses.get(agentId)?.focus
+    return f?.name === name ? { path: f.path ?? '/', selector: f.selector } : undefined
   }
 
   /**
@@ -275,15 +300,15 @@ export class PreviewHub {
   }
 
   /** The appservice token that may act as the agent: reads room state as it. */
-  private tokenFor(agentId: string, name: string): string | undefined {
-    return this.previews.get(previewKey(agentId, name))?.token
+  private tokenFor(agentId: string, name: string | undefined): string | undefined {
+    return (name === undefined ? undefined : this.previews.get(previewKey(agentId, name))?.token) ?? this.focuses.get(agentId)?.tunnel.token
   }
 
   /**
    * True when the user has joined the preview's room; read as the agent, through its workstation's
    * token. Concurrent callers share one check; only a "joined" answer is cached.
    */
-  isMember(userId: string, preview: PreviewState): Promise<boolean> {
+  isMember(userId: string, preview: Pick<PreviewState, 'agent_id' | 'room_id'> & { name?: string }): Promise<boolean> {
     const token = this.tokenFor(preview.agent_id, preview.name)
     if (!token) return Promise.resolve(false)
     const key = `${preview.room_id}\n${userId}`

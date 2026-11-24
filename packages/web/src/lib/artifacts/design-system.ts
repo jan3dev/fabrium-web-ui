@@ -1,3 +1,4 @@
+import { isMxc } from "./assets";
 import type { ArtifactRefTarget } from "./refs";
 
 /**
@@ -23,15 +24,39 @@ export interface DesignAsset {
   svg: string;
 }
 
+/** Color values for one theme (light, dark): they replace the `colors` of the same name. */
+export interface DesignTheme {
+  name: string;
+  colors: DesignToken[];
+}
+/** An uploaded font file (spec §5.1), loaded into the frame like any other asset (§5.4). */
+export interface DesignFont {
+  name: string;
+  mxc: string;
+  weight?: string;
+  style?: string;
+}
+/** A layout pattern (grid, page structure): text, not a CSS value. */
+export interface DesignNote {
+  name: string;
+  value: string;
+  description?: string;
+}
+
 export interface DesignSystem {
   /** Markdown; "" when absent. */
   overview: string;
   colors: DesignToken[];
+  themes: DesignTheme[];
   spacing: DesignToken[];
   typography: DesignToken[];
+  fonts: DesignFont[];
   radius: DesignToken[];
   shadows: DesignToken[];
+  layout: DesignNote[];
   components: DesignComponent[];
+  icons: DesignAsset[];
+  logos: DesignAsset[];
   assets: DesignAsset[];
 }
 
@@ -39,11 +64,16 @@ export interface DesignSystem {
 const DESIGN_SYSTEM_SECTIONS = [
   { key: "overview", label: "Overview" },
   { key: "colors", label: "Colors" },
+  { key: "themes", label: "Themes" },
   { key: "spacing", label: "Spacing" },
   { key: "typography", label: "Typography" },
+  { key: "fonts", label: "Fonts" },
   { key: "radius", label: "Corner radius" },
   { key: "shadows", label: "Shadows" },
+  { key: "layout", label: "Layout" },
   { key: "components", label: "Components" },
+  { key: "icons", label: "Icons" },
+  { key: "logos", label: "Logos" },
   { key: "assets", label: "Assets" },
 ] as const;
 
@@ -140,6 +170,52 @@ function tokens(raw: unknown): DesignToken[] {
   });
 }
 
+/** `{ name, svg }` items: icons, logos, assets. */
+function svgs(raw: unknown): DesignAsset[] {
+  return list(raw, (item) => {
+    const name = field(item, "name", LIMITS.name, true);
+    const svg = field(item, "svg", LIMITS.markup, true);
+    return name === undefined || svg === undefined ? null : { name, svg };
+  });
+}
+
+function themes(raw: unknown): DesignTheme[] {
+  const seen = new Set<string>();
+  return list(raw, (item) => {
+    const name = tokenName(field(item, "name", LIMITS.name, true) ?? "");
+    if (!name || seen.has(name)) return null;
+    seen.add(name);
+    return { name, colors: tokens(item.colors) };
+  });
+}
+
+const FONT_WEIGHT = /^(normal|bold|[1-9]\d{0,2}|1000)$/;
+const FONT_STYLE = /^(normal|italic|oblique)$/;
+
+function fonts(raw: unknown): DesignFont[] {
+  return list(raw, (item) => {
+    const name = field(item, "name", LIMITS.name, true);
+    if (name === undefined || !isMxc(item.mxc)) return null;
+    const weight = typeof item.weight === "number" ? String(item.weight) : item.weight;
+    return {
+      name,
+      mxc: item.mxc,
+      ...(typeof weight === "string" && FONT_WEIGHT.test(weight) ? { weight } : {}),
+      ...(typeof item.style === "string" && FONT_STYLE.test(item.style) ? { style: item.style } : {}),
+    };
+  });
+}
+
+function notes(raw: unknown): DesignNote[] {
+  return list(raw, (item) => {
+    const name = field(item, "name", LIMITS.name, true);
+    const value = field(item, "value", LIMITS.value, true);
+    const description = field(item, "description", LIMITS.description, false);
+    if (name === undefined || value === undefined || description === undefined) return null;
+    return description ? { name, value, description } : { name, value };
+  });
+}
+
 /** Untrusted JSON text → a design system, or null when it is not a JSON object. */
 export function parseDesignSystem(text: string): DesignSystem | null {
   let data: unknown;
@@ -152,10 +228,13 @@ export function parseDesignSystem(text: string): DesignSystem | null {
   return {
     overview: typeof data.overview === "string" ? data.overview.slice(0, LIMITS.overview) : "",
     colors: tokens(data.colors),
+    themes: themes(data.themes),
     spacing: tokens(data.spacing),
     typography: tokens(data.typography),
+    fonts: fonts(data.fonts),
     radius: tokens(data.radius),
     shadows: tokens(data.shadows),
+    layout: notes(data.layout),
     components: list(data.components, (item) => {
       const name = field(item, "name", LIMITS.name, true);
       const description = field(item, "description", LIMITS.description, false);
@@ -163,11 +242,9 @@ export function parseDesignSystem(text: string): DesignSystem | null {
       if (name === undefined || description === undefined || html === undefined) return null;
       return description ? { name, description, html } : { name, html };
     }),
-    assets: list(data.assets, (item) => {
-      const name = field(item, "name", LIMITS.name, true);
-      const svg = field(item, "svg", LIMITS.markup, true);
-      return name === undefined || svg === undefined ? null : { name, svg };
-    }),
+    icons: svgs(data.icons),
+    logos: svgs(data.logos),
+    assets: svgs(data.assets),
   };
 }
 
@@ -233,16 +310,18 @@ export function cssValue(value: string): string {
   return depth === 0 ? value.trim() : "";
 }
 
+/** `--<prefix>-<name>: <value>;` per token whose value is safe CSS. */
+function declarations(prefix: string, tokens: readonly { name: string; value: string }[]): string[] {
+  return tokens.flatMap((t) => {
+    const v = cssValue(t.value);
+    // Names are `[a-z0-9-]` after parsing; re-normalised in case the caller built the object.
+    return v ? [`--${prefix}-${tokenName(t.name)}: ${v};`] : [];
+  });
+}
+
 /** Every token as a CSS variable, so samples and component html can use `var(--color-brand)`. */
 function rootVariables(system: DesignSystem): string {
-  const lines: string[] = [];
-  for (const section of TOKEN_SECTIONS) {
-    for (const t of system[section]) {
-      const v = cssValue(t.value);
-      // Names are `[a-z0-9-]` after parsing; re-normalised in case the caller built the object.
-      if (v) lines.push(`--${TOKEN_PREFIX[section]}-${tokenName(t.name)}: ${v};`);
-    }
-  }
+  const lines = TOKEN_SECTIONS.flatMap((section) => declarations(TOKEN_PREFIX[section], system[section]));
   return `:root{\n${lines.join("\n")}\n}`;
 }
 
@@ -268,7 +347,9 @@ h1{font-size:16px;font-weight:600;margin:0 0 16px}
 .stage{background:rgb(248,248,250);padding:24px;display:flex;align-items:center;justify-content:center;overflow:auto}
 .assets .stage{height:140px}
 figcaption{padding:10px 12px;border-top:1px solid rgb(229,229,234)}
-.empty{color:rgb(99,99,102)}`;
+.empty{color:rgb(99,99,102)}
+h2{font-size:14px;font-weight:600;margin:0 0 12px}
+.theme+.theme{margin-top:32px}`;
 
 const SAMPLE = "The quick brown fox jumps over the lazy dog";
 
@@ -281,9 +362,11 @@ function meta(name: string, value?: string, description?: string): string {
 }
 
 /** Style attributes only ever hold `var(--…)` of a normalised name, never an agent value. */
-function tokenItem(section: TokenSection, t: DesignToken): string {
-  const id = `${TOKEN_PREFIX[section]}-${tokenName(t.name)}`;
-  const v = `var(--${id})`;
+/** `scope` keeps ids unique when one page shows the same token twice (themes). */
+function tokenItem(section: TokenSection, t: DesignToken, scope = ""): string {
+  const name = `${TOKEN_PREFIX[section]}-${tokenName(t.name)}`;
+  const id = scope + name;
+  const v = `var(--${name})`;
   const info = meta(t.name, t.value, t.description);
   switch (section) {
     case "colors":
@@ -299,18 +382,54 @@ function tokenItem(section: TokenSection, t: DesignToken): string {
   }
 }
 
+/** CSS for one section's page beyond the root variables: theme scopes, font faces. */
+function sectionCss(system: DesignSystem, section: DesignSystemSection): string {
+  if (section === "themes")
+    return system.themes
+      .map((t) => `#theme-${tokenName(t.name)}{${declarations("color", t.colors).join("")}}`)
+      .join("\n");
+  if (section === "fonts")
+    // The family is ours, never the agent's name; `mxc` and the rest passed a strict pattern.
+    return system.fonts
+      .map((f, i) => {
+        const face = `${f.weight ? `font-weight:${f.weight};` : ""}${f.style ? `font-style:${f.style};` : ""}`;
+        return `@font-face{font-family:"ds-font-${i}";src:url(${f.mxc});${face}}\n.f${i}{font-family:"ds-font-${i}",sans-serif;${face}}`;
+      })
+      .join("\n");
+  return "";
+}
+
 function sectionBody(system: DesignSystem, section: Exclude<DesignSystemSection, "overview">): string {
   if (sectionCount(system, section) === 0) return `<p class="empty">Nothing in this section.</p>`;
   if (isTokenSection(section)) {
     const layout = section === "spacing" || section === "typography" ? "list" : "grid";
     return `<div class="${layout} ${section}">${system[section].map((t) => tokenItem(section, t)).join("")}</div>`;
   }
-  if (section === "components")
-    return `<div class="list components">${markupCards("component", system.components.map((c) => ({ ...c, markup: c.html })))}</div>`;
-  return `<div class="grid assets">${markupCards(
-    "asset",
-    system.assets.map((a) => ({ name: a.name, markup: `<style>svg{max-width:100%;max-height:100%}</style>${a.svg}` })),
-  )}</div>`;
+  switch (section) {
+    case "themes":
+      return system.themes
+        .map(
+          (t) =>
+            `<section id="theme-${tokenName(t.name)}" class="theme"><h2>${escapeHtml(t.name)}</h2><div class="grid colors">${t.colors.map((c) => tokenItem("colors", c, `theme-${tokenName(t.name)}-`)).join("")}</div></section>`,
+        )
+        .join("");
+    case "fonts":
+      return `<div class="list fonts">${system.fonts
+        .map(
+          (f, i) =>
+            `<div id="font-${i + 1}" class="typo"><div class="sample f${i}">${SAMPLE}</div>${meta(f.name, [f.weight, f.style].filter(Boolean).join(" ") || undefined)}</div>`,
+        )
+        .join("")}</div>`;
+    case "layout":
+      return `<div class="list layout">${system.layout.map((n, i) => `<div id="layout-${i + 1}">${meta(n.name, n.value, n.description)}</div>`).join("")}</div>`;
+    case "components":
+      return `<div class="list components">${markupCards("component", system.components.map((c) => ({ ...c, markup: c.html })))}</div>`;
+    default:
+      return `<div class="grid assets">${markupCards(
+        section.replace(/s$/, ""),
+        system[section].map((a) => ({ name: a.name, markup: `<style>svg{max-width:100%;max-height:100%}</style>${a.svg}` })),
+      )}</div>`;
+  }
 }
 
 /**
@@ -345,5 +464,6 @@ export function designSystemSectionPage(
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${label}</title><style>
 ${rootVariables(system)}
 ${PAGE_CSS}
+${sectionCss(system, section)}
 </style></head><body><h1>${label}</h1>${sectionBody(system, section)}</body></html>`;
 }

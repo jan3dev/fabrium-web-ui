@@ -75,9 +75,9 @@ describe("listSlashCommands", () => {
     expect(names).toContain("stop");
   });
 
-  it("returns empty list in room mode (no non-thread commands yet)", () => {
-    const cmds = listSlashCommands();
-    expect(cmds).toHaveLength(0);
+  it("returns only the create commands in room mode", () => {
+    const cmds = listSlashCommands().map((c) => c.name);
+    expect(cmds).toEqual(["slides", "design", "design-system", "whiteboard", "motion"]);
   });
 
   it("every entry has a non-empty description", () => {

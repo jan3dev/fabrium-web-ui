@@ -1,9 +1,11 @@
 // Derived from Hugging Face chat-ui (Apache-2.0). Modified.
 import type { ArtifactKind } from "@/model/types";
-import { FRAME_SIZE, type FrameKind, isFrameKind, MAX_FRAMES, NAV_KEYS, PASS_KEYS, ZOOM_KEYS } from "./frames";
+import { FRAME_SIZE, type FrameKind, isFrameKind, MAX_FRAMES, NAV_KEYS, PASS_KEYS, SLIDE_SIZES, ZOOM_KEYS } from "./frames";
 import { MXC_PATTERN } from "./assets";
 import { editorRuntime } from "./editor-runtime";
+import { MAX_PINS } from "./pins";
 import { STYLE_PROPS } from "./styles";
+import { TWEAK_NAME, TWEAK_VAR } from "./tweaks";
 
 /**
  * The sandboxed document an artifact preview runs in. No network: a CSP meta
@@ -73,6 +75,16 @@ export const PreviewMessage = {
   assets: "fabrium.preview.assets",
   /** Frame → parent: files are dragged over the frame. The frame never takes the drop; the stage does. */
   drag: "fabrium.preview.drag",
+  /** Parent → frame `{ pins: [{ id, selector }] }`: elements to follow (pins.ts); the frame only queries them. */
+  pins: "fabrium.preview.pins",
+  /** Frame → parent `{ boxes: [{ id, x, y, w, h }] }`: where the followed elements are now, sent when they move. */
+  pinned: "fabrium.preview.pinned",
+  /** Frame → parent `{ scale }`: the scale the open frame is drawn at, sent when it changes. */
+  scale: "fabrium.preview.scale",
+  /** Frame → parent `{ factor }`: Cmd/Ctrl+wheel or a pinch over the frame asks for that much more zoom. */
+  zoom: "fabrium.preview.zoom",
+  /** Parent → frame `{ vars, texts }`: tweak values (tweaks.ts `tweakMessage`), custom properties on `:root` and `[data-tweak]` text. */
+  tweak: "fabrium.preview.tweak",
 } as const;
 
 export type RuntimeModule = "tailwind" | "react" | "jsx";
@@ -227,6 +239,43 @@ ${canvas && !print ? editorRuntime() : ""}
       if (type === 'dragenter') send(M.drag);
     }, true);
   });
+  /* Tweaks (spec §6.7): the parent validated the values ("" removes a property); names are checked again before they reach a selector. */
+  function applyTweaks(d){
+    var vars = d.vars || {}, texts = d.texts || {}, root = document.documentElement, k, i;
+    for (k in vars) if (/${TWEAK_VAR.source}/.test(k) && typeof vars[k] === 'string') root.style.setProperty(k, vars[k]);
+    for (k in texts) {
+      if (!/${TWEAK_NAME.source}/.test(k) || typeof texts[k] !== 'string') continue;
+      var els = document.querySelectorAll('[data-tweak="' + k + '"]');
+      for (i = 0; i < els.length; i++) if (els[i].textContent !== texts[k]) els[i].textContent = texts[k];
+    }
+  }
+  /* Pins (spec §6.6, §6.8): comment markers and the agent cursor. The parent names elements by
+     selector and draws its markers over the frame; here they are only queried and measured. */
+  var PINS = [], pinTimer = null, pinLast = '';
+  function measurePins(){
+    var out = [];
+    for (var i = 0; i < PINS.length; i++) {
+      var el = null;
+      try { el = document.querySelector(PINS[i].selector); } catch (e) {}
+      if (!el || !el.getBoundingClientRect) continue;
+      var r = el.getBoundingClientRect();
+      if (r.width > 0 || r.height > 0) out.push({ id: PINS[i].id, x: r.left, y: r.top, w: r.width, h: r.height });
+    }
+    var key = JSON.stringify(out);
+    if (key !== pinLast) { pinLast = key; send(M.pinned, { boxes: out }); }
+  }
+  function setPins(list){
+    PINS = [];
+    for (var i = 0; i < list.length && i < ${MAX_PINS}; i++) if (list[i] && typeof list[i].id === 'string' && typeof list[i].selector === 'string') PINS.push({ id: list[i].id, selector: list[i].selector });
+    if (pinTimer) clearInterval(pinTimer);
+    pinTimer = PINS.length ? setInterval(measurePins, 250) : null;
+    pinLast = '';
+    measurePins();
+  }
+  var pinFrame = 0;
+  window.addEventListener('scroll', function(){
+    if (PINS.length && !pinFrame) pinFrame = requestAnimationFrame(function(){ pinFrame = 0; measurePins(); });
+  }, true);
   function inject(source){ var el = document.createElement('script'); el.textContent = source; (document.head || document.documentElement).appendChild(el); el.remove(); }
   window.addEventListener('message', function(ev){
     if (ev.source !== window.parent) return;
@@ -235,6 +284,8 @@ ${canvas && !print ? editorRuntime() : ""}
     if (data.type === M.pick) { setPick(!!(data.detail && data.detail.on)); return; }
     if (data.type === M.frame) { if (frameTo) frameTo(data.detail || {}); return; }
     if (data.type === M.editor || data.type === M.patch || data.type === M.select) { if (onEditor) onEditor(data.type, data.detail || {}); if (data.type === M.patch) resolveAssets(); return; }
+    if (data.type === M.tweak) { applyTweaks(data.detail || {}); return; }
+    if (data.type === M.pins) { setPins(Array.isArray(data.detail && data.detail.pins) ? data.detail.pins : []); return; }
     if (data.type === M.assets) { addAssets(Array.isArray(data.detail && data.detail.assets) ? data.detail.assets : []); return; }
     if (data.type === M.style) {
       var d = data.detail || {};
@@ -261,7 +312,8 @@ ${END_SCRIPT}`;
 
 /**
  * Part of the hook script for slides and design: each `body > section` is a canvas
- * (slides 1920×1080; design `data-width`/`data-height`, default 1440×900). Only the
+ * (slides 1920×1080, or the size `data-size` on `body` names; design `data-width`/`data-height`,
+ * default 1440×900). Only the
  * active one shows, scaled to fit or at the parent's zoom, entered with the parent's
  * transition. Layout is one stylesheet keyed by `:nth-of-type`, so the agent's elements
  * stay untouched for pick mode. The parent lists the frames from the source (frames.ts).
@@ -279,7 +331,7 @@ function framesRuntime(kind: FrameKind, print: boolean): string {
     });
     /* Navigation keys are kept from the frame; Present keys pass through, so a zoomed frame still scrolls. */
     var KEYS = ${JSON.stringify(NAV_KEYS)}, PASS = ${JSON.stringify(PASS_KEYS)};
-    var ZOOM = ${JSON.stringify(ZOOM_KEYS)}, SIZE = ${JSON.stringify(FRAME_SIZE)};
+    var ZOOM = ${JSON.stringify(ZOOM_KEYS)}, SIZE = ${JSON.stringify(FRAME_SIZE)}, DECK = ${JSON.stringify(SLIDE_SIZES)};
     var BOX = 'min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;margin:0!important;';
     /* Speaker notes never show on a frame; a note for the builder shows as a note, but not in Present or the PDF. */
     var NOTES = 'body>section>aside[data-notes]{display:none!important}';
@@ -289,6 +341,18 @@ function framesRuntime(kind: FrameKind, print: boolean): string {
     var list = [], active = 0, zoom = null, sheet = null, want = null, enter = '', present = false;
     /* Design: every artboard in a row with its name above (spec §6.3), panned by scroll or Space-drag. */
     var row = false, labels = null, space = false, pan = null, GAP = 80, LABEL = 28;
+    /* The scale last reported, where the pointer is in here, and the wheel zoom not yet sent. */
+    var shown = 0, mouse = null, wheel = 1, wheelRaf = 0;
+    function report(s){ s = Math.round(s * 100) / 100; if (s !== shown) { shown = s; send(M.scale, { scale: s }); } }
+    /* A zoom keeps the point under the pointer where it is; with the pointer elsewhere, the middle of the stage. */
+    function zoomed(run){
+      var el = frameRoot(), root = document.documentElement, a = mouse || [root.clientWidth / 2, root.clientHeight / 2];
+      if (!el) { run(); return; }
+      var r = el.getBoundingClientRect(), u = (a[0] - r.left) / r.width, v = (a[1] - r.top) / r.height;
+      run();
+      r = el.getBoundingClientRect();
+      window.scrollBy(r.left + u * r.width - a[0], r.top + v * r.height - a[1]);
+    }
     frameRoot = function(){ return list.length ? document.querySelectorAll('body > section')[active] || null : null; };
     function size(v, d){ var n = parseFloat(v); return isFinite(n) ? Math.min(SIZE.max, Math.max(SIZE.min, n)) : d; }
     function name(el, i){
@@ -333,6 +397,7 @@ function framesRuntime(kind: FrameKind, print: boolean): string {
         'body [data-fab-hover],body [data-fab-picked]{outline-width:' + 2 / s + 'px!important;outline-offset:' + 2 / s + 'px!important}' +
         NOTES + NOTE;
       drawLabels(at, s);
+      report(s);
       return { x: at[active], y: at.top, w: f.width * s, h: f.height * s };
     }
     function center(){
@@ -358,6 +423,7 @@ function framesRuntime(kind: FrameKind, print: boolean): string {
         'body [data-fab-hover],body [data-fab-picked]{outline-width:' + 2 / s + 'px!important;outline-offset:' + 2 / s + 'px!important}' +
         NOTES + (present ? NO_NOTE : NOTE) + ENTER +
         (enter ? '@media (prefers-reduced-motion:no-preference){body>' + one + '{animation:' + enter + ' .4s ease-out!important}}' : '');
+      report(s);
     }
     function printLayout(){
       var css = '@page{margin:0}html,body{' + BOX + 'padding:0!important;background:none!important}body>:not(section){display:none!important}' +
@@ -378,9 +444,11 @@ function framesRuntime(kind: FrameKind, print: boolean): string {
     }
     function scan(){
       var nodes = document.querySelectorAll('body > section');
+      /* One size for the whole deck, as frames.ts reads it. */
+      var ds = (document.body.getAttribute('data-size') || '').trim(), deck = DECK.hasOwnProperty(ds) ? DECK[ds] : SIZE.slides;
       for (var i = 0; i < nodes.length && i < ${MAX_FRAMES}; i++) list.push({
-        width: SLIDES ? SIZE.slides[0] : size(nodes[i].getAttribute('data-width'), SIZE.design[0]),
-        height: SLIDES ? SIZE.slides[1] : size(nodes[i].getAttribute('data-height'), SIZE.design[1]),
+        width: SLIDES ? deck[0] : size(nodes[i].getAttribute('data-width'), SIZE.design[0]),
+        height: SLIDES ? deck[1] : size(nodes[i].getAttribute('data-height'), SIZE.design[1]),
         skip: nodes[i].hasAttribute('data-skip')
       });
       if (!list.length) { if (PRINT) send(M.printed); return; }
@@ -400,8 +468,8 @@ function framesRuntime(kind: FrameKind, print: boolean): string {
       if (row) {
         active = next;
         zoom = d.zoom != null && isFinite(z) && z > 0 ? Math.min(z, 10) : null;
-        /* The screen list (or a zoom) centres the active artboard; a reload of the same view keeps the scroll. */
-        if (changed || !wasRow || zoom !== oldZoom) center(); else rowLayout();
+        /* The screen list (or a zoom from the menu) centres the active artboard; a reload of the same view keeps the scroll. */
+        if (changed || !wasRow || (zoom !== oldZoom && !mouse)) center(); else if (zoom !== oldZoom) zoomed(rowLayout); else rowLayout();
         if (onFrameChange) onFrameChange(changed);
         return;
       }
@@ -413,11 +481,24 @@ function framesRuntime(kind: FrameKind, print: boolean): string {
       }
       active = next;
       zoom = d.zoom != null && isFinite(z) && z > 0 ? Math.min(z, 10) : null;
-      layout();
+      if (!changed && zoom !== oldZoom) zoomed(layout); else layout();
       if (onFrameChange) onFrameChange(changed);
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scan); else scan();
     if (!PRINT) window.addEventListener('resize', layout);
+    window.addEventListener('mousemove', function(ev){ mouse = [ev.clientX, ev.clientY]; }, true);
+    document.documentElement.addEventListener('mouseleave', function(){ mouse = null; });
+    /* Cmd/Ctrl+wheel, which a trackpad pinch also sends, zooms instead of the browser. The parent holds
+       the zoom: it gets the factor, once per painted frame. Not while presenting.
+       ponytail: Safari sends a pinch as gesture events, not wheel; add them if pinch must work there. */
+    window.addEventListener('wheel', function(ev){
+      if (!(ev.ctrlKey || ev.metaKey) || !list.length || present) return;
+      ev.preventDefault();
+      mouse = [ev.clientX, ev.clientY];
+      /* A wheel notch is about 100, a pinch step a few px: one event zooms by a third at most. */
+      wheel *= Math.exp(-Math.max(-30, Math.min(30, ev.deltaMode ? ev.deltaY * 16 : ev.deltaY)) / 100);
+      if (!wheelRaf) wheelRaf = requestAnimationFrame(function(){ wheelRaf = 0; send(M.zoom, { factor: wheel }); wheel = 1; });
+    }, { capture: true, passive: false });
     /* Space-drag pans the row. Registered ahead of the canvas editor, so it takes the pointer first. */
     window.addEventListener('keydown', function(ev){ if (row && ev.key === ' ' && !typing(ev.target)) { space = true; ev.preventDefault(); ev.stopImmediatePropagation(); } }, true);
     window.addEventListener('keyup', function(ev){ if (ev.key === ' ') space = false; }, true);
