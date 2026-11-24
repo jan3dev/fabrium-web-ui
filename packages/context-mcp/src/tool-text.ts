@@ -48,3 +48,17 @@ export const ARTIFACT_INSTRUCTIONS =
 const KINDS: Record<ArtifactKind, true> = { html: true, svg: true, react: true, markdown: true, code: true }
 /** The artifact kinds, for the MCP and pi tool schemas. */
 export const ARTIFACT_KINDS = Object.keys(KINDS) as [ArtifactKind, ...ArtifactKind[]]
+
+export const PREVIEW_START_DESCRIPTION =
+  'Run a web app and show it live to the user beside this thread: use it for anything with a dev server (Vite, Next.js, Flask, Rails, a static file server). For a single self-contained page or component, use zooid_artifact instead. ' +
+  'Pass the shell command that starts the app in the foreground (e.g. "npm run dev -- --port $PORT"). It runs in your workspace (or `cwd`), keeps running after your turn, and is restarted when you call this again with the same `name`. ' +
+  'The app MUST listen on the port in $PORT (or the `port` you pass) on 127.0.0.1 or localhost; it gets a clean environment (PATH, HOME, LANG and PORT, no daemon secrets), so pass anything else in `env`. Install dependencies before calling. ' +
+  'Returns once the port accepts connections (status "running") or the app exits or 60 s pass, with the last log lines: if the status is "crashed" or still "starting", read the logs, fix the problem, and call again. ' +
+  'The user sees the app in a card in this thread; do not post its URL. Only in threads. ' +
+  'For an Expo app pass kind "expo" and the command "npx expo start --port $PORT"; never add --tunnel or --lan, the preview is the tunnel. ' +
+  'Expo Go runs only the SDK version it ships with and no custom native code: if the logs report an SDK mismatch, move the project to the SDK Expo Go supports or tell the user.'
+
+export const PREVIEW_STOP_DESCRIPTION = 'Stop a preview app you started with zooid_preview_start.'
+
+export const PREVIEW_LOGS_DESCRIPTION =
+  'Read the latest output (stdout and stderr) of a preview app you started, with its status. Use it when the user reports a problem in the preview.'

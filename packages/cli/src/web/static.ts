@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
 import { Hono } from 'hono'
+import { proxy } from 'hono/proxy'
 
 export interface WebStaticOpts {
   webRoot: string
@@ -9,6 +10,10 @@ export interface WebStaticOpts {
   workforceSpace?: string
   pushGatewayUrl?: string
   vapidPublicKey?: string
+  /** The daemon's listener: `/_fabrium/*` goes there, as Caddy does in a deployment. */
+  daemonUrl?: string
+  /** `zooid.yaml` has `previews:`: the web UI shows previews. */
+  previews?: boolean
 }
 
 const MIME: Record<string, string> = {
@@ -38,8 +43,17 @@ export function webStatic(opts: WebStaticOpts): Hono {
       ...(opts.workforceSpace ? { workforce_space: opts.workforceSpace } : {}),
       ...(opts.pushGatewayUrl ? { push_gateway_url: opts.pushGatewayUrl } : {}),
       ...(opts.vapidPublicKey ? { vapid_public_key: opts.vapidPublicKey } : {}),
+      ...(opts.previews ? { previews: true } : {}),
     }),
   )
+
+  const daemonUrl = opts.daemonUrl
+  if (daemonUrl) {
+    app.all('/_fabrium/*', (c) => {
+      const url = new URL(c.req.url)
+      return proxy(`${daemonUrl}${url.pathname}${url.search}`, { raw: c.req.raw })
+    })
+  }
 
   app.get('*', (c) => {
     const url = new URL(c.req.url)

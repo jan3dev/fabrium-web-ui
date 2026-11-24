@@ -1998,6 +1998,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     app,
     taskActions,
     syncLoops,
+    isNotHuman,
     bootstrap: async (
       bootstrapOpts: {
         spaceRoomId?: string
