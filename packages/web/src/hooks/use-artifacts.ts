@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { MatrixClientPeg } from "@/client/peg";
+import { MAX_ARTIFACT_BYTES, sha256Hex } from "@/events/fabrium-artifact";
 import { fetchAuthedMedia } from "@/lib/matrix/authed-media";
 import type { ArtifactVersion } from "@/model/types";
 import { useThreadEntries } from "./use-timeline-entries";
@@ -82,20 +83,12 @@ export function useThreadArtifacts(
   );
 }
 
-const MAX_MEDIA_BYTES = 512_000;
-/** Fetched media texts by event id; the oldest goes past `MAX_CACHED`. */
+/** Fetched media texts by head event id (the content a version shows); the oldest goes past `MAX_CACHED`. */
 const texts = new Map<string, Promise<string>>();
 const MAX_CACHED = 16;
 
-async function hex(buf: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", buf);
-  return [...new Uint8Array(digest)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 function loadText(version: ArtifactVersion): Promise<string> {
-  const hit = texts.get(version.eventId);
+  const hit = texts.get(version.headEventId);
   if (hit) return hit;
   const client = MatrixClientPeg.safeGet();
   const pending = (async () => {
@@ -104,15 +97,15 @@ function loadText(version: ArtifactVersion): Promise<string> {
     const buf = await (
       await fetchAuthedMedia(client, version.mxc)
     ).arrayBuffer();
-    if (buf.byteLength > MAX_MEDIA_BYTES)
+    if (buf.byteLength > MAX_ARTIFACT_BYTES)
       throw new Error("The artifact is too large to show.");
     // The event pins the bytes; media that does not match was swapped.
-    if ((await hex(buf)) !== version.sha256)
+    if ((await sha256Hex(buf)) !== version.sha256)
       throw new Error("The artifact content does not match its checksum.");
     return new TextDecoder().decode(buf);
   })();
-  pending.catch(() => texts.delete(version.eventId));
-  texts.set(version.eventId, pending);
+  pending.catch(() => texts.delete(version.headEventId));
+  texts.set(version.headEventId, pending);
   if (texts.size > MAX_CACHED) texts.delete(texts.keys().next().value!);
   return pending;
 }
@@ -135,11 +128,11 @@ export function useArtifactText(version: ArtifactVersion | undefined): {
     if (!version || version.body !== undefined) return;
     let live = true;
     loadText(version).then(
-      (text) => live && setState({ id: version.eventId, text, error: null }),
+      (text) => live && setState({ id: version.headEventId, text, error: null }),
       (err: unknown) =>
         live &&
         setState({
-          id: version.eventId,
+          id: version.headEventId,
           text: null,
           error: err instanceof Error ? err.message : String(err),
         }),
@@ -150,5 +143,5 @@ export function useArtifactText(version: ArtifactVersion | undefined): {
   }, [version]);
   if (!version) return { text: null, error: null };
   if (version.body !== undefined) return { text: version.body, error: null };
-  return state.id === version.eventId ? state : { text: null, error: null };
+  return state.id === version.headEventId ? state : { text: null, error: null };
 }

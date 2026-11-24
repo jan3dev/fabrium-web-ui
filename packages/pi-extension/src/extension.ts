@@ -212,6 +212,7 @@ export default function createExtension(pi: ExtensionAPI, deps: Deps = {}): void
           type: 'array',
           items: { type: 'object', properties: { old_str: { type: 'string' }, new_str: { type: 'string' } }, required: ['old_str', 'new_str'] },
         },
+        read: { type: 'boolean' },
       },
       required: ['identifier'],
     },

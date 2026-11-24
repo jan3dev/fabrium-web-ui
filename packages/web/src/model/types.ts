@@ -90,9 +90,17 @@ export const ARTIFACT_KINDS = [
 ] as const;
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 
-/** One version of an agent's artifact, numbered per thread + identifier. */
+/**
+ * One version of an artifact, numbered per thread + identifier. An agent's event starts a
+ * version; a person's event is a save that folds into the version before it (spec §5.2 as
+ * changed: saves autosave into the current version). The content fields are the newest
+ * save's. A person's event with no version before it (Duplicate) starts version 1.
+ */
 export interface ArtifactVersion {
+  /** The event that started the version: it names the version (`?version=`) and does not change. */
   eventId: string;
+  /** The newest event folded into the version: its content is shown, the next save is based on it. */
+  headEventId: string;
   identifier: string;
   kind: ArtifactKind;
   title: string;
@@ -101,6 +109,12 @@ export interface ArtifactVersion {
   body?: string;
   mxc?: string;
   sha256?: string;
+  /** The starting event's one line for the version list. */
+  summary?: string;
+  /** Saves folded into the version: the newest one's author, time and summary, and how many. */
+  edited?: { by: ActorSummary; at: number; saves: number; summary?: string };
+  /** An event of this version was made from content older than the one before it (`based_on`). */
+  madeFromOlder?: { version: number | null };
   /** 1-based. */
   version: number;
   createdAt: number;

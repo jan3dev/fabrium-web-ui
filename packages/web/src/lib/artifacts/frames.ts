@@ -35,8 +35,9 @@ export interface FrameView {
 export const MAX_FRAMES = 200;
 /** Canvas bounds and defaults; the frame runtime in srcdoc.ts embeds the same values. */
 export const FRAME_SIZE = { min: 100, max: 10000, slides: [1920, 1080], design: [1440, 900] } as const;
-const MAX_NAME = 120;
-const MAX_NOTES = 5000;
+/** A frame's name and its speaker notes, read and written. */
+export const MAX_NAME = 120;
+export const MAX_NOTES = 5000;
 const TRANSITIONS: readonly FrameTransition[] = ["none", "fade", "slide"];
 
 const size = (v: string | null, fallback: number) => {
@@ -45,6 +46,9 @@ const size = (v: string | null, fallback: number) => {
 };
 const transition = (v: string | null) => TRANSITIONS.find((t) => t === v?.trim().toLowerCase());
 const text = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
+/** Speaker notes as read back from the source: runs of spaces and blank lines collapsed. */
+export const cleanNotes = (s: string) =>
+  s.replace(/[ \t]+/g, " ").replace(/\n\s*\n\s*/g, "\n\n").trim();
 
 /** The frames of a slides or design source; agent markup, so every value is clamped. */
 export function readFrames(kind: FrameKind, html: string): FrameInfo[] {
@@ -61,7 +65,7 @@ export function readFrames(kind: FrameKind, html: string): FrameInfo[] {
       width: slides ? FRAME_SIZE.slides[0] : size(el.getAttribute("data-width"), FRAME_SIZE.design[0]),
       height: slides ? FRAME_SIZE.slides[1] : size(el.getAttribute("data-height"), FRAME_SIZE.design[1]),
       notes: notes
-        .map((n) => (n.textContent ?? "").replace(/[ \t]+/g, " ").replace(/\n\s*\n\s*/g, "\n\n").trim())
+        .map((n) => cleanNotes(n.textContent ?? ""))
         .filter(Boolean)
         .join("\n\n")
         .slice(0, MAX_NOTES),

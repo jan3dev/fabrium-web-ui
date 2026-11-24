@@ -273,6 +273,25 @@ for (const theme of ["light", "dark"] as const) {
       await page.getByRole("navigation", { name: "Design system sections" }).getByRole("button", { name: /Colors/ }).click();
       await page.getByRole("form", { name: "Add to colors" }).waitFor();
     });
+    // Level 2 edit surfaces: the slide menu with the editable notes, the layout picker, the version list, the design-system editor.
+    await sweep(`${room}?thread=${encodeURIComponent(deckRoot)}&artifact=deck`, async () => {
+      await page.getByTestId("speaker-notes").getByLabel("Speaker notes").waitFor();
+      await page.getByRole("button", { name: "Slide 2 actions" }).click();
+      await page.getByRole("menuitem", { name: "Include slide" }).waitFor();
+    });
+    await sweep(`${room}?thread=${encodeURIComponent(deckRoot)}&artifact=deck`, async () => {
+      await page.getByRole("navigation", { name: "Slides" }).getByRole("button", { name: "Add slide" }).click();
+      await page.getByRole("dialog", { name: "Add slide" }).locator("iframe").nth(9).waitFor();
+    });
+    await sweep(`${room}?thread=${encodeURIComponent(deckRoot)}&artifact=deck`, async () => {
+      await page.getByTestId("artifact-versions").click();
+      await page.getByRole("menuitemradio").first().waitFor();
+    });
+    await sweep(`${room}?thread=${encodeURIComponent(tokensRoot)}&artifact=tokens`, async () => {
+      await page.getByRole("navigation", { name: "Design system sections" }).getByRole("button", { name: /Colors/ }).click();
+      await page.getByRole("button", { name: "Edit" }).click();
+      await page.getByLabel("Value of brand").waitFor();
+    });
     await sweep(`${room}?pane=members`, text(human.username));
     await sweep(`${room}?pane=info`, text("Room info"));
     await sweep("/search", () => page.getByRole("main").waitFor());

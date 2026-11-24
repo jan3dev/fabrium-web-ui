@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { PlusIcon } from "@/components/icons";
+import { PencilIcon, PlusIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,7 +23,7 @@ const PLACEHOLDER: Record<TokenSection, string> = {
   shadows: "0 1px 2px rgb(0 0 0 / 0.2)",
 };
 
-/** Name + value for one token section. Nothing changes the artifact: the caller adds an annotation. */
+/** Name + value for one token section; the caller writes it into a version, or annotates without edit rights. */
 function AddToken({
   section,
   onAdd,
@@ -88,42 +88,60 @@ function AddToken({
  * The section nav of a design-system artifact, above the panel's stage, plus the Add
  * control for token sections. The panel renders the stage (the markdown overview or the
  * sandboxed frame); nothing here renders agent markup. `onAdd` is undefined for agents,
- * which hides the Add control.
+ * which hides the Add control. `onEditChange` (users with edit rights) shows the Edit
+ * toggle that puts the page in edit mode.
  */
 export function DesignSystemNav({
   sections,
   section,
   onSectionChange,
   onAdd,
+  editing = false,
+  onEditChange,
 }: {
   /** `designSystemSections(system)`: the panel computes them once. */
   sections: readonly DesignSystemSectionInfo[];
   section: DesignSystemSection;
   onSectionChange: (section: DesignSystemSection) => void;
   onAdd?: (section: TokenSection, name: string, value: string) => void;
+  editing?: boolean;
+  onEditChange?: (editing: boolean) => void;
 }) {
   return (
     <div className="shrink-0" data-testid="design-system-nav">
       {/* Wraps instead of scrolling: eight sections do not fit a narrow panel on one line. */}
-      <nav aria-label="Design system sections" className="flex flex-wrap gap-1 border-b border-border px-3 py-2">
-        {sections.map((s) => (
-          <button
-            key={s.key}
-            type="button"
-            aria-current={s.key === section ? "true" : undefined}
-            onClick={() => onSectionChange(s.key)}
-            className={cn(
-              "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-pill px-2.5 text-caption1 font-medium transition-colors",
-              s.key === section
-                ? "bg-surface-selected text-text-primary"
-                : "text-text-secondary hover:bg-surface-secondary hover:text-text-primary",
-            )}
+      <div className="flex items-start gap-2 border-b border-border px-3 py-2">
+        <nav aria-label="Design system sections" className="flex min-w-0 flex-1 flex-wrap gap-1">
+          {sections.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              aria-current={s.key === section ? "true" : undefined}
+              onClick={() => onSectionChange(s.key)}
+              className={cn(
+                "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-pill px-2.5 text-caption1 font-medium transition-colors",
+                s.key === section
+                  ? "bg-surface-selected text-text-primary"
+                  : "text-text-secondary hover:bg-surface-secondary hover:text-text-primary",
+              )}
+            >
+              {s.label}
+              {s.key === "overview" ? null : <span className="text-text-tertiary tabular-nums">{s.count}</span>}
+            </button>
+          ))}
+        </nav>
+        {onEditChange ? (
+          <Button
+            size="xs"
+            variant={editing ? "primary" : "utility"}
+            aria-pressed={editing}
+            onClick={() => onEditChange(!editing)}
           >
-            {s.label}
-            {s.key === "overview" ? null : <span className="text-text-tertiary tabular-nums">{s.count}</span>}
-          </button>
-        ))}
-      </nav>
+            {editing ? null : <PencilIcon />}
+            {editing ? "Done" : "Edit"}
+          </Button>
+        ) : null}
+      </div>
       {onAdd && isTokenSection(section) ? <AddToken key={section} section={section} onAdd={onAdd} /> : null}
     </div>
   );

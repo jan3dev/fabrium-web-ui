@@ -4,6 +4,7 @@ import { ArtifactCard } from "./artifact-card";
 
 const artifact: ArtifactVersion = {
   eventId: "$v1",
+  headEventId: "$v1",
   identifier: "pricing-page",
   kind: "html",
   title: "Pricing page",

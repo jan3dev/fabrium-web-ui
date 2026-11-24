@@ -75,6 +75,7 @@ function setup() {
     leaveRoom: vi.fn(),
     setTyping: vi.fn(async () => {}),
     setPresence: vi.fn(async () => {}),
+    fetchThreadRelations: vi.fn(async () => ({ chunk: [] })),
     sendMessage: vi.fn(async (input: Record<string, unknown>) => {
       const event_id = `$${++n}`
       sent.push({ type: 'm.room.message', input, event_id })

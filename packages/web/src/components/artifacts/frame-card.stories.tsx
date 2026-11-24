@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { buildArtifactSrcdoc } from "@/lib/artifacts/srcdoc";
+import { FrameMenu } from "./artifact-menus";
 import { FrameCard, FrameThumb } from "./frame-card";
 
 const DECK = `<!doctype html><html><head><style>section{display:flex;align-items:center;justify-content:center;font:600 140px system-ui;background:rgb(240,244,255)}</style></head>
@@ -27,6 +28,14 @@ export const Live: Story = {};
 export const Active: Story = { args: { active: true } };
 
 export const Skipped: Story = { args: { frame: { ...SLIDE, skip: true } } };
+
+/** Changed in the shown version, by an agent; with edit rights the card holds the slide menu. */
+export const ChangedEditable: Story = {
+  args: {
+    changed: "agent",
+    menu: <FrameMenu kind="slides" index={1} count={2} onAction={() => {}} />,
+  },
+};
 
 /** Off screen or past the twelve live frames: number only. */
 export const NotLive: Story = { args: { live: false } };

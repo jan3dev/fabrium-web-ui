@@ -34,6 +34,14 @@ export const Slides: Story = {};
 
 export const Grid: Story = { args: { grid: true } };
 
+/** With edit rights: slide menus, drag to move, Add at the end; slide 2 changed by a person. */
+export const Editable: Story = {
+  args: {
+    edit: { kind: "slides", onAction: () => {}, onMove: () => {} },
+    changed: { indexes: [1], actor: "human" },
+  },
+};
+
 const bar = (children: React.ReactNode) => <div className="flex items-center gap-1 p-2">{children}</div>;
 
 export const SlideControls: Story = {

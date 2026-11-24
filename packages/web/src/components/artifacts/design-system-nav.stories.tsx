@@ -110,3 +110,21 @@ export const Full: Story = {};
 export const Sparse: Story = { args: { system: SPARSE } };
 /** As an agent sees it: no Add control. */
 export const WithoutAdd: Story = { args: { onAdd: undefined } };
+/** With edit rights: the Edit toggle beside the sections. */
+export const Editable: Story = {
+  render: function Editing(args) {
+    const sections = designSystemSections(args.system);
+    const [editing, setEditing] = useState(false);
+    return (
+      <div className="max-w-xl">
+        <DesignSystemNav
+          {...args}
+          sections={sections}
+          section="colors"
+          editing={editing}
+          onEditChange={setEditing}
+        />
+      </div>
+    );
+  },
+};

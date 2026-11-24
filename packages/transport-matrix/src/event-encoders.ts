@@ -121,6 +121,12 @@ export interface TurnEnd {
   turnId?: string | null
   /** The harness's stop reason, verbatim and uninterpreted; absent when the prompt threw. */
   stopReason?: string
+  /**
+   * When the turn started, in ms: the trigger event's `origin_server_ts`
+   * (homeserver clock), else the daemon's clock at turn start. The next turn's
+   * "user edited" check reads it as its cutoff.
+   */
+  startedTs?: number
 }
 
 /** Push payloads are size-capped, and a notification body is glanceable or useless. */
@@ -149,6 +155,7 @@ export function toTurnEndBody(evt: TurnEnd, threadRoot: string): Record<string, 
     ...(evt.turnId ? { turn_id: evt.turnId } : {}),
     ...(typeof evt.stopReason === 'string' ? { stop_reason: evt.stopReason } : {}),
     produced_output: evt.producedOutput,
+    ...(Number.isFinite(evt.startedTs) ? { started_ts: evt.startedTs } : {}),
     'm.relates_to': { rel_type: 'm.thread', event_id: threadRoot },
   }
 }

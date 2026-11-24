@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   AGENT_NOTIFY_INSTRUCTIONS,
+  ARTIFACT_DESCRIPTION,
   ARTIFACT_INSTRUCTIONS,
   HANDOFF_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
@@ -159,6 +160,15 @@ describe('zooid_handoff on pi ([[ZOD094]])', () => {
     const artifact = tools.find((t) => t.name === 'zooid_artifact')!
     expect(artifact.promptGuidelines).toEqual([ARTIFACT_INSTRUCTIONS])
     expect(ARTIFACT_INSTRUCTIONS).toMatch(/without being asked/)
+  })
+
+  it('zooid_artifact takes `read` and passes it to the daemon as-is', async () => {
+    const { tools, calls } = harness()
+    const artifact = tools.find((t) => t.name === 'zooid_artifact')!
+    expect(artifact.description).toBe(ARTIFACT_DESCRIPTION)
+    expect(artifact.parameters.properties.read).toEqual({ type: 'boolean' })
+    await artifact.execute('id', { identifier: 'deck', read: true }, undefined, undefined, ctx())
+    expect(calls.at(-1)).toMatchObject({ method: 'sendArtifact', params: { identifier: 'deck', read: true } })
   })
 
   it('carries the MCP server instructions and the end-your-turn rule in promptGuidelines', () => {

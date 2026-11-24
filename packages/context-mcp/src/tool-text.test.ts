@@ -46,6 +46,15 @@ describe('shared tool text ([[ZOD094]])', () => {
     expect(ARTIFACT_DESCRIPTION).toMatch(/data-skip/)
     expect(ARTIFACT_DESCRIPTION).toMatch(/data-transition="fade" or "slide"/)
     expect(ARTIFACT_DESCRIPTION).toMatch(/sections a script adds at run time are not listed/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/Every new deck also gets ten layouts in <head>: one <template data-layout="NAME">/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(
+      /blank, title, section, title-body, bullets, two-columns, table, quote, image-caption \(a placeholder box, not an image\) and closing/,
+    )
+    expect(ARTIFACT_DESCRIPTION).toMatch(/They are not slides and are not shown; the user adds slides from them\. When you restyle the deck, restyle the templates too\./)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/The user may have edited the artifact/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/`edits` apply to the latest version from any author/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/pass only `identifier` and `read: true`/)
+    expect(ARTIFACT_DESCRIPTION).toMatch(/When you were told "The user edited artifact `<identifier>`".*call `read` before you change it, with `edits` or with a full `content` rewrite/)
   })
 
   it('is exactly what the MCP server serves', async () => {

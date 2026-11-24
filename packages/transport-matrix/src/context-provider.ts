@@ -19,11 +19,14 @@ import { basename } from 'node:path'
 import type { MatrixClient } from './matrix-client.js'
 import {
   ARTIFACT_EVENT_TYPE,
+  ARTIFACT_SEARCH_PAGES,
   MAX_ARTIFACT_BYTES,
   MAX_INLINE_ARTIFACT_BYTES,
   applyArtifactEdits,
+  artifactAuthorCheck,
   readStoredArtifact,
   sha256Hex,
+  threadEventsNewestFirst,
   validateArtifactContent,
   validateArtifactInput,
   type StoredArtifact,
@@ -106,9 +109,6 @@ function indexOfNth<T>(items: Array<T | null>, n: number): number {
   }
   return -1
 }
-
-/** Pages of thread relations searched for an artifact's latest version. */
-const ARTIFACT_SEARCH_PAGES = 10
 
 export class MatrixContextProvider implements TransportContextProvider {
   constructor(private readonly opts: MatrixContextProviderOpts) {}
@@ -405,9 +405,10 @@ export class MatrixContextProvider implements TransportContextProvider {
   }
 
   /**
-   * Edits are applied here, against this agent's latest version in the
-   * thread, so every event holds a whole version and a bad edit fails back to
-   * the model instead of rendering a broken artifact.
+   * Edits are applied here, against the latest version in the thread from any
+   * allowed author (a user may have edited it since), so every event holds a
+   * whole version and a bad edit fails back to the model instead of rendering
+   * a broken artifact. `read` sends nothing and returns that version.
    */
   async sendArtifact(channelId: string, threadId: string, input: ArtifactInput): Promise<ArtifactResult> {
     validateArtifactInput(input)
@@ -415,11 +416,21 @@ export class MatrixContextProvider implements TransportContextProvider {
     if (!threadId.startsWith('$')) {
       throw new Error('unsupported: artifacts are shown in threads. Reply in a thread to use zooid_artifact.')
     }
-    const previous =
-      input.edits || !input.title ? await this.latestArtifact(channelId, threadId, input.identifier) : null
-    if (input.edits && !previous) {
-      throw new Error(`not_found: no earlier version of "${input.identifier}" by you in this thread. Send the full content.`)
+    const previous = await this.latestArtifact(channelId, threadId, input.identifier)
+    const notFound = `not_found: no version of "${input.identifier}" in this thread.`
+    if (input.read) {
+      if (!previous) throw new Error(notFound)
+      return {
+        event_id: previous.eventId,
+        identifier: input.identifier,
+        type: previous.type,
+        title: previous.title,
+        ...(previous.language ? { language: previous.language } : {}),
+        sender: previous.sender,
+        content: await this.artifactBody(previous),
+      }
     }
+    if (input.edits && !previous) throw new Error(`${notFound} Send the full content.`)
     const text = input.edits
       ? applyArtifactEdits(await this.artifactBody(previous!), input.edits)
       : input.content!
@@ -436,6 +447,7 @@ export class MatrixContextProvider implements TransportContextProvider {
     }
     const language = input.language ?? (input.type ? undefined : previous?.language)
     if (language) content.language = language
+    if (previous) content.based_on = previous.eventId
     // Measured as encoded in the event: JSON escaping can double quote- and newline-heavy code.
     if (new TextEncoder().encode(JSON.stringify(text)).byteLength <= MAX_INLINE_ARTIFACT_BYTES) {
       content.body = text
@@ -459,39 +471,47 @@ export class MatrixContextProvider implements TransportContextProvider {
     return { event_id, identifier: input.identifier }
   }
 
-  private async latestArtifact(roomId: string, threadId: string, identifier: string): Promise<StoredArtifact | null> {
-    let from: string | undefined
-    for (let page = 0; page < ARTIFACT_SEARCH_PAGES; page++) {
-      const { chunk, next_batch } = await this.opts.client.fetchThreadRelations({
-        roomId,
-        rootEventId: threadId,
-        asUserId: this.opts.asUserId,
-        eventType: ARTIFACT_EVENT_TYPE,
-        dir: 'b',
-        limit: 50,
-        from,
-      })
-      for (const ev of chunk) {
-        if (ev.sender !== this.opts.asUserId) continue
-        const stored = readStoredArtifact(ev.content)
-        if (stored?.identifier === identifier) return stored
+  /** The newest version by timeline order from any allowed author (decision D2). */
+  private async latestArtifact(
+    roomId: string,
+    threadId: string,
+    identifier: string,
+  ): Promise<(StoredArtifact & { eventId: string; sender: string }) | null> {
+    const { client, asUserId } = this.opts
+    let allowed: ((sender: string) => boolean) | undefined
+    const events = threadEventsNewestFirst(client, {
+      roomId,
+      threadId,
+      asUserId,
+      eventType: ARTIFACT_EVENT_TYPE,
+      pages: ARTIFACT_SEARCH_PAGES,
+    })
+    for await (const ev of events) {
+      const stored = readStoredArtifact(ev.content)
+      if (stored?.identifier !== identifier) continue
+      if (typeof ev.event_id !== 'string' || typeof ev.sender !== 'string') continue
+      // Our own versions pass without a state read: we are sending into the room now.
+      if (ev.sender !== asUserId) {
+        allowed ??= await artifactAuthorCheck(client, roomId, asUserId, (s) => this.opts.agentBots.has(s))
+        if (!allowed(ev.sender)) continue
       }
-      if (!next_batch) return null
-      from = next_batch
+      return { ...stored, eventId: ev.event_id, sender: ev.sender }
     }
     return null
   }
 
+  /** Inline body, or the media body only when it matches the version's sha256. */
   private async artifactBody(stored: StoredArtifact): Promise<string> {
     if (typeof stored.body === 'string') return stored.body
-    if (!this.opts.media) throw new Error('media_unavailable: cannot read the earlier version. Send the full content.')
+    if (!this.opts.media) throw new Error('media_unavailable: cannot read the latest version. Send the full content.')
+    if (!stored.sha256) throw new Error('media_mismatch: the latest version has no checksum. Send the full content.')
     const { data } = await this.opts.media.download({
       mxcUri: stored.url!,
       asUserId: this.opts.asUserId,
       maxBytes: MAX_ARTIFACT_BYTES,
     })
-    if (stored.sha256 && sha256Hex(data) !== stored.sha256) {
-      throw new Error('media_mismatch: the earlier version does not match its checksum. Send the full content.')
+    if (sha256Hex(data) !== stored.sha256) {
+      throw new Error('media_mismatch: the latest version does not match its checksum. Send the full content.')
     }
     return new TextDecoder().decode(data)
   }

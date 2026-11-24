@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import type { FrameInfo, FrameTransition } from "@/lib/artifacts/frames";
 import { PREVIEW_SANDBOX, PreviewMessage } from "@/lib/artifacts/srcdoc";
 import { cn } from "@/lib/utils";
+import type { ActorKind } from "@/model/types";
+import { ActorDot } from "./artifact-menus";
 
 /**
  * One frame of a slides or design document, drawn small: the same srcdoc in another
@@ -66,7 +68,11 @@ export function FrameThumb({
   );
 }
 
-/** A preview card: the thumb, the number and the name. The whole card selects the frame. */
+/**
+ * A preview card: the thumb, the number and the name. The whole card selects the frame.
+ * With edit rights it also holds the frame's menu (`menu`) and takes its keys; `changed`
+ * marks a frame the shown version changed, in its author's actor color.
+ */
 export function FrameCard({
   srcdoc,
   channel,
@@ -76,6 +82,10 @@ export function FrameCard({
   live,
   active,
   onSelect,
+  menu,
+  changed,
+  onKeyDown,
+  onContextMenu,
 }: {
   srcdoc: string;
   channel: string;
@@ -85,9 +95,14 @@ export function FrameCard({
   live: boolean;
   active: boolean;
   onSelect: () => void;
+  menu?: React.ReactNode;
+  changed?: ActorKind;
+  onKeyDown?: React.KeyboardEventHandler<HTMLButtonElement>;
+  onContextMenu?: React.MouseEventHandler<HTMLDivElement>;
 }) {
   return (
     <div
+      onContextMenu={onContextMenu}
       className={cn(
         "relative flex flex-col gap-1 rounded-card p-1.5 transition-colors",
         active ? "bg-surface-selected" : "hover:bg-surface-secondary",
@@ -96,11 +111,14 @@ export function FrameCard({
       <div className={cn("rounded-utility", active && "ring-2 ring-accent-brand", frame.skip && "opacity-40")}>
         <FrameThumb srcdoc={srcdoc} channel={channel} index={index} frame={frame} width={width} live={live} />
       </div>
+      {/* Above the select button's ::after, so it takes its own clicks. */}
+      {menu ? <div className="absolute top-2.5 right-2.5 z-10">{menu}</div> : null}
       {/* The button's ::after covers the card, so a click on the thumb selects too. */}
       <button
         type="button"
         aria-current={active ? "true" : undefined}
         onClick={onSelect}
+        onKeyDown={onKeyDown}
         className="flex min-w-0 cursor-pointer items-baseline gap-2 text-left text-caption1 after:absolute after:inset-0 after:rounded-card"
       >
         <span className="shrink-0 text-text-tertiary tabular-nums">{index + 1}</span>
@@ -108,6 +126,12 @@ export function FrameCard({
           {frame.name}
         </span>
         {frame.skip ? <span className="shrink-0 text-text-tertiary">Skipped</span> : null}
+        {changed ? (
+          <>
+            <ActorDot kind={changed} className="self-center" />
+            <span className="sr-only">Changed</span>
+          </>
+        ) : null}
       </button>
     </div>
   );
