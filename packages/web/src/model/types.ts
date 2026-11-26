@@ -31,6 +31,7 @@ export type TimelineKind =
   | "question"
   | "error"
   | "artifact"
+  | "preview"
   | "gap"
   | "divider";
 
@@ -96,6 +97,51 @@ export interface ArtifactVersion {
   createdAt: number;
   author: ActorSummary;
   threadRootId: string | null;
+}
+
+/** One `dev.fabrium.preview` event: an agent started or stopped a live app preview. */
+export interface PreviewEvent {
+  eventId: string;
+  /** kebab-case, unique per agent. A preview is (agent, name). */
+  name: string;
+  title: string;
+  command: string;
+  /** `expo`: a React Native app that Expo Go also opens. */
+  kind: PreviewKind;
+  action: "started" | "stopped";
+  createdAt: number;
+  author: ActorSummary;
+  threadRootId: string | null;
+}
+
+// Fabrium service API. Field names match the wire format.
+export type PreviewStatus = "starting" | "running" | "crashed" | "stopped" | "offline";
+export type PreviewKind = "web" | "expo";
+
+export interface PreviewInfo {
+  agent_id: string;
+  name: string;
+  title: string;
+  command: string;
+  kind: PreviewKind;
+  room_id: string;
+  thread_root: string;
+  status: PreviewStatus;
+  /** RFC 3339. */
+  since: string;
+  exit_code: number | null;
+}
+
+export interface PreviewDetail extends PreviewInfo {
+  /** Log text after the requested offset; pass `offset` back to get only new text. */
+  /** `reset`: the offset asked for is gone (a reconnect or a lost window); `text` replaces the log. */
+  log: { offset: number; text: string; reset?: boolean };
+}
+
+export interface PreviewSession {
+  /** The only URL the preview iframe may load. */
+  url: string;
+  expires_at: string;
 }
 
 // Fabrium service API (VM management). Field names match the wire format.

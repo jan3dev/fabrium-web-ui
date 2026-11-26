@@ -22,3 +22,14 @@ export function isGlobalSearchEnabled(): boolean {
 export function useGlobalSearchEnabled(): boolean {
   return isGlobalSearchEnabled();
 }
+
+// Live app previews: opt-in, runtime config only. Default OFF.
+let previewsEnabled = false;
+
+export function setPreviewsEnabled(value: boolean): void {
+  previewsEnabled = value;
+}
+
+export function isPreviewsEnabled(): boolean {
+  return previewsEnabled;
+}

@@ -8,6 +8,8 @@ import {
 import { ApprovalEventType, decodeApprovalRequest, decodeApprovalResponse } from "@/events/approval";
 import { ElicitationEventType } from "@/events/elicitation";
 import { ArtifactEventType, decodeArtifactVersion, type DecodedArtifact } from "@/events/fabrium-artifact";
+import { decodePreview } from "@/events/fabrium-preview";
+import { isPreviewsEnabled } from "@/client/feature-flags";
 import { readArtifactRefs, stripArtifactRefs } from "@/lib/artifacts/refs";
 import { decodeZooidEvent, isZooidLifecycle, ZooidEventType } from "@/events/zooid-events";
 import { allRoomEvents } from "@/hooks/use-timeline";
@@ -20,6 +22,7 @@ import type { AgentTurn, ApprovalView } from "./agent-activity";
 import { type TimedZooidEvent, toTranscriptItems } from "./from-zooid";
 import type {
   ActorSummary,
+  PreviewEvent,
   ArtifactVersion,
   ThreadSummary,
   TimelineEntry,
@@ -304,8 +307,11 @@ function classify(
   const type = ev.getType();
   if (type === "m.room.message") {
     const msgtype = (ev.getContent() as { msgtype?: string }).msgtype;
+    const redacted = isRedacted(ev, redactions, room);
+    const preview = redacted ? null : toPreviewEvent(ev, room, roster);
+    if (preview) return { kind: "preview", body: "", raw: preview };
     if (
-      isRedacted(ev, redactions, room) ||
+      redacted ||
       TEXT_MSGTYPES.has(msgtype ?? "") ||
       MEDIA_MSGTYPES.has(msgtype ?? "")
     ) {
@@ -374,6 +380,27 @@ function classify(
     return raw.items.length > 0 ? { kind: "agent-turn", body: "", raw } : null;
   }
   return null;
+}
+
+/**
+ * A live app preview card, or null: then the event renders as its plain-text
+ * notice. Only an agent's event counts (plan §5 trust rule), never in an
+ * encrypted room (plan: sealed rooms have no previews), and only with the flag on.
+ */
+function toPreviewEvent(ev: MatrixEvent, room: Room | null, roster: Roster | null): PreviewEvent | null {
+  // Cheapest first: most messages carry no preview.
+  const decoded = decodePreview(ev);
+  if (!decoded || !isPreviewsEnabled() || room?.hasEncryptionStateEvent()) return null;
+  const sender = ev.getSender() ?? "";
+  if (!roster?.isAgent(sender)) return null;
+  const rel = ev.getRelation();
+  return {
+    ...decoded,
+    eventId: ev.getId()!,
+    createdAt: ev.getTs(),
+    author: toActor(sender, room, roster),
+    threadRootId: rel?.rel_type === "m.thread" ? (rel.event_id ?? null) : null,
+  };
 }
 
 function toAgentTurn(
