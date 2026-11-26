@@ -82,17 +82,15 @@ export const test = base.extend<{ daemon: DaemonImpersonator; human: FreshHuman 
     const localpart = `${AS_NAMESPACE_PREFIX}architect_${randomUUID().slice(0, 8)}`;
     // AS-namespaced users are registered via /register with the AS token,
     // type m.login.application_service. No password, no captcha.
-    const reg = await fetch(
-      `${HS_URL}/_matrix/client/v3/register?access_token=${encodeURIComponent(AS_TOKEN)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "m.login.application_service",
-          username: localpart,
-        }),
-      },
-    );
+    // Header, not ?access_token=: newer Tuwunel rejects the query form (deprecated in Matrix v1.11).
+    const reg = await fetch(`${HS_URL}/_matrix/client/v3/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${AS_TOKEN}` },
+      body: JSON.stringify({
+        type: "m.login.application_service",
+        username: localpart,
+      }),
+    });
     if (!reg.ok) {
       throw new Error(`AS user registration failed: ${reg.status} ${await reg.text()}`);
     }
