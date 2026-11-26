@@ -12,7 +12,9 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { FabriumApiError } from "../../client/fabrium-api";
-import type { Agent, AgentInput, AgentList, ModelList } from "../../model/types";
+import { serverText } from "../../lib/fabrium-errors";
+import type { Agent, AgentInput, AgentList, ModelList, Project } from "../../model/types";
+import { ProjectSelector, projectGone } from "./project-selector";
 
 const NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
 /** The limit of the daemon and the control plane, in bytes of UTF-8. */
@@ -33,6 +35,13 @@ interface AgentDialogProps {
   modelsError: string | null;
   /** The people of the workspace, from `GET /agents`: the owners to choose from. */
   members: { userId: string; name: string }[];
+  /** `null` while the list loads or when it failed. */
+  projects: Project[] | null;
+  projectsError: string | null;
+  /** `can.manage` of the project list: the selector offers Create project. */
+  canManageProjects: boolean;
+  /** Creates a project. Rejects with the reason it failed. */
+  onCreateProject: (name: string) => Promise<Project>;
   /** Creates or changes the agent. Rejects with the reason it failed. */
   onSubmit: (input: AgentInput) => Promise<void>;
 }
@@ -68,6 +77,10 @@ function AgentForm({
   models,
   modelsError,
   members,
+  projects,
+  projectsError,
+  canManageProjects,
+  onCreateProject,
   onSubmit,
   submitting,
   setSubmitting,
@@ -85,17 +98,16 @@ function AgentForm({
     /** `null` until the user picks one: a new agent takes the default of the list. */
     model: agent?.model ?? null,
     tag: agent?.tag ?? "",
-    project: agent?.project ?? "",
     owner: agent?.owner ?? "",
     vm: "",
   });
+  const [projectId, setProjectId] = useState(agent?.project_id ?? null);
   const [failure, setFailure] = useState<{ message: string; step?: string } | null>(null);
   const set = (key: keyof typeof form, value: string) => setForm((f) => ({ ...f, [key]: value }));
 
   const name = form.name.trim();
   const model = form.model ?? models?.default ?? "";
   const tag = form.tag.trim();
-  const project = form.project.trim();
   const nameError =
     !initial && name !== "" && !NAME_RE.test(name)
       ? "Use a lowercase letter first, then lowercase letters, digits, or hyphens. At most 32 characters."
@@ -104,16 +116,36 @@ function AgentForm({
     new TextEncoder().encode(form.description).length > MAX_DESCRIPTION_BYTES
       ? "The description is too long (max 16 KB)."
       : undefined;
-  const showOwner = !!initial?.can.set_owner;
+  const showProject = !initial || initial.can.set_project;
+  const gone = showProject && projectGone(projects, projectId);
+  // A project agent that leaves its project: it needs an owner again.
+  const takeOut = !!initial && initial.project_id !== null && projectId === null;
+  const showOwner = projectId === null && (takeOut || !!initial?.can.set_owner);
   const showVm = !initial || (initial.vm === null && initial.can.assign);
   // A model the list no longer offers stays selectable, so an edit does not change it silently.
   const modelIds = [...new Set([...(models?.models.map((m) => m.id) ?? []), ...(model ? [model] : [])])];
+  // A project agent runs only on a project VM.
+  const usable = projectId === null ? vms : vms.filter((vm) => vm.project_id !== null);
   // A chosen VM that leaves the list stays an option, so the select shows what the request sends.
-  const vmNames = [...new Set([...vms.map((vm) => vm.name), ...(form.vm ? [form.vm] : [])])];
-  const owners = members.some((m) => m.userId === form.owner)
-    ? members
-    : [{ userId: form.owner, name: form.owner }, ...members];
+  const vmNames = [...new Set([...usable.map((vm) => vm.name), ...(form.vm ? [form.vm] : [])])];
+  const noProjectVm = projectId !== null && usable.length === 0;
+  const vmHint = noProjectVm
+    ? "A project agent runs only on a project VM. No project VM is available."
+    : form.vm
+      ? "Every agent of a VM uses its Haven API key and its GitHub token."
+      : undefined;
+  const isPerson = members.some((m) => m.userId === form.owner);
+  // A take-out offers only people; a personal agent keeps its owner as an option.
+  const owner = takeOut && !isPerson ? "" : form.owner;
+  const owners =
+    isPerson || takeOut ? members : [{ userId: form.owner, name: form.owner }, ...members];
   const liveVm = initial?.vm?.state ? initial.vm.name : null;
+
+  const pickProject = (next: string | null) => {
+    setProjectId(next);
+    // A personal VM that the project leaves out is no longer a choice.
+    if (next !== null && form.vm && !usableFor(vms, form.vm)) set("vm", "");
+  };
 
   let input: AgentInput;
   if (!initial) {
@@ -122,7 +154,7 @@ function AgentForm({
       ...(form.description ? { description: form.description } : {}),
       model,
       ...(tag ? { tag } : {}),
-      ...(project ? { project } : {}),
+      ...(projectId ? { project_id: projectId } : {}),
       ...(form.vm ? { vm: form.vm } : {}),
     };
   } else {
@@ -131,13 +163,17 @@ function AgentForm({
     if (form.description !== (initial.description ?? "")) input.description = form.description;
     if (model !== initial.model) input.model = model;
     if (tag !== (initial.tag ?? "")) input.tag = tag;
-    if (project !== (initial.project ?? "")) input.project = project;
-    if (showOwner && form.owner !== (initial.owner ?? "")) input.owner = form.owner;
+    if (showProject && projectId !== initial.project_id) input.project_id = projectId ?? "";
+    // A take-out always sends the owner, so what the user sees is what is stored.
+    if (takeOut) input.owner = owner;
+    else if (showOwner && form.owner !== (initial.owner ?? "")) input.owner = form.owner;
     if (showVm && form.vm) input.vm = form.vm;
   }
   const canSubmit =
     !submitting &&
     !descriptionError &&
+    !gone &&
+    !(takeOut && owner === "") &&
     (initial ? Object.keys(input).length > 0 : NAME_RE.test(name) && model !== "");
   const submitLabel = initial ? "Save" : "Create agent";
 
@@ -152,7 +188,7 @@ function AgentForm({
       close();
     } catch (err) {
       setFailure({
-        message: err instanceof Error ? err.message : String(err),
+        message: serverText(err),
         step: err instanceof FabriumApiError ? err.step : undefined,
       });
       setSubmitting(false);
@@ -170,8 +206,8 @@ function AgentForm({
           <DialogTitle>{initial ? "Edit agent" : "New agent"}</DialogTitle>
           {liveVm ? (
             <DialogDescription>
-              A change of the description or the model restarts every agent of the
-              VM {liveVm}. A turn in progress is lost.
+              A change of the description, the model, the owner, or the project
+              restarts every agent of the VM {liveVm}. A turn in progress is lost.
             </DialogDescription>
           ) : null}
         </DialogHeader>
@@ -247,24 +283,37 @@ function AgentForm({
             placeholder="Reviewer"
           />
         </Field>
-        <Field id="agent-project" label="Project">
-          <Input
+        {showProject ? (
+          <ProjectSelector
             id="agent-project"
-            value={form.project}
-            onChange={(e) => set("project", e.target.value)}
+            projects={projects}
+            loadError={projectsError}
+            value={projectId}
+            fallbackName={initial?.project}
+            onChange={pickProject}
+            canCreate={canManageProjects}
+            onCreate={onCreateProject}
             disabled={submitting}
-            autoComplete="off"
-            placeholder="Payments"
           />
-        </Field>
+        ) : null}
         {showOwner ? (
-          <Field id="agent-owner" label="Owner">
+          <Field
+            id="agent-owner"
+            label="Owner"
+            hint={takeOut ? "The agent leaves the project. Choose who owns it." : undefined}
+          >
             <NativeSelect
               id="agent-owner"
-              value={form.owner}
+              aria-describedby={takeOut ? "agent-owner-hint" : undefined}
+              value={owner}
               onChange={(e) => set("owner", e.target.value)}
               disabled={submitting}
             >
+              {owner === "" ? (
+                <option value="" disabled>
+                  Choose an owner
+                </option>
+              ) : null}
               {owners.map((m) => (
                 <option key={m.userId} value={m.userId}>
                   {m.name === m.userId ? m.userId : `${m.name} (${m.userId})`}
@@ -274,18 +323,10 @@ function AgentForm({
           </Field>
         ) : null}
         {showVm ? (
-          <Field
-            id="agent-vm"
-            label="VM"
-            hint={
-              form.vm
-                ? "Every agent of a VM uses its Haven API key and its GitHub token."
-                : undefined
-            }
-          >
+          <Field id="agent-vm" label="VM" hint={vmHint}>
             <NativeSelect
               id="agent-vm"
-              aria-describedby={form.vm ? "agent-vm-hint" : undefined}
+              aria-describedby={vmHint ? "agent-vm-hint" : undefined}
               value={form.vm}
               onChange={(e) => set("vm", e.target.value)}
               disabled={submitting}
@@ -299,7 +340,8 @@ function AgentForm({
             </NativeSelect>
           </Field>
         ) : null}
-        <Failure failure={failure} retry={submitLabel} />
+        {/* A gone project: the field says it. */}
+        <Failure failure={gone ? null : failure} retry={submitLabel} />
         <DialogFooter>
           <Button type="button" variant="secondary" onClick={close} disabled={submitting}>
             Cancel
@@ -312,6 +354,10 @@ function AgentForm({
     </DialogContent>
   );
 }
+
+/** A VM of the list that a project agent can use: a project VM. */
+const usableFor = (vms: AgentList["vms"], name: string) =>
+  vms.some((vm) => vm.name === name && vm.project_id !== null);
 
 /** The reason a request failed, announced; with the step of a failed admission, which a retry resumes. */
 export function Failure({

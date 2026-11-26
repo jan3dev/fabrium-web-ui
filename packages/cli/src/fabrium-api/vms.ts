@@ -7,9 +7,17 @@ export interface Vm {
   name: string
   state: string
   creator?: string | null
+  /** The project of the VM. Absent or null: a personal VM. */
+  project_id?: string | null
   launched_at: string
   [key: string]: unknown
 }
+
+export const isVm = (vm: Partial<Vm> | null): boolean =>
+  typeof vm?.id === 'string' &&
+  typeof vm.name === 'string' &&
+  typeof vm.state === 'string' &&
+  (vm.project_id == null || typeof vm.project_id === 'string')
 
 /** The VM list of the tenant, or the failure of the control plane, ready to pass on. */
 export async function fetchVms(
@@ -24,8 +32,6 @@ export async function fetchVms(
   } catch {
     body = undefined
   }
-  const isVm = (vm: Partial<Vm> | null) =>
-    typeof vm?.id === 'string' && typeof vm.name === 'string' && typeof vm.state === 'string'
   if (!Array.isArray(body) || !body.every(isVm)) {
     throw new ApiError(502, { error: 'control plane sent an invalid response' })
   }

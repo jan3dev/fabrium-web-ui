@@ -11,9 +11,12 @@ import type {
   PreviewDetail,
   PreviewInfo,
   PreviewSession,
+  Project,
+  ProjectList,
   Vm,
   VmCredentials,
   VmInstanceType,
+  VmOwnerInput,
 } from "../model/types";
 import { MatrixClientPeg } from "./peg";
 
@@ -104,6 +107,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 const vmPath = (id: string, verb = "") => `/vms/${encodeURIComponent(id)}${verb}`;
 const agentPath = (id: string) => `/agents/${encodeURIComponent(id)}`;
+const projectPath = (id: string) => `/projects/${encodeURIComponent(id)}`;
 
 export const getAccess = () => call<FabriumAccess>("GET", "/access");
 export const listAgents = () => call<AgentList>("GET", "/agents");
@@ -130,6 +134,13 @@ export const setAutoStop = (id: string, autoStopHours: number) =>
 export const stopVm = (id: string) => call<Vm>("POST", vmPath(id, "/stop"));
 export const rebootVm = (id: string) => call<Vm>("POST", vmPath(id, "/reboot"));
 export const deleteVm = (id: string) => call<void>("DELETE", vmPath(id));
+export const setVmOwner = (id: string, input: VmOwnerInput) =>
+  call<Vm>("PUT", vmPath(id, "/owner"), input);
+export const listProjects = () => call<ProjectList>("GET", "/projects");
+export const createProject = (name: string) => call<Project>("POST", "/projects", { name });
+export const renameProject = (id: string, name: string) =>
+  call<Project>("PUT", projectPath(id), { name });
+export const deleteProject = (id: string) => call<void>("DELETE", projectPath(id));
 
 // Live app previews. A preview is (agent, name); 404 = previews off or unknown preview.
 const previewPath = (agentId: string, name: string, verb = "") =>

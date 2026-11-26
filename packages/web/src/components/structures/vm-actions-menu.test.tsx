@@ -8,11 +8,14 @@ const trigger = (name = "lima") =>
   screen.getByRole("button", { name: `Actions for ${name}` });
 const labels = () => screen.getAllByRole("menuitem").map((item) => item.textContent);
 
-function setup(state: VmState = "running", busy = false) {
+/** The tests of the state table: a caller who may not move the VM to a project. */
+const NO_PROJECT = { set_project: false };
+
+function setup(state: VmState = "running", busy = false, can = NO_PROJECT) {
   const onSelect = vi.fn();
   const user = userEvent.setup();
   const view = render(
-    <VmActionsMenu vm={{ name: "lima", state }} busy={busy} onSelect={onSelect} />,
+    <VmActionsMenu vm={{ name: "lima", state, can }} busy={busy} onSelect={onSelect} />,
   );
   return { onSelect, user, ...view };
 }
@@ -53,8 +56,8 @@ describe("<VmActionsMenu>", () => {
     const user = userEvent.setup();
     render(
       <>
-        <VmActionsMenu vm={{ name: "lima", state: "running" }} busy={false} onSelect={() => {}} />
-        <VmActionsMenu vm={{ name: "kilo", state: "stopped" }} busy={false} onSelect={() => {}} />
+        <VmActionsMenu vm={{ name: "lima", state: "running", can: NO_PROJECT }} busy={false} onSelect={() => {}} />
+        <VmActionsMenu vm={{ name: "kilo", state: "stopped", can: NO_PROJECT }} busy={false} onSelect={() => {}} />
       </>,
     );
     expect(trigger("lima")).toHaveAttribute("aria-haspopup", "menu");
@@ -92,11 +95,35 @@ describe("<VmActionsMenu>", () => {
     await waitFor(() => expect(trigger()).toHaveFocus());
   });
 
+  it.each<VmState>(["stopped", "running", "pending", "stopping", "shutting-down"])(
+    "offers Move to project in %s with can.set_project",
+    async (state) => {
+      const { user } = setup(state, false, { set_project: true });
+      await user.click(trigger());
+      expect(labels()).toContain("Move to project");
+    },
+  );
+
+  it("hides Move to project without can.set_project", async () => {
+    const { user } = setup("running");
+    await user.click(trigger());
+    expect(labels()).not.toContain("Move to project");
+  });
+
+  it("has Move to project after Update credentials, and Delete last", async () => {
+    const { user, onSelect } = setup("stopped", false, { set_project: true });
+    await user.click(trigger());
+    expect(labels()).toEqual(["Start", "Update credentials", "Move to project", "Delete"]);
+    expect(screen.getByRole("separator").nextElementSibling).toHaveTextContent("Delete");
+    await user.click(screen.getByRole("menuitem", { name: "Move to project" }));
+    expect(onSelect).toHaveBeenCalledWith("project");
+  });
+
   it("disables the trigger while busy", () => {
     render(
       <>
-        <VmActionsMenu vm={{ name: "lima", state: "running" }} busy onSelect={() => {}} />
-        <VmActionsMenu vm={{ name: "kilo", state: "stopped" }} busy={false} onSelect={() => {}} />
+        <VmActionsMenu vm={{ name: "lima", state: "running", can: NO_PROJECT }} busy onSelect={() => {}} />
+        <VmActionsMenu vm={{ name: "kilo", state: "stopped", can: NO_PROJECT }} busy={false} onSelect={() => {}} />
       </>,
     );
     expect(trigger("lima")).toBeDisabled();
@@ -107,7 +134,7 @@ describe("<VmActionsMenu>", () => {
     const { onSelect, user, rerender } = setup("running");
     await user.click(trigger());
     rerender(
-      <VmActionsMenu vm={{ name: "lima", state: "running" }} busy onSelect={onSelect} />,
+      <VmActionsMenu vm={{ name: "lima", state: "running", can: NO_PROJECT }} busy onSelect={onSelect} />,
     );
     await user.click(screen.getByRole("menuitem", { name: "Stop" }));
     expect(onSelect).not.toHaveBeenCalled();

@@ -1,6 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
-import { INSTANCE_TYPES, PROFILE, VM_GONE } from "../../../test/vm-fixtures";
+import {
+  INSTANCE_TYPES,
+  PROFILE,
+  PROJECTS,
+  PROJECT_AGENT,
+  VM_GONE,
+} from "../../../test/vm-fixtures";
 import { FabriumApiError } from "../../client/fabrium-api";
 import { CreateVmDialog } from "./create-vm-dialog";
 
@@ -16,6 +22,10 @@ const meta = {
     agent: forVmCreator,
     types: INSTANCE_TYPES,
     typesError: null,
+    projects: PROJECTS,
+    projectsError: null,
+    canManageProjects: true,
+    onCreateProject: async (name) => ({ id: "0f0e0d0c0b0a09080706050403020100", name, in_use: false }),
     onSubmit: async () => {},
   },
 } satisfies Meta<typeof CreateVmDialog>;
@@ -68,4 +78,11 @@ export const LoadingTypes: Story = { args: { types: null } };
 
 export const TypesError: Story = {
   args: { types: null, typesError: "control plane unreachable" },
+};
+
+/** A project agent: the VM starts in its project, No project is disabled, and the note shows. */
+export const ForProjectAgent: Story = {
+  args: {
+    agent: { ...PROJECT_AGENT, vm: { name: "kilo" }, can: { ...PROJECT_AGENT.can, create_vm: true } },
+  },
 };

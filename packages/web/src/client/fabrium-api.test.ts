@@ -6,18 +6,24 @@ import { makeVm } from "../../test/vm-fixtures";
 import type { CreateVmRequest } from "../model/types";
 import {
   FabriumApiError,
+  createAgent,
   createPreviewSession,
+  createProject,
   createVm,
   deleteAgent,
-  getPreview,
-  listPreviews,
-  restartPreview,
+  deleteProject,
   deleteVm,
   getAccess,
+  getPreview,
   isNoAccess,
+  listPreviews,
+  listProjects,
   listVms,
   rebootVm,
   recreateVm,
+  renameProject,
+  restartPreview,
+  setVmOwner,
   startVm,
   stopPreview,
   stopVm,
@@ -339,6 +345,113 @@ describe("routes", () => {
     ).resolves.toMatchObject({ state: "pending" });
     expect(hit).toBe(`POST ${vm.id}`);
     expect(sent).toStrictEqual({ haven_api_key: "hk-1", github_token: "gh-1" });
+  });
+
+  it("listProjects gets /projects", async () => {
+    signInForVmApi();
+    const list = { projects: [{ id: "p1", name: "Payments", in_use: true }], can: { manage: true } };
+    mswServer.use(http.get(`${API}/projects`, () => HttpResponse.json(list)));
+    await expect(listProjects()).resolves.toEqual(list);
+  });
+
+  it("createProject posts the name", async () => {
+    signInForVmApi();
+    let sent: unknown;
+    mswServer.use(
+      http.post(`${API}/projects`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ id: "p1", name: "Payments", in_use: false }, { status: 201 });
+      }),
+    );
+    await expect(createProject("Payments")).resolves.toMatchObject({ id: "p1" });
+    expect(sent).toStrictEqual({ name: "Payments" });
+  });
+
+  it("renameProject puts the name to /projects/<id>", async () => {
+    signInForVmApi();
+    let hit = "";
+    let sent: unknown;
+    mswServer.use(
+      http.put(`${API}/projects/:id`, async ({ params, request }) => {
+        hit = `${request.method} ${params.id}`;
+        sent = await request.json();
+        return HttpResponse.json({ id: params.id, name: "Billing", in_use: false });
+      }),
+    );
+    await expect(renameProject("abc", "Billing")).resolves.toMatchObject({ name: "Billing" });
+    expect(hit).toBe("PUT abc");
+    expect(sent).toStrictEqual({ name: "Billing" });
+  });
+
+  it("deleteProject resolves on a 204", async () => {
+    signInForVmApi();
+    let hit = "";
+    mswServer.use(
+      http.delete(`${API}/projects/:id`, ({ params, request }) => {
+        hit = `${request.method} ${params.id}`;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    await expect(deleteProject("abc")).resolves.toBeUndefined();
+    expect(hit).toBe("DELETE abc");
+  });
+
+  it("setVmOwner puts the body to /vms/<id>/owner", async () => {
+    signInForVmApi();
+    let hit = "";
+    let sent: unknown;
+    mswServer.use(
+      http.put(`${API}/vms/:id/owner`, async ({ params, request }) => {
+        hit = `${request.method} ${params.id}`;
+        sent = await request.json();
+        return HttpResponse.json(vm);
+      }),
+    );
+    await expect(
+      setVmOwner(vm.id, { project_id: "", owner: "@ana:example.org" }),
+    ).resolves.toEqual(vm);
+    expect(hit).toBe(`PUT ${vm.id}`);
+    expect(sent).toStrictEqual({ project_id: "", owner: "@ana:example.org" });
+  });
+
+  it("createAgent and updateAgent send project_id and no project", async () => {
+    signInForVmApi();
+    const sent: unknown[] = [];
+    mswServer.use(
+      http.post(`${API}/agents`, async ({ request }) => {
+        sent.push(await request.json());
+        return HttpResponse.json({ id: "abc" }, { status: 201 });
+      }),
+      http.put(`${API}/agents/:id`, async ({ request }) => {
+        sent.push(await request.json());
+        return HttpResponse.json({ id: "abc" });
+      }),
+    );
+    await createAgent({ name: "scout", model: "glm-5-3", project_id: "p1" });
+    await updateAgent("abc", { project_id: "" });
+    expect(sent).toStrictEqual([
+      { name: "scout", model: "glm-5-3", project_id: "p1" },
+      { project_id: "" },
+    ]);
+  });
+
+  it("createVm sends project_id when it is given", async () => {
+    signInForVmApi();
+    let sent: unknown;
+    mswServer.use(
+      http.post(`${API}/vms`, async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json(vm, { status: 201 });
+      }),
+    );
+    const body: CreateVmRequest = {
+      agent: "5f0c2d7a9b3e4c1d8a6f0e2b4c6d8a0f",
+      name: "kilo",
+      haven_api_key: "hk-1",
+      project_id: "p1",
+    };
+    await createVm(body);
+    expect(sent).toStrictEqual(body);
   });
 
   it("keep a VM id inside its own path segment", async () => {

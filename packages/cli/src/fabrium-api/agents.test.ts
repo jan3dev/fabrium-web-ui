@@ -2,7 +2,8 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRecord } from './agent-records.js'
-import { ADMIN, MEMBER, createTestApi, fakeAgentStore, jsonResponse } from './test-api.js'
+import type { Project } from './project-records.js'
+import { ADMIN, MEMBER, createTestApi, fakeAgentStore, fakeProjectStore, jsonResponse } from './test-api.js'
 
 // The world of the policy tests (policy.test.ts), with Matrix behind it.
 const ANN = ADMIN // admin
@@ -16,6 +17,7 @@ const CUSCO = { id: 'i-0c0c0c0c0c0c0c0c0', name: 'cusco', state: 'running', crea
 
 let api: ReturnType<typeof createTestApi>
 let store: { records: AgentRecord[] }
+let projects: Project[]
 let vms: Record<string, unknown>[]
 const tokens: Record<string, string> = {}
 
@@ -30,6 +32,7 @@ async function place(id: string, name: string, vm: string | null, owner: string,
     model: 'glm-5-3',
     tag: null,
     project: null,
+    project_id: null,
     vm,
     rooms: vm === null ? [] : ['#general:example.org'],
     ...over,
@@ -43,7 +46,8 @@ beforeEach(async () => {
     pollIntervalMs: 5,
     instanceAgents: [{ name: 's-meow', userId: '@s-meow:example.org' }],
   })
-  store = fakeAgentStore(api.controlPlane)
+  projects = []
+  store = fakeAgentStore(api.controlPlane, projects)
   vms = [LIMA, CUSCO]
   api.controlPlane.on('GET', '/v1/vms', () => jsonResponse(200, vms))
   api.controlPlane.on('DELETE', /^\/v1\/vms\/[^/]+$/, () => new Response(null, { status: 202 }))
@@ -94,10 +98,20 @@ describe('GET /agents', () => {
       description: 'You are an expert software engineer who does code reviews.',
       model: 'glm-5-3',
       tag: 'Reviewer',
-      project: 'Payments',
-      vm: { name: 'lima', id: 'i-0123456789abcdef0', state: 'running', owner: LUIS },
+      // The text label of phase 1 is not shown.
+      project_id: null,
+      project: null,
+      vm: { name: 'lima', id: 'i-0123456789abcdef0', state: 'running', owner: LUIS, project_id: null },
       source: 'control-plane',
-      can: { edit: true, set_owner: false, assign: false, create_vm: false, delete: true, delete_needs_vm: false },
+      can: {
+        edit: true,
+        set_owner: false,
+        set_project: true,
+        assign: false,
+        create_vm: false,
+        delete: true,
+        delete_needs_vm: false,
+      },
     })
   })
 
@@ -112,7 +126,13 @@ describe('GET /agents', () => {
 
   it('a live VM without a creator has a VM owner of null', async () => {
     vms = [{ ...LIMA, creator: null }, CUSCO]
-    expect((await viewOf(ANN, 'a1'))?.vm).toEqual({ name: 'lima', id: LIMA.id, state: 'running', owner: null })
+    expect((await viewOf(ANN, 'a1'))?.vm).toEqual({
+      name: 'lima',
+      id: LIMA.id,
+      state: 'running',
+      owner: null,
+      project_id: null,
+    })
   })
 
   it('lists what the caller sees, by name, with the instance agents last', async () => {
@@ -134,10 +154,19 @@ describe('GET /agents', () => {
       description: null,
       model: null,
       tag: null,
+      project_id: null,
       project: null,
       vm: null,
       source: 'instance',
-      can: { edit: false, set_owner: false, assign: false, create_vm: false, delete: false, delete_needs_vm: false },
+      can: {
+        edit: false,
+        set_owner: false,
+        set_project: false,
+        assign: false,
+        create_vm: false,
+        delete: false,
+        delete_needs_vm: false,
+      },
     })
   })
 
@@ -148,7 +177,7 @@ describe('GET /agents', () => {
     [BOB, ['cusco']],
     [VERA, ['cusco']],
   ])('vms has the live VMs that %s can use', async (user, names) => {
-    expect((await list(user)).vms).toEqual(names.map((name) => ({ name, state: 'running' })))
+    expect((await list(user)).vms).toEqual(names.map((name) => ({ name, state: 'running', project_id: null })))
   })
 
   it('lists the people, for every role', async () => {
@@ -193,6 +222,21 @@ describe('GET /agents', () => {
   })
 })
 
+it('a project list failure on any agent route is a 502', async () => {
+  api.controlPlane.on('GET', '/v1/projects', jsonResponse(500, { error: 'database is locked' }))
+  const invalid = [502, { error: 'control plane sent an invalid response' }]
+  for (const [method, path, json] of [
+    ['GET', '/agents'],
+    ['POST', '/agents', { name: 'scout', model: 'glm-5-3' }],
+    ['PUT', '/agents/a1', { description: 'x' }],
+    ['DELETE', '/agents/p1'],
+  ] as const) {
+    const res = await as(ANA, method, path, json)
+    expect([res.status, await res.json()], `${method} ${path}`).toEqual(invalid)
+  }
+  expect(writes()).toEqual([])
+})
+
 describe('POST /agents', () => {
   it('creates a profile that the caller owns', async () => {
     const res = await as(ANA, 'POST', '/agents', {
@@ -224,7 +268,6 @@ describe('POST /agents', () => {
     ['no model', { model: undefined }],
     ['a model with a space', { model: 'glm 5' }],
     ['a tag of 201 characters', { tag: 'x'.repeat(201) }],
-    ['a project with a line break', { project: 'a\nb' }],
     ['a description of 16385 bytes', { description: 'é'.repeat(8192) + 'x' }],
     ['a description that is not a string', { description: 5 }],
     ['a vm outside the name rule', { vm: '../lima' }],
@@ -295,9 +338,9 @@ describe('PUT /agents/:id', () => {
   })
 
   it('a change of the tag rebuilds the roster', async () => {
-    const res = await as(ANA, 'PUT', '/agents/a1', { tag: 'Lead', project: '' })
+    const res = await as(ANA, 'PUT', '/agents/a1', { tag: 'Lead' })
     expect(res.status).toBe(200)
-    expect(writes().map((r) => r.body)).toEqual([{ tag: 'Lead', project: '' }])
+    expect(writes().map((r) => r.body)).toEqual([{ tag: 'Lead' }])
     expect(roster('lima')).toMatchObject({ agents: [{ name: 'reviewer', persona: 'Lead' }, { name: 'tester' }] })
     expect((roster('lima') as { agents: object[] }).agents[0]).not.toHaveProperty('project')
   })
@@ -544,6 +587,358 @@ describe('DELETE /agents/:id', () => {
     expect(res.status).toBe(204)
     expect(recordOf('a2')).toBeUndefined()
     expect(JSON.stringify(warn.mock.calls)).toContain('the roster of lima was not rebuilt')
+  })
+})
+
+// The fixture of the project writes: hub is a project VM of PR1, @gone left the workspace.
+const PR1 = '1'.repeat(32)
+const PR2 = '2'.repeat(32)
+const UNKNOWN = 'f'.repeat(32)
+const GONE = '@gone:example.org'
+const HUB = {
+  id: 'i-0b0b0b0b0b0b0b0b0',
+  name: 'hub',
+  state: 'running',
+  creator: LUIS,
+  launched_at: '2026-11-18T19:00:00Z',
+  project_id: PR1,
+}
+const project = (id: string, name: string): Project => ({
+  id,
+  name,
+  created_at: '2026-11-19T19:00:00Z',
+  updated_at: '2026-11-19T19:00:00Z',
+})
+
+describe('with projects', () => {
+  beforeEach(async () => {
+    projects.push(project(PR1, 'Payments'), project(PR2, 'Billing'))
+    fakeProjectStore(api.controlPlane, projects, { records: store.records, vms })
+    vms.push(HUB)
+    api.fake.joinSpace(GONE, 40)
+    api.fake.setMember(api.fake.spaceId, GONE, 'leave')
+    // A project profile, a project agent on hub whose stored owner left, and a personal agent on hub.
+    await place('q1', 'planner', null, ANA, { project_id: PR1 })
+    await place('q2', 'auditor', 'hub', GONE, { project_id: PR1 })
+    await place('q3', 'notes', 'hub', VERA)
+  })
+
+  describe('GET /agents', () => {
+    it('gives a project agent every field of the contract example', async () => {
+      expect(await viewOf(ANA, 'q2')).toEqual({
+        id: 'q2',
+        name: 'auditor',
+        agent_id: '@hub.auditor:example.org',
+        owner: GONE,
+        description: '',
+        model: 'glm-5-3',
+        tag: null,
+        project_id: PR1,
+        project: 'Payments',
+        vm: { name: 'hub', id: HUB.id, state: 'running', owner: LUIS, project_id: PR1 },
+        source: 'control-plane',
+        can: {
+          edit: true,
+          set_owner: false,
+          set_project: false,
+          assign: false,
+          create_vm: false,
+          delete: true,
+          delete_needs_vm: false,
+        },
+      })
+    })
+
+    it('a personal agent has project_id null, project null, vm.project_id null', async () => {
+      expect(await viewOf(VERA, 'q3')).toMatchObject({
+        project_id: null,
+        project: null,
+        vm: { name: 'hub', project_id: PR1 },
+      })
+      expect(await viewOf(ANA, 'a1')).toMatchObject({ project_id: null, project: null, vm: { project_id: null } })
+    })
+
+    it('the text label of phase 1 is not shown', async () => {
+      await place('q4', 'scribe', null, ANA, { project: 'Old' })
+      expect(await viewOf(ANA, 'q4')).toMatchObject({ project_id: null, project: null })
+    })
+
+    it('a project_id that no project has gives project null', async () => {
+      await place('q4', 'scribe', null, ANA, { project_id: UNKNOWN })
+      expect(await viewOf(ANA, 'q4')).toMatchObject({ project_id: UNKNOWN, project: null })
+    })
+
+    it('an agent whose VM is gone has vm {name} only', async () => {
+      await place('q4', 'scribe', 'quito', ANA, { project_id: PR1 })
+      expect((await viewOf(ANA, 'q4'))?.vm).toEqual({ name: 'quito' })
+    })
+
+    it('an instance agent has project_id null and every can false', async () => {
+      expect((await list(ANN)).agents.at(-1)).toMatchObject({
+        source: 'instance',
+        project_id: null,
+        project: null,
+        can: { set_project: false, edit: false },
+      })
+    })
+
+    it('vms has project_id for each live VM that the caller can use', async () => {
+      expect((await list(ANA)).vms).toEqual([
+        { name: 'hub', state: 'running', project_id: PR1 },
+        { name: 'lima', state: 'running', project_id: null },
+      ])
+    })
+
+    it('can.set_project follows the policy', async () => {
+      const setProject = async (user: string, id: string) =>
+        ((await viewOf(user, id)) as unknown as { can: { set_project: boolean } }).can.set_project
+      expect(await setProject(ANA, 'a1')).toBe(true)
+      expect(await setProject(LUIS, 'a1')).toBe(false)
+      expect(await setProject(ANA, 'q1')).toBe(false)
+      expect(await setProject(ANN, 'q1')).toBe(true)
+    })
+
+    it('still gives people', async () => {
+      expect((await list(BOB)).people.map((p) => p.user_id)).toEqual([ANA, ANN, BOB, LUIS, VERA])
+    })
+  })
+
+  describe('POST /agents with projects', () => {
+    it('creates a project agent for a caller of every role', async () => {
+      for (const user of [ANN, LUIS, ANA]) {
+        const res = await as(user, 'POST', '/agents', { name: 'scout', model: 'glm-5-3', project_id: PR1 })
+        expect(res.status, user).toBe(201)
+        expect(await res.json(), user).toMatchObject({ project_id: PR1, project: 'Payments', owner: user })
+      }
+    })
+
+    it('the caller must be a person, also for a project agent', async () => {
+      // A bot with a role, in the namespace of the VM name lima.
+      const bot = '@lima.bot:example.org'
+      api.fake.joinSpace(bot, 40)
+      for (const extra of [{}, { project_id: PR1 }, { project_id: PR1, vm: 'hub' }]) {
+        const res = await api.request('POST', '/agents', {
+          token: api.fake.openIdToken(bot),
+          json: { name: 'scout', model: 'glm-5-3', ...extra },
+        })
+        expect([res.status, await res.json()], JSON.stringify(extra)).toEqual([
+          400,
+          { error: 'owner must be a person' },
+        ])
+      }
+      expect(api.fake.userExists('@hub.scout:example.org')).toBe(false)
+      expect(writes()).toEqual([])
+    })
+
+    it('sends project_id and never project', async () => {
+      const res = await as(ANA, 'POST', '/agents', { name: 'scout', model: 'glm-5-3', project: 'Old', project_id: PR1 })
+      expect(res.status).toBe(201)
+      expect(writes().map((r) => r.body)).toEqual([{ name: 'scout', owner: ANA, model: 'glm-5-3', project_id: PR1 }])
+    })
+
+    it('a non-string project_id is 400, null and "" give a personal agent', async () => {
+      for (const projectId of [5, true, {}, [PR1]]) {
+        const res = await as(ANA, 'POST', '/agents', { name: 'scout', model: 'glm-5-3', project_id: projectId })
+        expect([res.status, await res.json()]).toEqual([400, { error: 'project_id must be a string' }])
+      }
+      expect(writes()).toEqual([])
+      for (const projectId of [null, '']) {
+        const res = await as(ANA, 'POST', '/agents', { name: 'scout', model: 'glm-5-3', project_id: projectId })
+        expect(res.status).toBe(201)
+        expect(await res.json()).toMatchObject({ project_id: null, project: null })
+      }
+      // The control plane reads "" in a POST as an unknown project: zooid leaves the field out.
+      expect(writes().map((r) => r.body)).toEqual([
+        { name: 'scout', owner: ANA, model: 'glm-5-3' },
+        { name: 'scout', owner: ANA, model: 'glm-5-3' },
+      ])
+    })
+
+    it('an unknown project_id is 400 before any Matrix step', async () => {
+      const before = adminMessages().length
+      const res = await as(ANA, 'POST', '/agents', { name: 'scout', model: 'glm-5-3', vm: 'hub', project_id: UNKNOWN })
+      expect([res.status, await res.json()]).toEqual([400, { error: 'unknown project' }])
+      expect(adminMessages()).toHaveLength(before)
+      expect(api.fake.userExists('@hub.scout:example.org')).toBe(false)
+      expect(writes()).toEqual([])
+    })
+
+    it('with vm, refuses a personal VM for a project agent', async () => {
+      const res = await as(ANA, 'POST', '/agents', { name: 'scout', model: 'glm-5-3', vm: 'lima', project_id: PR1 })
+      expect([res.status, await res.json()]).toEqual([409, { error: 'a project agent needs a project vm' }])
+      expect(api.fake.userExists('@lima.scout:example.org')).toBe(false)
+      expect(writes()).toEqual([])
+    })
+
+    it('with vm, puts a project agent on a project VM', async () => {
+      const res = await as(ANA, 'POST', '/agents', { name: 'scout', model: 'glm-5-3', vm: 'hub', project_id: PR1 })
+      expect(res.status).toBe(201)
+      expect(await res.json()).toMatchObject({ agent_id: '@hub.scout:example.org', vm: { name: 'hub', project_id: PR1 } })
+      expect(roster('hub')).toMatchObject({ agents: expect.arrayContaining([expect.objectContaining({ name: 'scout', project: 'Payments' })]) })
+    })
+  })
+
+  describe('PUT /agents/:id with projects', () => {
+    const needsProjectVm = { error: 'a project agent needs a project vm' }
+    const noOwner = { error: 'a project agent has no owner' }
+    it.each([
+      // caller, agent, body, status, answer, the body that the control plane got (null: no write)
+      [ANA, 'p1', { project_id: PR1 }, 200, { project_id: PR1, project: 'Payments' }, { project_id: PR1 }],
+      // set_project is false for a non-owner, and the 403 comes before the 400 of an unknown project.
+      [LUIS, 'p1', { project_id: PR1 }, 403, { error: 'forbidden' }, null],
+      [LUIS, 'p1', { project_id: UNKNOWN }, 403, { error: 'forbidden' }, null],
+      // a1 is on the personal VM lima. The rule holds for an admin too.
+      [ANA, 'a1', { project_id: PR1 }, 409, needsProjectVm, null],
+      [ANN, 'a1', { project_id: PR1 }, 409, needsProjectVm, null],
+      // a4 has a vm and no live VM: allowed.
+      [BOB, 'a4', { project_id: PR1 }, 200, { project_id: PR1 }, { project_id: PR1 }],
+      [ANN, 'q2', { project_id: PR2 }, 200, { project_id: PR2, project: 'Billing' }, { project_id: PR2 }],
+      // Only an admin moves.
+      [ANA, 'q1', { project_id: PR2 }, 403, { error: 'forbidden' }, null],
+      [LUIS, 'q1', { project_id: PR2 }, 403, { error: 'forbidden' }, null],
+      // A personal agent of another member on a project VM: an agents-manager does not see it.
+      [ANA, 'q3', { description: 'x' }, 404, { error: 'not found' }, null],
+      // The stored project_id is not a change (D1).
+      [ANA, 'q1', { description: 'x', project_id: PR1 }, 200, { description: 'x' }, { description: 'x' }],
+      [ANN, 'q1', { owner: BOB }, 400, noOwner, null],
+      [ANN, 'p1', { project_id: PR1, owner: BOB }, 400, noOwner, null],
+      [ANN, 'p1', { project_id: UNKNOWN }, 400, { error: 'unknown project' }, null],
+      // D2: "" for a personal agent changes nothing.
+      [ANA, 'p1', { project_id: '' }, 200, { project_id: null }, null],
+    ] as const)('%s on %s with %j is %i', async (user, id, body, status, answer, sent) => {
+      const res = await as(user, 'PUT', `/agents/${id}`, body)
+      expect([res.status, await res.json()]).toEqual([status, expect.objectContaining(answer)])
+      expect(writes().map((r) => r.body)).toEqual(sent === null ? [] : [sent])
+    })
+
+    it('a non-string project_id is 400', async () => {
+      const res = await as(ANA, 'PUT', '/agents/p1', { project_id: 5 })
+      expect([res.status, await res.json()]).toEqual([400, { error: 'project_id must be a string' }])
+      expect((await as(ANA, 'PUT', '/agents/p1', { project_id: null, description: 'x' })).status).toBe(200)
+      expect(writes().map((r) => r.body)).toEqual([{ description: 'x' }])
+    })
+
+    it('a project the control plane no longer has is 400 even when the list is stale', async () => {
+      api.controlPlane.on('PUT', /^\/v1\/agents\//, jsonResponse(400, { error: 'unknown project' }))
+      const res = await as(ANA, 'PUT', '/agents/p1', { project_id: PR1 })
+      expect([res.status, await res.json()]).toEqual([400, { error: 'unknown project' }])
+      expect(recordOf('p1')?.project_id).toBeNull()
+    })
+
+    it('leaves a project without owner when the stored owner is a person', async () => {
+      const res = await as(ANN, 'PUT', '/agents/q1', { project_id: '' })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ project_id: null, project: null, owner: ANA })
+      expect(writes().map((r) => r.body)).toEqual([{ project_id: '' }])
+      expect(recordOf('q1')).toMatchObject({ project_id: null, owner: ANA })
+    })
+
+    it('leaves a project with an owner', async () => {
+      const res = await as(ANN, 'PUT', '/agents/q1', { project_id: '', owner: BOB })
+      expect(res.status).toBe(200)
+      expect(writes().map((r) => r.body)).toEqual([{ project_id: '', owner: BOB }])
+      expect(recordOf('q1')).toMatchObject({ project_id: null, owner: BOB })
+    })
+
+    it('leave: a stored owner who left the workspace is 400, and nothing changes', async () => {
+      const res = await as(ANN, 'PUT', '/agents/q2', { project_id: '' })
+      expect([res.status, await res.json()]).toEqual([400, { error: 'owner must be a member of the workspace' }])
+      expect(writes()).toEqual([])
+      const withOwner = await as(ANN, 'PUT', '/agents/q2', { project_id: '', owner: BOB })
+      expect(withOwner.status).toBe(200)
+      expect(recordOf('q2')).toMatchObject({ project_id: null, owner: BOB })
+    })
+
+    it('only an admin takes an agent out of a project', async () => {
+      for (const user of [LUIS, ANA]) {
+        const res = await as(user, 'PUT', '/agents/q1', { project_id: '' })
+        expect([res.status, await res.json()], user).toEqual([403, { error: 'forbidden' }])
+      }
+      expect(writes()).toEqual([])
+    })
+
+    it('vm and project_id together: a project VM works, a personal VM is 409', async () => {
+      const refused = await as(ANA, 'PUT', '/agents/p1', { project_id: PR1, vm: 'lima' })
+      expect([refused.status, await refused.json()]).toEqual([409, needsProjectVm])
+      expect(api.fake.userExists('@lima.draft:example.org')).toBe(false)
+      expect(recordOf('p1')).toMatchObject({ vm: null, project_id: null })
+      const res = await as(ANA, 'PUT', '/agents/p1', { project_id: PR1, vm: 'hub' })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ agent_id: '@hub.draft:example.org', project_id: PR1 })
+      expect(writes().map((r) => r.body)).toEqual([{ project_id: PR1, vm: 'hub', rooms: ['#general:example.org'] }])
+      expect(roster('hub')).toMatchObject({
+        agents: expect.arrayContaining([expect.objectContaining({ name: 'draft', project: 'Payments' })]),
+      })
+    })
+
+    it('assigns a project profile only to a project VM', async () => {
+      // @ana owns a1 on lima, so she can use lima.
+      const refused = await as(ANA, 'PUT', '/agents/q1', { vm: 'lima' })
+      expect([refused.status, await refused.json()]).toEqual([409, needsProjectVm])
+      expect(api.fake.userExists('@lima.planner:example.org')).toBe(false)
+      expect((await as(ANA, 'PUT', '/agents/q1', { vm: 'hub' })).status).toBe(200)
+      expect(recordOf('q1')).toMatchObject({ vm: 'hub', project_id: PR1 })
+    })
+
+    it('a project profile on a VM that the caller cannot use is 403, not 409', async () => {
+      const res = await as(ANA, 'PUT', '/agents/q1', { vm: 'cusco' })
+      expect([res.status, await res.json()]).toEqual([403, { error: 'forbidden' }])
+    })
+
+    it('a name in use wins over the project VM rule', async () => {
+      await place('q5', 'reviewer', null, ANA, { project_id: PR1 })
+      const res = await as(ANA, 'PUT', '/agents/q5', { vm: 'lima' })
+      expect([res.status, await res.json()]).toEqual([409, { error: 'name in use' }])
+    })
+
+    it('a vm-creator changes the owner of a personal agent on a project VM', async () => {
+      const res = await as(LUIS, 'PUT', '/agents/q3', { owner: BOB })
+      expect(res.status).toBe(200)
+      expect(recordOf('q3')?.owner).toBe(BOB)
+    })
+
+    it('the stored owner is not a change', async () => {
+      // A project agent: without D1, owner would be "a project agent has no owner".
+      expect((await as(ANN, 'PUT', '/agents/q1', { owner: ANA, tag: 'Plan' })).status).toBe(200)
+      // A caller without set_owner who sends the stored owner again.
+      expect((await as(ANA, 'PUT', '/agents/a1', { owner: ANA, tag: 'Lead' })).status).toBe(200)
+      expect(writes().map((r) => r.body)).toEqual([{ tag: 'Plan' }, { tag: 'Lead' }])
+    })
+
+    it('a text project in the body is dropped', async () => {
+      expect((await as(ANA, 'PUT', '/agents/a1', { description: 'x', project: 'Old' })).status).toBe(200)
+      expect(writes().map((r) => r.body)).toEqual([{ description: 'x' }])
+    })
+
+    it('the roster of the VM is rebuilt after a change of project_id', async () => {
+      expect((await as(ANN, 'PUT', '/agents/q2', { project_id: PR2 })).status).toBe(200)
+      expect(roster('hub')).toMatchObject({
+        agents: expect.arrayContaining([expect.objectContaining({ name: 'auditor', project: 'Billing' })]),
+      })
+    })
+  })
+
+  describe('DELETE /agents/:id with projects', () => {
+    it('an agents-manager gets 404 for a personal agent of another member on a project VM', async () => {
+      const res = await as(ANA, 'DELETE', '/agents/q3?vm=1')
+      expect([res.status, await res.json()]).toEqual([404, { error: 'not found' }])
+      expect(writes()).toEqual([])
+    })
+
+    it('an agents-manager deletes a project agent that is not the last of its VM', async () => {
+      expect((await as(ANA, 'DELETE', '/agents/q2')).status).toBe(204)
+      expect(recordOf('q2')).toBeUndefined()
+    })
+
+    it('only who manages the project VM deletes its last agent', async () => {
+      expect((await as(ANN, 'DELETE', '/agents/q3')).status).toBe(204)
+      const refused = await as(ANA, 'DELETE', '/agents/q2?vm=1')
+      expect([refused.status, await refused.json()]).toEqual([403, { error: 'forbidden' }])
+      expect(writes().filter((r) => r.path.startsWith('/v1/vms/'))).toEqual([])
+      expect((await as(VERA, 'DELETE', '/agents/q2?vm=1')).status).toBe(204)
+      expect(writes().map((r) => [r.method, r.path])).toContainEqual(['DELETE', `/v1/vms/${HUB.id}`])
+      expect(recordOf('q2')).toBeUndefined()
+    })
   })
 })
 

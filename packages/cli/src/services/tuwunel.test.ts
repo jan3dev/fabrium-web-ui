@@ -61,10 +61,26 @@ describe('buildRunArgs', () => {
     expect(args[args.length - 1]).toBe(base.image)
   })
 
-  it('engine: podman switches the binary (caller chooses), args are identical', () => {
+  it('docker runs Tuwunel as the host user, so the files it writes in the mounts stay deletable', () => {
+    vi.spyOn(process, 'getuid').mockReturnValue(1000)
+    vi.spyOn(process, 'getgid').mockReturnValue(1001)
+    const args = buildRunArgs({ ...base, engine: 'docker' })
+    expect(args.slice(args.indexOf('--user'), args.indexOf('--user') + 2)).toEqual([
+      '--user',
+      '1000:1001',
+    ])
+    expect(args.indexOf('--user')).toBeLessThan(args.indexOf(base.image))
+    vi.restoreAllMocks()
+  })
+
+  it('engine: podman gets no --user (rootless podman already maps root to the host user)', () => {
+    vi.spyOn(process, 'getuid').mockReturnValue(1000)
+    vi.spyOn(process, 'getgid').mockReturnValue(1001)
     const docker = buildRunArgs({ ...base, engine: 'docker' })
     const podman = buildRunArgs({ ...base, engine: 'podman' })
-    expect(podman).toEqual(docker)
+    expect(podman).not.toContain('--user')
+    expect(podman).toEqual(docker.filter((a) => a !== '--user' && a !== '1000:1001'))
+    vi.restoreAllMocks()
   })
 
   it('honors a custom container name and host port', () => {

@@ -1,17 +1,29 @@
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import type { AxeResults } from "axe-core";
-import { INSTANCE_AGENT, PROFILE, makeAgent, makeVm } from "../test/vm-fixtures";
+import {
+  INSTANCE_AGENT,
+  INSTANCE_TYPES,
+  PAYMENTS,
+  PROFILE,
+  PROJECTS,
+  PROJECT_AGENT,
+  PROJECT_VM,
+  VM_GONE,
+  makeAgent,
+  makeVm,
+} from "../test/vm-fixtures";
 import { HS_URL, expect, test } from "./fixtures/daemon-impersonator";
 
 const AXE_PATH = createRequire(import.meta.url).resolve("axe-core/axe.min.js");
 const BLOCKING = new Set(["serious", "critical"]);
 
-// One VM per look of /vm: each state tone, Confidential, expired setup, no IP, no agent, two agents.
+// One VM per look of /vm: each state tone, Confidential, expired setup, no IP, no agent, two agents,
+// and a project VM. The project VM is kilo, so the stopped VM has another name.
 const VMS = [
   makeVm(),
-  makeVm({ id: "i-0123456789abcdef1", name: "kilo", state: "stopped", public_ip: null }),
+  makeVm({ id: "i-0123456789abcdef1", name: "juliet", state: "stopped", public_ip: null }),
   makeVm({
     id: "i-0123456789abcdef2",
     name: "oscar",
@@ -31,13 +43,21 @@ const VMS = [
       { id: "1b2c3d4e5f60718293a4b5c6d7e8f90a", name: "reviewer", agent_id: "@tango.reviewer:example.org" },
     ],
   }),
+  PROJECT_VM,
 ];
 
-// One agent per look of /agents: on a VM, a profile (Create VM disabled with its reason), an instance agent.
+// One agent per look of /agents: on a VM, a profile (Create VM disabled with its reason), an
+// instance agent, a project agent, and an agent whose VM is gone (Create VM enabled).
 const AGENTS = {
-  agents: [makeAgent(), PROFILE, INSTANCE_AGENT],
-  vms: [{ name: "lima", state: "running" }],
-  people: [],
+  agents: [makeAgent(), PROFILE, INSTANCE_AGENT, PROJECT_AGENT, VM_GONE],
+  vms: [
+    { name: "lima", state: "running", project_id: null },
+    { name: "kilo", state: "running", project_id: PAYMENTS.id },
+  ],
+  people: [
+    { user_id: "@ann:example.org", name: "Ann" },
+    { user_id: "@luis:example.org", name: "Luis" },
+  ],
 };
 
 // The homeserver answers on another origin, so a stubbed answer needs CORS headers.
@@ -277,6 +297,12 @@ for (const theme of ["light", "dark"] as const) {
     await page.route("**/_fabrium/v1/models", (route) =>
       route.fulfill({ json: { models: [{ id: "glm-5-3" }], default: "glm-5-3" } }),
     );
+    await page.route("**/_fabrium/v1/instance-types", (route) =>
+      route.fulfill({ json: INSTANCE_TYPES }),
+    );
+    await page.route("**/_fabrium/v1/projects", (route) =>
+      route.fulfill({ json: { projects: PROJECTS, can: { manage: true } } }),
+    );
 
     const found: string[] = [];
     // Visit a page, wait until `ready` shows, then sweep it.
@@ -286,6 +312,25 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       for (const line of await seriousViolations(page))
         found.push(`${path}\n  ${line}`);
+    }
+    // Open a dialog on the current page, sweep it, then close it. Escape closes only the layer on
+    // top: `layers` (an open project list, a rename) innermost first, then the dialog. Each press
+    // waits until its layer is gone, so a second press never reaches a layer that is closing.
+    async function sweepDialog(label: string, open: () => Promise<void>, layers: Locator[] = []) {
+      await open();
+      await page.getByRole("dialog").first().waitFor();
+      for (const line of await seriousViolations(page)) found.push(`${label}\n  ${line}`);
+      for (const layer of [...layers, page.getByRole("dialog")]) {
+        await page.keyboard.press("Escape");
+        await expect(layer).toHaveCount(0);
+      }
+    }
+    const dialog = (name: string) => page.getByRole("dialog", { name });
+    /** Opens the project list of a dialog, once the projects have loaded. */
+    async function openProjects(name: string) {
+      const field = dialog(name).getByRole("combobox", { name: "Project" });
+      await expect(field).toBeEnabled();
+      await field.click();
     }
     const room = `/room/${encodeURIComponent(roomId)}`;
     const text = (t: string | RegExp) => () =>
@@ -422,7 +467,43 @@ for (const theme of ["light", "dark"] as const) {
     );
     await sweep("/invites", () => page.getByRole("main").waitFor());
     await sweep("/vm", text("tango"));
+    await sweepDialog("/vm: Move to project", async () => {
+      await page.getByRole("button", { name: "Actions for kilo" }).click();
+      await page.getByRole("menuitem", { name: "Move to project" }).click();
+      await dialog("Move kilo to a project").waitFor();
+    });
     await sweep("/agents", text(AGENTS.agents[0].name));
+    await sweepDialog(
+      "/agents: New agent, with the project list",
+      async () => {
+        await page.getByRole("button", { name: "New agent" }).click();
+        await openProjects("New agent");
+        await page.getByRole("combobox", { name: "Search or create a project" }).fill("Bil");
+        await page.getByRole("option", { name: 'Create project "Bil"' }).waitFor();
+      },
+      [page.getByRole("listbox")],
+    );
+    await sweepDialog("/agents: Edit, taking an agent out of its project", async () => {
+      await page.getByRole("button", { name: `Edit ${PROJECT_AGENT.name}` }).click();
+      await openProjects("Edit agent");
+      await page.getByRole("option", { name: "No project" }).click();
+      // The pick closes the list: the Escape of the sweep must reach the dialog, not the list.
+      await expect(page.getByRole("listbox")).toHaveCount(0);
+      await dialog("Edit agent").getByLabel("Owner").waitFor();
+    });
+    await sweepDialog("/agents: Create VM", async () => {
+      await page.getByRole("button", { name: `Create VM for ${VM_GONE.name}` }).click();
+      await dialog(`Create a VM for ${VM_GONE.name}`).getByLabel("Instance type").waitFor();
+    });
+    await sweepDialog(
+      "/agents: Manage projects, renaming",
+      async () => {
+        await page.getByRole("button", { name: "Manage projects" }).click();
+        await dialog("Manage projects").getByRole("button", { name: "Rename Payments" }).click();
+        await page.getByRole("textbox", { name: "Name of Payments" }).waitFor();
+      },
+      [page.getByRole("textbox", { name: "Name of Payments" })],
+    );
 
     expect(found, found.join("\n\n")).toEqual([]);
   });

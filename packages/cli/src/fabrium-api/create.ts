@@ -1,13 +1,23 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { changeRecord } from './agent-records.js'
-import { loadWorld, rebuildRoster, step, type AgentContext } from './agents.js'
+import {
+  checkProject,
+  loadWorld,
+  needsProjectVm,
+  parseProjectId,
+  rebuildRoster,
+  step,
+  type AgentContext,
+} from './agents.js'
 import type { Caller } from './auth.js'
 import { MARKER, VM_NAME_RE, readBundleEnv } from './bundle.js'
 import { describeFailure, relay } from './control-plane.js'
 import { ApiError } from './errors.js'
 import { buildPayload, isStrictUserId, secretProblem } from './payload.js'
-import { sees } from './policy.js'
+import { checkPerson } from './people.js'
+import { hasProjectAgent, isProject, sees } from './policy.js'
+import { relayVm, vmView, type VmDecorator } from './vm-projects.js'
 import type { Vm } from './vms.js'
 
 /** The body of `POST /vms` (contracts section 2). */
@@ -20,6 +30,8 @@ export interface CreateRequest {
   autoStopHours?: number
   havenApiKey: string
   githubToken?: string
+  /** The project of a project VM. Absent: a personal VM of the caller. */
+  projectId?: string
 }
 
 // A control character would split a line of the secrets file (secretProblem words the line break).
@@ -84,6 +96,8 @@ export function parseCreateRequest(raw: unknown): CreateRequest {
     instanceType: body.instance_type ?? undefined,
     autoStopHours: parseAutoStopHours(body.auto_stop_hours),
     ...parseCredentials(body),
+    // null and "" make a personal VM. The control plane reads "" in a POST as an unknown project.
+    projectId: parseProjectId(body.project_id) || undefined,
   }
 }
 
@@ -103,6 +117,7 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
     const world = await loadWorld(deps, caller)
     const agent = world.records.find((r) => r.id === req.agent)
     if (!agent || !sees(world, agent)) throw new ApiError(404, { error: 'agent not found' })
+    if (req.projectId !== undefined) checkProject(world, req.projectId)
     if (agent.vm !== null && world.live.has(agent.vm)) throw new ApiError(409, { error: 'the agent has a vm' })
     if (agent.vm !== null && agent.vm !== req.name) throw bad('name must be the vm of the agent')
     if (agent.vm === null) {
@@ -113,6 +128,12 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
         throw new ApiError(409, { error: 'name in use' })
       }
     }
+    // The rule of the project VM: a personal VM for no project agent of the name.
+    if (req.projectId === undefined && (isProject(agent) || hasProjectAgent(world.records, req.name))) {
+      throw needsProjectVm()
+    }
+    // The caller is the stored creator, also of a project VM (contracts section 2, "Person").
+    await checkPerson(deps, caller.userId)
     // Safe to repeat. An agent with a VM name joins the rooms of its record, not today's FABRIUM_VM_ROOMS.
     const admitted = await deps.admission.admit({
       workstation: req.name,
@@ -126,7 +147,7 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
       )
       records = records.map((r) => (r.id === record.id ? record : r))
     }
-    await rebuildRoster(deps, req.name, records)
+    await rebuildRoster(deps, req.name, records, world.projects)
 
     // The greeting is a courtesy: a caller ID outside the strict grammar skips it instead of failing.
     const creator = isStrictUserId(caller.userId) ? caller.userId : undefined
@@ -141,15 +162,21 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
       creator,
       agent: agent.name,
     })
+    // Recorded before the call, and kept after a 5xx or no answer: the launch can go on.
+    const launch = deps.launches.add(req.name, req.projectId ?? null)
     const upstream = await deps.controlPlane.request('POST', '/v1/vms', {
       name: req.name,
       ...(req.instanceType ? { instance_type: req.instanceType } : {}),
       ...(req.autoStopHours === undefined ? {} : { auto_stop_hours: req.autoStopHours }),
       // Unconditional: a caller ID outside the strict grammar still owns the VM. The control plane checks it.
       creator: caller.userId,
+      ...(req.projectId === undefined ? {} : { project_id: req.projectId }),
       bootstrap: payload,
     })
-    if (!upstream.ok) return relay(upstream)
+    if (!upstream.ok) {
+      if (upstream.status < 500) deps.launches.drop(launch)
+      return relay(upstream)
+    }
     // The create went through: with its answer lost, the VM exists or may, so report no failure.
     let vm: unknown
     try {
@@ -163,7 +190,8 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
           'the control plane answered, but the answer could not be read. The VM may exist: check the VM list',
       })
     }
-    return new Response(JSON.stringify({ ...vm, agent_id: admitted.agentId }), {
+    // The project of the answer: a project deleted during the launch gives a personal VM.
+    return new Response(JSON.stringify({ ...vmView(caller, world.projects, vm as Vm), agent_id: admitted.agentId }), {
       status: upstream.status,
       headers: { 'content-type': 'application/json' },
     })
@@ -172,18 +200,22 @@ export function createVm(deps: CreateDeps, caller: Caller, req: CreateRequest): 
 
 /**
  * `POST /vms/:id/recreate`: the same bundle `.env` with new credentials. No creator and no agent, so the new
- * VM does not greet again. The answer of the control plane passes on as it is.
+ * VM does not greet again. The answer of the control plane passes on with the fields of the VM view.
  */
 export async function recreateVm(
   deps: CreateDeps,
   vm: Vm,
   creds: { havenApiKey: string; githubToken?: string },
+  decorate: VmDecorator,
 ): Promise<Response> {
   // The name comes from the control plane list: check it before it reaches a path.
   const env = VM_NAME_RE.test(vm.name) ? await readBundleEnv(join(deps.workstationsDir, vm.name)) : null
   if (env === null) throw new ApiError(409, { error: 'the vm has no bundle' })
   const payload = buildPayload({ env, ...creds, commit: deps.commit })
-  return relay(
-    await deps.controlPlane.request('POST', `/v1/vms/${encodeURIComponent(vm.id)}/recreate`, { bootstrap: payload }),
-  )
+  // The new VM gets the project of the registry row. Kept after a 5xx or no answer, as for a create.
+  const launch = deps.launches.add(vm.name, vm.project_id ?? null)
+  const path = `/v1/vms/${encodeURIComponent(vm.id)}/recreate`
+  const upstream = await deps.controlPlane.request('POST', path, { bootstrap: payload })
+  if (!upstream.ok && upstream.status < 500) deps.launches.drop(launch)
+  return relayVm(upstream, decorate)
 }
