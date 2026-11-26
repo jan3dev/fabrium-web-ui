@@ -1,4 +1,5 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/messages/ui/MessageComposerToolbar.tsx. Modified.
+import type { ReactNode } from "react";
 import type { Editor } from "@tiptap/react";
 
 import {
@@ -27,6 +28,7 @@ export function ComposerToolbar({
   onMention,
   onAttach,
   onEmoji,
+  tools,
   sendButton = true,
   sendDisabled,
   onSend,
@@ -39,6 +41,7 @@ export function ComposerToolbar({
   /** Absent when attachments are off. */
   onAttach?: () => void;
   onEmoji: (emoji: string) => void;
+  tools?: ReactNode;
   sendButton?: boolean;
   sendDisabled: boolean;
   onSend: () => void;
@@ -100,6 +103,7 @@ export function ComposerToolbar({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onFormattingToggle(true)}
           />
+          {tools}
         </div>
       )}
       <div className="flex shrink-0 items-center gap-1">

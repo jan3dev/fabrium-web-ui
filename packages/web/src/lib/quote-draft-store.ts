@@ -50,3 +50,14 @@ export const getQuoteDraft = quotes.get;
 export const useQuoteDraft = quotes.use;
 /** Tests only. */
 export const resetQuoteDrafts = quotes.reset;
+
+/** Text for a composer, after an @mention of `mention` (a user ID); the composer takes it once. */
+export interface ComposerFill {
+  text: string;
+  mention?: string;
+}
+
+const fills = keyedDraftStore<ComposerFill | null>(null);
+
+export const setComposerFill = fills.set;
+export const useComposerFill = fills.use;

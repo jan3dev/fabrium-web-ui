@@ -68,3 +68,10 @@ export function getPlatformKeysById(id: string): string[] | null {
   if (!shortcut) return null;
   return isMacPlatform() ? shortcut.keys : shortcut.keysWindows;
 }
+
+/** The user is typing: keys there are text, not shortcuts. */
+export function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return target.closest("input, textarea, select, [contenteditable='true']") !== null;
+}

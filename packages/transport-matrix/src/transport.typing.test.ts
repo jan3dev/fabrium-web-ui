@@ -55,6 +55,7 @@ function setup(o: { failPublish?: number } = {}) {
     }),
     setTyping: vi.fn(async () => {}),
     setPresence: vi.fn(async () => {}),
+    fetchThreadRelations: vi.fn(async () => ({ chunk: [] })),
     getJoinedMembers: vi.fn(async () => ({ joined: { [AGENT]: {}, [ALICE]: {} } })),
   }
   const elicitations = new ElicitationCorrelator()

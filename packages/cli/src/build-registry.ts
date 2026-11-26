@@ -5,6 +5,7 @@ import { DockerAcpRuntime } from '@zooid/runtime-docker'
 import {
   AcpAgentRegistry,
   isContainerRuntime,
+  previewsFor,
   resolveAgentRuntime,
   type AcpMount,
   type AcpRuntime,
@@ -387,6 +388,8 @@ function buildContextSpawns(
         rooms: agent.matrix.rooms,
         media: mediaClients.get(agent.matrix.transport),
         workspace,
+        // The workforce space lists the workspace's design systems (design modes spec §5.6).
+        workspaceSpace: transportSpace(cfg.transports[agent.matrix.transport]),
       })
       result[name] = async (threadId: string, channelId?: string, sessionKey?: string) => {
         const spawnId = registry.register({
@@ -400,6 +403,7 @@ function buildContextSpawns(
           sockPath,
           containerize: isContainerRuntime(kind),
           sendAttachment: workspace !== undefined,
+          previews: previewsFor(cfg, name),
         })
       }
     } else {
@@ -407,6 +411,11 @@ function buildContextSpawns(
     }
   }
   return result
+}
+
+/** The workforce space localpart of a Matrix transport (`space`, default `dev`, as start-daemon). */
+function transportSpace(transport: ZooidConfig['transports'][string] | undefined): string | undefined {
+  return transport?.type === 'matrix' ? (transport.space ?? 'dev') : undefined
 }
 
 /** Agents on configured Matrix transports get a context listener and binding. */

@@ -1,0 +1,7 @@
+---
+'@zooid/core': minor
+'@zooid/transport-matrix': minor
+'@zooid/context-mcp': minor
+---
+
+Users can now write artifact versions too. `zooid_artifact` resolves the latest version of an identifier from any allowed author (a joined room member who is in the room's project space, so not a guest, and whose power level reaches the level for `dev.fabrium.artifact.version`), not only the agent's own, and applies `edits` to it, so an agent edit after a user edit keeps the user's change. A failed edit now tells the agent to `read` first instead of resending its own copy. `{ identifier, read: true }` returns the latest version's content (media bodies only when they match their sha256). Agent versions carry `based_on`, the event ID of the version they were made from. `dev.zooid.turn.end` carries `started_ts`, when the turn started in ms (the triggering event's `origin_server_ts`, else the daemon's clock). When a user changed an artifact since the agent's previous turn in the thread started, including while that turn ran, the next turn's prompt ends with one line per artifact: ``The user edited artifact `<identifier>`: <summary>``, with the user's summary reduced to one clean, short line. The tool text asks for ten slide layouts in every new deck, one `<template data-layout="NAME">` in `<head>` each (`blank`, `title`, `section`, `title-body`, `bullets`, `two-columns`, `table`, `quote`, `image-caption`, `closing`), kept in the deck's design when it is restyled; sections inside a `<template>` do not count as slides when the daemon checks a deck.

@@ -22,6 +22,66 @@ export interface ArtifactRef {
   event_id: string;
   target: ArtifactRefTarget;
   note: string;
+  /**
+   * Set when the annotation is on a live app preview, not an artifact: the
+   * preview's agent and the page path. `identifier` is the preview name,
+   * `event_id` its latest event, `version` 0.
+   */
+  preview?: { agent: string; path: string };
+}
+
+/**
+ * A message of comments the user did not send to the agent (spec §6.6): the daemon's router wakes
+ * no agent for it. It carries no typed text, only the references.
+ */
+export const QUIET_FIELD = "dev.fabrium.quiet";
+
+/** A reference waiting in the composer. The extra fields stay local; `wireRef` drops them. */
+export interface ArtifactRefDraft extends ArtifactRef {
+  /** "Send to agent" is off: it goes in a quiet message of its own. */
+  quiet?: boolean;
+  /** The agent a sent comment mentions: the artifact's author or the preview's agent. */
+  agent?: string;
+  /** A drawn markup (spec §3.8 Draw): its frame and stroke, in the frame's own pixels, shown until sent. */
+  sketch?: { index: number; points: readonly Point[] };
+}
+
+export function wireRef({ quiet: _quiet, agent: _agent, sketch: _sketch, ...ref }: ArtifactRefDraft): ArtifactRef {
+  return ref;
+}
+
+export type Point = readonly [x: number, y: number];
+
+/**
+ * A drawn markup as a reference: the frame and the stroke's bounding box in the frame's own
+ * pixels (0 to `width` by 0 to `height`, whatever the zoom), clamped to the frame. It is a text
+ * target, so the agent reads it in the body like any annotation. Null when the stroke misses
+ * the frame or is a dot.
+ * ponytail: the region only, never the stroke's shape; send the path when an agent can use it.
+ */
+export function sketchTarget(
+  unit: "slide" | "artboard",
+  index: number,
+  name: string,
+  points: readonly Point[],
+  width: number,
+  height: number,
+): ArtifactRefTarget | null {
+  if (points.length === 0) return null;
+  const clamp = (v: number, max: number) => Math.round(Math.min(max, Math.max(0, v)));
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const x = clamp(Math.min(...xs), width);
+  const y = clamp(Math.min(...ys), height);
+  const w = clamp(Math.max(...xs), width) - x;
+  const h = clamp(Math.max(...ys), height) - y;
+  if (w === 0 || h === 0) return null;
+  const frame = `${unit} ${index + 1}`;
+  return {
+    kind: "text",
+    where: `sketch on ${frame}${name ? ` "${name}"` : ""}`.slice(0, 200),
+    text: `region x=${x}, y=${y}, w=${w}, h=${h} on ${frame}, in its own pixels (${width}x${height})`,
+  };
 }
 
 const str = (v: unknown, max: number) =>
@@ -46,6 +106,20 @@ export function readTarget(raw: unknown): ArtifactRefTarget | null {
   return null;
 }
 
+/** A page path from a frame: one line, it lands in the user's message unfenced. */
+export function onePath(raw: unknown): string | null {
+  const path = str(raw, 500)?.replace(/\s+/g, "").trim();
+  return path?.startsWith("/") ? path : null;
+}
+
+function readPreview(raw: unknown): ArtifactRef["preview"] | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const agent = str(o.agent, 255);
+  const path = onePath(o.path);
+  return agent && path ? { agent, path } : undefined;
+}
+
 /** Valid refs from message content (or a frame's message); anything malformed is dropped. */
 export function readArtifactRefs(content: unknown): ArtifactRef[] {
   const raw = (content as Record<string, unknown> | null)?.[
@@ -60,6 +134,7 @@ export function readArtifactRefs(content: unknown): ArtifactRef[] {
     const eventId = str(o.event_id, 255);
     if (!target || !identifier || !eventId || typeof o.version !== "number")
       return [];
+    const preview = readPreview(o.preview);
     return [
       {
         identifier,
@@ -68,6 +143,7 @@ export function readArtifactRefs(content: unknown): ArtifactRef[] {
         event_id: eventId,
         target,
         note: str(o.note, MAX_NOTE) ?? "",
+        ...(preview ? { preview } : {}),
       },
     ];
   });
@@ -87,7 +163,9 @@ function fence(lang: string, content: string): string {
 export function formatArtifactRefs(refs: readonly ArtifactRef[]): string {
   return refs
     .map((r, i) => {
-      const head = `[Annotation ${i + 1} on artifact \`${r.identifier}\` v${r.version} "${r.title}" (event ${r.event_id})]`;
+      const head = r.preview
+        ? `[Annotation ${i + 1} on the preview \`${r.identifier}\` "${r.title}" at ${r.preview.path} (event ${r.event_id})]`
+        : `[Annotation ${i + 1} on artifact \`${r.identifier}\` v${r.version} "${r.title}" (event ${r.event_id})]`;
       const t = r.target;
       const lines =
         t.kind === "element"
@@ -126,8 +204,8 @@ export function stripArtifactRefs(
 }
 
 // Annotations waiting in a thread composer, keyed like the quote drafts.
-const EMPTY: ArtifactRef[] = [];
-const drafts = keyedDraftStore<ArtifactRef[]>(EMPTY);
+const EMPTY: ArtifactRefDraft[] = [];
+const drafts = keyedDraftStore<ArtifactRefDraft[]>(EMPTY);
 
 export const getArtifactRefDrafts = drafts.get;
 export const useArtifactRefDrafts = drafts.use;
@@ -135,7 +213,7 @@ export const useArtifactRefDrafts = drafts.use;
 export function setArtifactRefDrafts(
   roomId: string,
   threadId: string | null,
-  refs: ArtifactRef[],
+  refs: ArtifactRefDraft[],
 ) {
   drafts.set(roomId, threadId, refs.length ? refs.slice(0, MAX_REFS) : EMPTY);
 }
@@ -144,7 +222,7 @@ export function setArtifactRefDrafts(
 export function addArtifactRefDraft(
   roomId: string,
   threadId: string | null,
-  ref: ArtifactRef,
+  ref: ArtifactRefDraft,
 ): boolean {
   const refs = drafts.get(roomId, threadId);
   if (refs.length >= MAX_REFS) return false;

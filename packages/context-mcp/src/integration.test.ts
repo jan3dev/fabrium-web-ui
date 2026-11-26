@@ -74,6 +74,7 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
     const list = await client.listTools()
     expect(list.tools.map((t) => t.name).sort()).toEqual([
       'zooid_artifact',
+      'zooid_design_system',
       'zooid_get_history',
       'zooid_get_members',
       'zooid_get_recent_threads',

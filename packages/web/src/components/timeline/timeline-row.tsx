@@ -4,10 +4,12 @@ import type * as React from "react";
 
 import { TurnBlock } from "@/components/agents/activity/turn-block";
 import { ArtifactCard } from "@/components/artifacts/artifact-card";
+import { PreviewCard } from "@/components/previews/preview-card";
 import { useArtifactRoute } from "@/hooks/use-artifacts";
+import { usePreviewRoute } from "@/hooks/use-previews";
 import type { DecodedZooidEvent } from "@/events/zooid-events";
 import type { AgentTurn, ApprovalView } from "@/model/agent-activity";
-import type { ArtifactVersion, TimelineEntry } from "@/model/types";
+import type { ArtifactVersion, PreviewEvent, TimelineEntry } from "@/model/types";
 import { ApprovalCard } from "./approval-card";
 import { ErrorTile } from "./error-tile";
 import { MessageRow, type MessageRowActions } from "./message-row";
@@ -41,6 +43,21 @@ function ArtifactRow({ artifact }: { artifact: ArtifactVersion }) {
         artifact={artifact}
         active={route.identifier === artifact.identifier && route.versionEventId === artifact.eventId}
         onOpen={() => route.open(artifact.identifier, artifact.eventId, artifact.threadRootId)}
+      />
+    </AgentCard>
+  );
+}
+
+/** Opens the preview panel beside this preview's thread. */
+function PreviewRow({ preview }: { preview: PreviewEvent }) {
+  const route = usePreviewRoute();
+  const ref = { agentId: preview.author.id, name: preview.name };
+  return (
+    <AgentCard>
+      <PreviewCard
+        preview={preview}
+        active={route.current?.agentId === ref.agentId && route.current.name === ref.name}
+        onOpen={() => route.open(ref, preview.threadRootId)}
       />
     </AgentCard>
   );
@@ -106,6 +123,8 @@ export function TimelineRow({
       );
     case "artifact":
       return <ArtifactRow artifact={message.raw as ArtifactVersion} />;
+    case "preview":
+      return <PreviewRow preview={message.raw as PreviewEvent} />;
     case "agent-turn":
       return (
         <AgentCard>

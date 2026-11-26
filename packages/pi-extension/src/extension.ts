@@ -4,7 +4,9 @@ import {
   ARTIFACT_KINDS,
   ARTIFACT_INSTRUCTIONS,
   callDaemon,
+  DESIGN_SYSTEM_DESCRIPTION,
   HANDOFF_DESCRIPTION,
+  SEND_ATTACHMENT_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
   type DaemonRequest,
 } from '@zooid/context-mcp'
@@ -144,6 +146,21 @@ export default function createExtension(pi: ExtensionAPI, deps: Deps = {}): void
     },
   })
 
+  // Exports go back as files (design modes spec §6.9). The daemon scopes it to this thread
+  // and refuses it where the transport cannot send attachments.
+  pi.registerTool({
+    name: 'zooid_send_attachment',
+    label: 'Attach a file',
+    description: SEND_ATTACHMENT_DESCRIPTION,
+    parameters: {
+      type: 'object',
+      properties: { path: { type: 'string' }, name: { type: 'string' }, caption: { type: 'string' } },
+      required: ['path'],
+    },
+    execute: (_id, params, _signal, _update, ctx) =>
+      call('sendAttachment', { path: params.path, name: params.name, caption: params.caption }, ctx, true),
+  })
+
   pi.registerTool({
     name: 'zooid_start_task_threads',
     label: 'Start Zooid task threads',
@@ -212,10 +229,23 @@ export default function createExtension(pi: ExtensionAPI, deps: Deps = {}): void
           type: 'array',
           items: { type: 'object', properties: { old_str: { type: 'string' }, new_str: { type: 'string' } }, required: ['old_str', 'new_str'] },
         },
+        read: { type: 'boolean' },
+        assets: { type: 'array', items: { type: 'string' } },
       },
       required: ['identifier'],
     },
     execute: (_id, params, _signal, _update, ctx) => call('sendArtifact', params, ctx, true),
+  })
+
+  pi.registerTool({
+    name: 'zooid_design_system',
+    label: 'Read design systems',
+    description: DESIGN_SYSTEM_DESCRIPTION,
+    parameters: {
+      type: 'object',
+      properties: { identifier: { type: 'string' }, room_id: { type: 'string' }, component: { type: 'string' } },
+    },
+    execute: (_id, params, _signal, _update, ctx) => call('designSystem', params, ctx, true),
   })
 
   // Role-conditional gating ([[ZOD084]]). Fail open on any error — the read

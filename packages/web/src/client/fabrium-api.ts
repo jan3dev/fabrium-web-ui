@@ -8,6 +8,9 @@ import type {
   CreateVmRequest,
   FabriumAccess,
   ModelList,
+  PreviewDetail,
+  PreviewInfo,
+  PreviewSession,
   Project,
   ProjectList,
   Vm,
@@ -138,3 +141,22 @@ export const createProject = (name: string) => call<Project>("POST", "/projects"
 export const renameProject = (id: string, name: string) =>
   call<Project>("PUT", projectPath(id), { name });
 export const deleteProject = (id: string) => call<void>("DELETE", projectPath(id));
+
+// Live app previews. A preview is (agent, name); 404 = previews off or unknown preview.
+const previewPath = (agentId: string, name: string, verb = "") =>
+  `/previews/${encodeURIComponent(agentId)}/${encodeURIComponent(name)}${verb}`;
+
+export const listPreviews = (roomId: string) =>
+  call<PreviewInfo[]>("GET", `/previews?room=${encodeURIComponent(roomId)}`);
+export const getPreview = (agentId: string, name: string, logOffset: number) =>
+  call<PreviewDetail>("GET", previewPath(agentId, name, `?log_offset=${logOffset}`));
+/** The only source of a preview's iframe URL. */
+export const createPreviewSession = (agentId: string, name: string) =>
+  call<PreviewSession>("POST", previewPath(agentId, name, "/session"));
+export const restartPreview = (agentId: string, name: string) =>
+  call<void>("POST", previewPath(agentId, name, "/restart"));
+export const stopPreview = (agentId: string, name: string) =>
+  call<void>("POST", previewPath(agentId, name, "/stop"));
+/** Where the room's agents work now (the agent cursor); untrusted, read with `readAgentFocus`. */
+export const listAgentFocus = (roomId: string) =>
+  call<unknown>("GET", `/previews/focus?room=${encodeURIComponent(roomId)}`);

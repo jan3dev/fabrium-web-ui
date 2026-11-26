@@ -34,6 +34,8 @@ export interface FabriumApiDeps extends FabriumApiConfig {
   /** The agents of the daemon config: every caller sees them, read-only. */
   instanceAgents?: readonly { name: string; userId: string }[]
   getSpaceRoomId(): string | undefined
+  /** This daemon has `previews:` in zooid.yaml: new VMs get `previews: true`. */
+  previews: boolean
   // Test seams.
   now?: () => number
   controlPlaneTimeoutMs?: number
@@ -71,6 +73,7 @@ export function fabriumApi(deps: FabriumApiDeps): {
     workforceSpace: deps.workforceSpace,
     getSpaceRoomId: deps.getSpaceRoomId,
     rooms: deps.vmRooms,
+    previews: deps.previews,
     workstationsDir,
     registrationsDir: join(deps.zooidHome, 'data', 'matrix', 'config', 'registrations'),
     whoamiTimeoutMs: deps.whoamiTimeoutMs,

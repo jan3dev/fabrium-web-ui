@@ -86,6 +86,14 @@ describe('fabrium-agent-sync', () => {
   }
   const lines = (out: string) => out.trim().split('\n')
 
+  it('turns previews on in zooid.yaml when the bundle has FABRIUM_PREVIEWS=true', async () => {
+    expect((await sync()).code).toBe(0)
+    expect(JSON.parse(read('zooid.yaml'))).not.toHaveProperty('previews')
+    writeFileSync(join(zooid(), '.env'), 'FABRIUM_PREVIEWS=true\n', { flag: 'a' })
+    expect((await sync()).code).toBe(0)
+    expect(JSON.parse(read('zooid.yaml')).previews).toBe(true)
+  })
+
   it('writes zooid.yaml and the files of each agent', async () => {
     const { code, out } = await sync()
     expect(code).toBe(0)

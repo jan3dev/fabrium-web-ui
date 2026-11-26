@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs } from "@/components/ui/tabs";
 import { AppearanceSection } from "./appearance-section";
+import { DesignSystemsSettings } from "./design-systems-section";
 import { NotificationSection } from "./notification-section";
 import { ProfileSection } from "./profile-section";
 
@@ -35,12 +36,15 @@ export function SettingsDialog({
             { value: "profile", label: "Profile" },
             { value: "notifications", label: "Notifications" },
             { value: "appearance", label: "Appearance" },
+            { value: "design-systems", label: "Design systems" },
           ]}
         >
           {tab === "profile" ? (
             <ProfileSection onSaved={() => onOpenChange(false)} />
           ) : tab === "notifications" ? (
             <NotificationSection pushGatewayUrl={pushGatewayUrl} vapidPublicKey={vapidPublicKey} />
+          ) : tab === "design-systems" ? (
+            <DesignSystemsSettings />
           ) : (
             <AppearanceSection />
           )}

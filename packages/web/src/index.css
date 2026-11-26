@@ -166,6 +166,8 @@
 	--color-risk-transparent: var(--risk-transparent);
 	--color-money: var(--money);
 	--color-money-transparent: var(--money-transparent);
+	--color-board-fill: var(--board-fill);
+	--color-board-hue: var(--board-hue);
 }
 
 /*

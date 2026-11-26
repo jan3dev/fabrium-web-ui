@@ -535,18 +535,23 @@ export class MatrixClient {
     return (await r.json()) as { type?: string; state_key?: string; content?: unknown }[]
   }
 
-  async fetchRoomName(roomId: string, asUserId: string): Promise<string | null> {
+  /** One state event's content (empty state key), or null when the room has none. */
+  async fetchStateContent(roomId: string, eventType: string, asUserId: string): Promise<unknown> {
     const url =
       `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}` +
-      `/state/m.room.name/?user_id=${encodeURIComponent(asUserId)}`
+      `/state/${encodeURIComponent(eventType)}/?user_id=${encodeURIComponent(asUserId)}`
     const r = await this.fetch(url, {
       method: 'GET',
       headers: { Authorization: `Bearer ${this.asToken}` },
     })
     if (r.status === 404) return null
-    if (!r.ok) throw new Error(`fetchRoomName(${roomId}) failed: ${r.status}`)
-    const body = (await r.json()) as { name?: string }
-    return body.name ?? null
+    if (!r.ok) throw new Error(`fetchStateContent(${roomId}, ${eventType}) failed: ${r.status}`)
+    return r.json()
+  }
+
+  async fetchRoomName(roomId: string, asUserId: string): Promise<string | null> {
+    const body = (await this.fetchStateContent(roomId, 'm.room.name', asUserId)) as { name?: string } | null
+    return body?.name ?? null
   }
 
   private async sendEvent(

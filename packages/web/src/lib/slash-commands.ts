@@ -1,3 +1,5 @@
+import { CREATE_TYPES } from "@/lib/artifacts/hint";
+
 export interface ParsedSlashCommand {
   eventType: string;
   content: Record<string, unknown>;
@@ -51,8 +53,15 @@ export function parseSlashCommand(
 }
 
 export function listSlashCommands(ctx: { threadScoped: boolean } = { threadScoped: false }): SlashCommandMeta[] {
-  return COMMANDS.flatMap((c) => {
+  const commands = COMMANDS.flatMap((c) => {
     if (c.threadScopedOnly && !ctx.threadScoped) return [];
     return c.names.map((name) => ({ name, description: c.description, source: "client" as const }));
   });
+  // Explicit mode (spec §6.8): the composer sends these as a message with an artifact hint.
+  const create = CREATE_TYPES.map((t) => ({
+    name: t.type,
+    description: `Ask the agent for ${t.label.toLowerCase()}`,
+    source: "client" as const,
+  }));
+  return [...commands, ...create];
 }

@@ -11,6 +11,7 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { MatrixClientPeg } from "./client/peg";
+import { PresenterView } from "./components/artifacts/presenter-view";
 import { AuthCallback } from "./components/auth/auth-callback";
 import { Login } from "./components/auth/login";
 import { Register } from "./components/auth/register";
@@ -168,6 +169,8 @@ function AppRoutes({ config }: { config: AppConfig }) {
         }
       />
       <Route path="/auth/callback" element={<AuthCallback homeserverUrl={config.homeserverUrl} />} />
+      {/* A second window that takes the deck from the panel that opened it; no sync of its own. */}
+      <Route path="/present/:session" element={<PresenterView />} />
     </Routes>
   );
 }

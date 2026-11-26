@@ -7,7 +7,7 @@ Everything an instance runs comes from this repo as one Docker Compose project
 |---|---|---|
 | `tuwunel` | `ghcr.io/matrix-construct/tuwunel` pinned by digest | Matrix homeserver (chats, accounts, rooms). |
 | `zooid` | `fabrium-zooid:<git sha>`, built from `deploy/Dockerfile` | The daemon (`zooid start`). Starts one container per agent through the engine socket (podman's Docker-compatible socket on a box, Docker's on a laptop). |
-| `web` | `fabrium-web:<git sha>`, built from `deploy/Dockerfile` | Caddy serving `packages/web/dist`, `/config.json`, and proxying `/_matrix/*` to Tuwunel and `/_fabrium/*` to the daemon ([VM management](#vm-management-from-the-web-ui)). HTTPS is automatic for a public domain. |
+| `web` | `fabrium-web:<git sha>`, built from `deploy/Dockerfile` | Caddy serving `packages/web/dist`, `/config.json`, and proxying `/_matrix/*` to Tuwunel and `/_fabrium/*` to the daemon ([VM management](#vm-management-from-the-web-ui)), and the preview domain to the daemon when it is set ([Live app previews](#live-app-previews)). HTTPS is automatic for a public domain. |
 
 Per-instance state lives outside the repo, under `ZOOID_HOME` (default `~/zooid`):
 
@@ -40,7 +40,7 @@ deploy.log                    one line per successful deploy
 | `deploy/restore.sh` | Extracts a backup into an empty `ZOOID_HOME`. |
 | `deploy/compose.sh` | `docker compose` bound to this instance, for `logs`, `ps`, `stop`, `start`, `down`. |
 | `deploy/add-workstation.sh` | Admits an agent VM: writes its tokens and tuwunel registration, adds its users to the workforce space and its rooms, publishes its roster entry. Refuses a workstation that the VM API admitted. See [Agent VM](#agent-vm-workstation). |
-| `deploy/agent-vm/prepare-image.sh` | Prepares a VM to become the agent VM image: installs Node 22, pnpm, opencode, gh and Docker CE, builds the zooid CLI at a commit, and runs `image/install.sh`. No bundle, no agent service. See [Build a VM image](#build-a-vm-image). |
+| `deploy/agent-vm/prepare-image.sh` | Prepares a VM to become the agent VM image: installs Node 22, pnpm, opencode, gh, Docker CE and the render tools (Playwright with headless Chromium, ffmpeg, python-pptx), builds the zooid CLI at a commit, and runs `image/install.sh`. No bundle, no agent service. See [Build a VM image](#build-a-vm-image). |
 | `deploy/agent-vm/image/` | Host parts of the agent VM image: host hardening and the auto-stop watcher, with `install.sh`. See [Host hardening and auto-stop](#host-hardening-and-auto-stop). |
 | `deploy/agent-vm/provision.sh` | Runs on an agent VM made from the image: checks the bundle and the VM token, builds the zooid CLI only when `--ref` is not the image's commit, runs it as a systemd user service. Installs no package. On a VM of the web UI, it installs `fabrium-agent-sync` and runs the first sync. Idempotent; also the update path. |
 | `deploy/agent-vm/configure-agent.sh` | Runs on an agent VM after `provision.sh`, for `preset: opencode`: stores the Haven and GitHub variables in `secrets.env`, writes `opencode.json` (on a VM of the web UI, `fabrium-agent-sync` writes it), checks one opencode turn on Haven, configures git, restarts the agent. See [Configure an opencode agent](#configure-an-opencode-agent). |
@@ -365,7 +365,9 @@ the agent needs.
 ### Build a VM image
 
 An image holds everything an agent VM needs except the bundle: Node 22, pnpm, opencode (the version that the
-`agent-opencode` image pins), gh, Docker CE, linger, and the repo with the CLI built at one commit. The build reads
+`agent-opencode` image pins), gh, Docker CE, the render tools the agent exports artifacts with (Playwright with
+headless Chromium in `~/.cache/ms-playwright`, ffmpeg, python-pptx; pinned in the script, not tracked by
+`agent-images:check`), linger, and the repo with the CLI built at one commit. The build reads
 no bundle, so the image holds no token. `deploy/agent-vm/prepare-image.sh` prepares a VM for the image. It
 stops when `~/zooid` or the `fabrium-agent` unit exists: every VM made from the image would act as that VM.
 
@@ -735,7 +737,7 @@ agents of the VM from the control plane with the VM token (`/etc/fabrium/vm-toke
 
 | File | Content |
 |---|---|
-| `zooid.yaml` | JSON, which is valid YAML: the values of `~/zooid/.env`, and one block per agent with preset `opencode`, its rooms, the mention trigger, and `matrix.senders` when the control plane gives one |
+| `zooid.yaml` | JSON, which is valid YAML: the values of `~/zooid/.env` (with `previews: true` when it has `FABRIUM_PREVIEWS=true`), and one block per agent with preset `opencode`, its rooms, the mention trigger, and `matrix.senders` when the control plane gives one |
 | `agents/<name>/AGENTS.md` | The description of the agent: its instructions |
 | `agents/<name>/opencode.json` | The model of the agent, as `configure-agent.sh` writes it. Other keys stay |
 
@@ -779,3 +781,84 @@ The appservice of a VM acts as every user whose name starts with `<ws>.`. Before
 refuses the name (`409`) when a member of the workforce space has such a name, or when `@<ws>.<agent>` exists
 already. It cannot see a user who is not in the workforce space. A user outside the space with a name such as
 `lima.bob` still falls under a VM named `lima`: do not name a VM like the start of such a name.
+
+## Live app previews
+
+An agent starts an app (a dev server such as Vite or Next.js, or an Expo app), and the people in its room open it
+in the web UI beside the thread ([`PREVIEWS_SPEC.md`](../PREVIEWS_SPEC.md)). The app runs on the agent's machine.
+The daemon there tunnels it to the zooid daemon on this box over an outbound connection to
+`HOMESERVER_URL/_fabrium/v1/tunnel`, so agent VMs need no inbound port. Each viewer gets a session at
+`https://<random token>.<PREVIEW_DOMAIN>`: Caddy sends those hosts to the zooid daemon, which proxies them
+through the tunnel.
+
+Previews are off by default. Then the web UI shows none, the agents get no preview tools, and Caddy has no
+preview site.
+
+### Domain and DNS
+
+`PREVIEW_DOMAIN` must be a separate registrable domain, for example `fabrium-preview.net`, never a subdomain of
+`SITE_ADDRESS`. A preview runs code that the agent wrote, and the browser keeps it apart from Fabrium only when
+the sites differ. `deploy.sh` refuses a preview domain on Fabrium's site.
+
+| Record | Value |
+|---|---|
+| `*.<PREVIEW_DOMAIN>` `A` (and `AAAA` when the box has IPv6) | The public IP of this box |
+
+Optional: list `PREVIEW_DOMAIN` in the private section of the [Public Suffix List](https://github.com/publicsuffix/list).
+Without that, one preview's page script can set a cookie that other previews under the domain receive. The gateway
+already strips `Domain=` from cookies that apps set in responses.
+
+### Certificate
+
+The session hosts are random, so Caddy needs a wildcard certificate, which only the DNS-01 challenge gives.
+`deploy.sh` builds Caddy with the [caddy-dns](https://github.com/caddy-dns) module that `PREVIEW_DNS_PROVIDER`
+names, for example `cloudflare` (pin a version with `cloudflare@v0.2.1`). Caddy passes one token to the module:
+`dns <provider> {env.PREVIEW_DNS_TOKEN}`. That fits Cloudflare, Hetzner and DigitalOcean. For a provider that
+needs other settings, edit `deploy/Caddyfile.previews`.
+
+The token goes in its own file, `${ZOOID_HOME}/caddy.env` (mode 600), which only the `web` container reads.
+Never put it in `.env`: the daemon gets every key of `.env`, and agents inherit the daemon's environment.
+`backup.sh` includes `caddy.env`. Give the token only the right to edit DNS records of the preview domain.
+
+### Turn previews on
+
+1. Create the DNS record above.
+2. In `${ZOOID_HOME}/.env`:
+   ```sh
+   PREVIEW_DOMAIN=fabrium-preview.net
+   PREVIEW_DNS_PROVIDER=cloudflare
+   ```
+3. Create `${ZOOID_HOME}/caddy.env` with `PREVIEW_DNS_TOKEN=<token>`, and run `chmod 600` on it.
+4. Add this line to `${ZOOID_HOME}/workforce/zooid.yaml` (it reads the domain from `.env`):
+   ```yaml
+   previews: { origin: 'https://*.${PREVIEW_DOMAIN}' }
+   ```
+5. Run `deploy/deploy.sh`. It refuses to run while `.env` and `zooid.yaml` disagree.
+
+The domain is built into the images: the web UI may frame only `https://*.<PREVIEW_DOMAIN>` (its CSP), and the
+Caddy site exists only in an image built with the domain. A change of `PREVIEW_DOMAIN` therefore needs a deploy
+with a build, not `--no-build`.
+
+On this box, previews are only for `runtime: local` agents. The agents here run in containers, so the agents
+that run previews are on agent VMs.
+
+### Agent VMs
+
+A VM gets `previews: true` in its `zooid.yaml` when this box has `PREVIEW_DOMAIN` at the time the VM is admitted.
+`add-workstation.sh` writes the line into the bundle's `zooid.yaml`. The VM API writes `FABRIUM_PREVIEWS=true` into
+the bundle's `.env`, and [the agent sync](#the-agent-sync) writes `previews: true` from it. The VM needs no other
+setting: it dials `HOMESERVER_URL`. For a VM that was admitted before: on a VM made by hand, add `previews: true` to
+`~/zooid/workforce/zooid.yaml` and restart its service; on a VM of the web UI, add `FABRIUM_PREVIEWS=true` to
+`~/zooid/.env`, because the agent sync writes `zooid.yaml`.
+The VM's security group stays SSH-only: the tunnel is outbound.
+
+`previews: true` lets the agent run shell commands on the VM through the daemon, outside its harness and its
+permission prompts. To allow only some agents, use `previews: { agents: [<name>] }`.
+
+### Turn previews off
+
+1. Remove the `previews:` line from `zooid.yaml` on this box, and `PREVIEW_DOMAIN` and `PREVIEW_DNS_PROVIDER`
+   from `.env`.
+2. Run `deploy/deploy.sh`. The web UI hides previews, and the preview site and its CSP entry are gone.
+3. Optional: set `previews: false` on the VMs. Until then their apps keep running, and their tunnels retry
+   against a box that refuses them.

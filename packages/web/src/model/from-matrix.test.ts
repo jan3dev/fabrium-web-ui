@@ -4,7 +4,8 @@ import {
   type MatrixEvent,
   type Room,
 } from "matrix-js-sdk";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { setPreviewsEnabled } from "@/client/feature-flags";
 import { allRoomEvents } from "@/hooks/use-timeline";
 import { appendArtifactRefs, ARTIFACT_REFS_FIELD, type ArtifactRef } from "@/lib/artifacts/refs";
 import { QUOTE_FIELD, type QuoteRef } from "@/lib/matrix/quote";
@@ -23,7 +24,7 @@ import {
   toTimelineMessages,
 } from "./from-matrix";
 import type { AgentTurn, ApprovalView } from "./agent-activity";
-import type { ArtifactVersion } from "./types";
+import type { ArtifactVersion, PreviewEvent } from "./types";
 
 const roomId = "!r:h.example";
 const me = "@me:h.example";
@@ -528,22 +529,59 @@ describe("artifacts", () => {
   const version = (sender: string, body: string, identifier = "page") =>
     ev(sender, "dev.fabrium.artifact.version", { identifier, type: "html", title: "Page", body, ...thread });
 
-  it("numbers an agent's versions per thread + identifier and ignores anyone else's", () => {
-    const room = roomWith(
-      version(agent, "v1"),
-      version(ana, "forged"),
-      version(agent, "other", "other"),
-      version(agent, "v2"),
-    );
-    const artifacts = entries(room)
+  const joined = (room: Room, ...ids: string[]) => {
+    for (const id of ids)
+      injectStateEvent(
+        room,
+        mkMatrixEvent({ roomId, sender: id, type: "m.room.member", stateKey: id, content: { membership: "join" } }),
+      );
+  };
+  const artifactsOf = (room: Room) =>
+    entries(room)
       .filter((e) => e.message.kind === "artifact")
       .map((e) => e.message.raw as ArtifactVersion);
+
+  it("starts a version per agent event, folds a person's saves into it, and ignores anyone else's", () => {
+    const stranger = "@stranger:h.example";
+    const room = roomWith(
+      version(agent, "v1"),
+      version(stranger, "forged"),
+      version(agent, "other", "other"),
+      version(ana, "v1 edited by ana"),
+      version(agent, "v2"),
+    );
+    joined(room, agent, ana);
+    const artifacts = artifactsOf(room);
+    // The save has no row of its own and adds no version number.
     expect(artifacts.map((a) => [a.identifier, a.version, a.body])).toEqual([
-      ["page", 1, "v1"],
+      ["page", 1, "v1 edited by ana"],
       ["other", 1, "other"],
       ["page", 2, "v2"],
     ]);
-    expect(artifacts[0]).toMatchObject({ kind: "html", threadRootId: "$root", author: { kind: "agent" } });
+    expect(entries(room)).toHaveLength(3);
+    expect(artifacts[0]).toMatchObject({
+      kind: "html",
+      threadRootId: "$root",
+      author: { kind: "agent" },
+      edited: { by: { id: ana, kind: "human" }, saves: 1 },
+    });
+    expect(artifacts[0]!.headEventId).not.toBe(artifacts[0]!.eventId);
+    expect(artifacts[2]!.edited).toBeUndefined();
+  });
+
+  it("makes a person's first event version 1, and marks content made from older content", () => {
+    const room = roomWith(
+      ev(ana, "dev.fabrium.artifact.version", { identifier: "copy", type: "html", body: "a", ...thread }, "$c1"),
+      ev(ana, "dev.fabrium.artifact.version", { identifier: "copy", type: "html", body: "b", based_on: "$c1", ...thread }, "$c2"),
+      ev(agent, "dev.fabrium.artifact.version", { identifier: "copy", type: "html", body: "c", based_on: "$c2", ...thread }, "$c3"),
+      // Made from the first save, while the agent's version was already there.
+      ev(ana, "dev.fabrium.artifact.version", { identifier: "copy", type: "html", body: "d", based_on: "$c1", ...thread }, "$c4"),
+    );
+    joined(room, agent, ana);
+    const [v1, v2] = artifactsOf(room);
+    expect(v1).toMatchObject({ version: 1, author: { id: ana }, body: "b", headEventId: "$c2", edited: { saves: 1 } });
+    expect(v1!.madeFromOlder).toBeUndefined();
+    expect(v2).toMatchObject({ version: 2, body: "d", headEventId: "$c4", madeFromOlder: { version: 1 } });
   });
 
   it("strips the annotation fallback from an annotated reply's body", () => {
@@ -559,5 +597,49 @@ describe("artifacts", () => {
     ];
     const room = roomWith(text(ana, appendArtifactRefs("tweak this", refs), undefined, { [ARTIFACT_REFS_FIELD]: refs }));
     expect(entries(room)[0].message).toMatchObject({ body: "tweak this", artifactRefs: refs });
+  });
+});
+
+describe("previews", () => {
+  afterEach(() => setPreviewsEnabled(false));
+  const preview = (sender: string) =>
+    ev(sender, "m.room.message", {
+      msgtype: "m.notice",
+      body: "Preview: Todo app (npm run dev)",
+      "dev.fabrium.preview": { name: "todo-app", title: "Todo app", command: "npm run dev", action: "started" },
+      "m.relates_to": { rel_type: "m.thread", event_id: "$root" },
+    });
+
+  it("maps an agent's preview event to a card", () => {
+    setPreviewsEnabled(true);
+    const [entry] = entries(roomWith(preview(agent)));
+    expect(entry.message.kind).toBe("preview");
+    expect(entry.message.raw as PreviewEvent).toMatchObject({
+      name: "todo-app",
+      action: "started",
+      threadRootId: "$root",
+      author: { id: agent, kind: "agent" },
+    });
+  });
+
+  it("renders the notice text when previews are off, the sender is not an agent, or the room is encrypted", () => {
+    expect(entries(roomWith(preview(agent)))[0].message).toMatchObject({
+      kind: "message",
+      body: "Preview: Todo app (npm run dev)",
+    });
+    setPreviewsEnabled(true);
+    expect(entries(roomWith(preview(ana)))[0].message.kind).toBe("message");
+    const sealed = roomWith(preview(agent));
+    injectStateEvent(
+      sealed,
+      mkMatrixEvent({
+        roomId,
+        sender: me,
+        type: "m.room.encryption",
+        stateKey: "",
+        content: { algorithm: "m.megolm.v1.aes-sha2" },
+      }),
+    );
+    expect(entries(sealed)[0].message.kind).toBe("message");
   });
 });

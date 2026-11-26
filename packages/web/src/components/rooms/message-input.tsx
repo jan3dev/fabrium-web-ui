@@ -133,6 +133,12 @@ export interface MessageInputProps {
   onError?: (message: string | null) => void;
   /** Rendered between the error and the field, e.g. a quote chip. */
   header?: ReactNode;
+  /** Extra controls in the toolbar after the formatting toggle, e.g. the Create menu. */
+  tools?: ReactNode;
+  /** Rendered under the field, e.g. the design-system chip. */
+  footer?: ReactNode;
+  /** The field's plain text, after every change. */
+  onTextChange?: (text: string) => void;
   className?: string;
   /** Positioning for the suggestion list, which opens above the root. */
   suggestionsClassName?: string;
@@ -141,6 +147,8 @@ export interface MessageInputProps {
 export interface MessageInputHandle {
   /** Submit what's typed, as if Enter were pressed. For a send button outside the input. */
   submit: () => Promise<void>;
+  /** Put `text` in the field after an @mention of `mentionUserId`, or after what is typed already. */
+  fill: (text: string, mentionUserId?: string) => void;
 }
 
 /** The rich-text composer field: TipTap editor, autocompletes, attachments, toolbar. */
@@ -163,12 +171,18 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
       error = null,
       onError,
       header,
+      footer,
+      onTextChange,
+      tools,
       className,
       suggestionsClassName = "left-0 right-0",
     },
     ref,
   ) {
     const [text, setText] = useState("");
+    const onText = useRef(onTextChange);
+    onText.current = onTextChange;
+    useEffect(() => onText.current?.(text), [text]);
     const [ac, setAc] = useState<AutocompleteState | null>(null);
     const [activeIdx, setActiveIdx] = useState(0);
     const [attachments, setAttachments] = useState<StagedAttachment[]>([]);
@@ -397,7 +411,16 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
       }
     }
 
-    useImperativeHandle(ref, () => ({ submit }));
+    function fill(text: string, mentionUserId?: string) {
+      const { text: typed } = editor.getPlainTextAndCursor();
+      const member = members.find((m) => m.userId === mentionUserId);
+      if (member) pickedMentions.current.push({ label: member.displayName, target: member.userId });
+      const lead = member ? `@${member.displayName} ` : "";
+      if (typed.trim()) editor.replacePlainTextRange(typed.length, typed.length, ` ${lead}${text}`);
+      else editor.replacePlainTextRange(0, typed.length, `${lead}${text}`);
+    }
+
+    useImperativeHandle(ref, () => ({ submit, fill }));
 
     /** Single entry point for every way a file can reach the tray. */
     function addFiles(files: File[]) {
@@ -593,6 +616,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
             onEmoji={(emoji) =>
               editor.editor?.chain().focus().insertContent(emoji).run()
             }
+            tools={tools}
             sendButton={sendButton}
             sendDisabled={
               disabled ||
@@ -601,6 +625,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
             onSend={() => void submit()}
           />
         </div>
+        {footer}
         {attachmentsEnabled && (
           <input
             ref={attachInputRef}

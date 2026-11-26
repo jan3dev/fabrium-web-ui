@@ -313,6 +313,26 @@ export interface ZooidConfig {
   }
   /** Optional. Map of trigger name → trigger. Empty map when the block is absent. */
   triggers: Record<string, TriggerConfig>
+  /** Live app previews; absent = off. See PREVIEWS_SPEC.md. */
+  previews?: PreviewsConfig
+}
+
+export interface PreviewsConfig {
+  /**
+   * Public preview origin with `*` for the session token, e.g.
+   * `https://*.fabrium-preview.net`. Only the daemon that serves the gateway
+   * (it binds the HTTP listener) reads it; default `http://*.preview.localhost:<port>`.
+   */
+  origin?: string
+  /** Where the workstation dials the tunnel. Default: own listener, else the homeserver origin. */
+  tunnel_url?: string
+  /** Previews per workstation; the oldest stops first. */
+  max: number
+  /**
+   * The agents that get the preview tools; default every `runtime: local` agent. The tools run
+   * shell commands through the daemon, outside the agent's harness and its permission prompts.
+   */
+  agents?: string[]
 }
 
 export interface CliFlags {

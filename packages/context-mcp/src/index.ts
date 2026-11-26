@@ -15,8 +15,13 @@ export {
   ARTIFACT_DESCRIPTION,
   ARTIFACT_INSTRUCTIONS,
   ARTIFACT_KINDS,
+  DESIGN_SYSTEM_DESCRIPTION,
   HANDOFF_DESCRIPTION,
+  PREVIEW_FOCUS_DESCRIPTION,
+  PREVIEW_LOGS_DESCRIPTION,
+  PREVIEW_START_DESCRIPTION,
+  PREVIEW_STOP_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
   SEND_ATTACHMENT_DESCRIPTION,
 } from './tool-text.js'
-export type { SpawnBinding, ZooidContextServerSpec } from './types.js'
+export type { PreviewActions, PreviewCallerRef, SpawnBinding, ZooidContextServerSpec } from './types.js'

@@ -250,6 +250,12 @@ describe('toTurnEndBody', () => {
     })
   })
 
+  it('carries started_ts when the turn has a finite start', () => {
+    const base = { agentId: 'claude', sessionId: 's1', producedOutput: true }
+    expect(toTurnEndBody({ ...base, startedTs: 1_700_000_000_000 }, '$root').started_ts).toBe(1_700_000_000_000)
+    expect(toTurnEndBody({ ...base, startedTs: Number.NaN }, '$root')).not.toHaveProperty('started_ts')
+  })
+
   it('carries a preview of the final message — the prose itself never pushes', () => {
     // Agent prose goes out as m.notice and is silenced by
     // .m.rule.suppress_notices, so without this the only notification the user

@@ -6,6 +6,8 @@ transports:
     homeserver: http://tuwunel:8448        # compose service name, not localhost
     port: 9000                             # must equal APPSERVICE_PORT and the registration url port
     user_namespace: '@.*:fabrium.net'      # host part must equal SERVER_NAME; do not escape the dots
+# Live app previews: uncomment together with PREVIEW_DOMAIN in .env (deploy/README.md).
+# previews: { origin: 'https://*.${PREVIEW_DOMAIN}' }
 agents:
   s-meow:
     acp: { preset: opencode }

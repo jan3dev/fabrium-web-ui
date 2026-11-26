@@ -4,7 +4,14 @@ const MIME_BY_EXT: Record<string, string> = {
   jpeg: 'image/jpeg',
   gif: 'image/gif',
   webp: 'image/webp',
+  avif: 'image/avif',
   svg: 'image/svg+xml',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  woff2: 'font/woff2',
+  woff: 'font/woff',
+  ttf: 'font/ttf',
+  otf: 'font/otf',
   pdf: 'application/pdf',
   txt: 'text/plain',
   log: 'text/plain',
@@ -13,6 +20,7 @@ const MIME_BY_EXT: Record<string, string> = {
   json: 'application/json',
   html: 'text/html',
   zip: 'application/zip',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 }
 
 /** Content type by lowercase extension; unknown or missing extension → octet-stream. */

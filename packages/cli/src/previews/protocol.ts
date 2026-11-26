@@ -1,0 +1,169 @@
+import { connect, type Socket } from 'node:net'
+import type { Duplex } from 'node:stream'
+import { StringDecoder } from 'node:string_decoder'
+
+// Wire format of the preview tunnel between a workstation and the gateway (PREVIEWS_SPEC.md §4.3).
+// Control: one HTTP/1.1 upgrade, newline-delimited JSON both ways. Data: one upgrade per stream.
+
+export const TUNNEL_PROTOCOL = 'fabrium-tunnel'
+export const TUNNEL_PATH = '/_fabrium/v1/tunnel'
+export const STREAM_PATH = '/_fabrium/v1/tunnel/stream/'
+
+export const NAME_RE = /^[a-z0-9][a-z0-9-]{0,39}$/
+/** Keep the last this many bytes of app output per preview. */
+export const LOG_LIMIT = 64 * 1024
+
+export type PreviewStatus = 'starting' | 'running' | 'crashed' | 'stopped' | 'offline'
+/** `expo`: a React Native app that Expo Go also opens (§3.8). */
+export type PreviewKind = 'web' | 'expo'
+
+/** What the workstation reports about one preview. The port never leaves the workstation. */
+export interface PreviewState {
+  agent_id: string
+  name: string
+  title: string
+  command: string
+  kind: PreviewKind
+  room_id: string
+  thread_root: string
+  status: PreviewStatus
+  /** RFC 3339. */
+  since: string
+  exit_code: number | null
+  /** The app serves a page the panel can show. False for an Expo app without react-native-web. */
+  web: boolean
+}
+
+/**
+ * Where an agent works right now (plan row P6 "Agent cursor", DESIGN_MODES_SPEC.md §6.8): an
+ * artifact (`identifier`) or a preview page (`name`, `path`), and a CSS selector in it. Live
+ * state, one per agent, cleared when its turn ends; never a timeline event (D10).
+ */
+export interface AgentFocus {
+  agent_id: string
+  room_id: string
+  thread_root: string
+  identifier?: string
+  name?: string
+  path?: string
+  /** Untrusted: readers only query with it. */
+  selector: string
+}
+
+const MAX_SELECTOR = 300
+/** An artifact identifier as the web UI reads one (`readArtifactRefs`): up to 80 characters, no whitespace. */
+const IDENTIFIER_RE = /^[^\s]{1,80}$/
+
+/** The focus with its fields checked, or null. The workstation is a peer: the gateway reads it this way too. */
+export function readFocus(raw: unknown): AgentFocus | null {
+  if (!raw || typeof raw !== 'object') return null
+  const f = raw as Record<string, unknown>
+  const str = (v: unknown) => (typeof v === 'string' ? v : '')
+  const selector = str(f.selector).trim()
+  if (!selector || selector.length > MAX_SELECTOR || /[\r\n]/.test(selector)) return null
+  const focus: AgentFocus = {
+    agent_id: str(f.agent_id),
+    room_id: str(f.room_id),
+    thread_root: str(f.thread_root),
+    selector,
+  }
+  if (!focus.agent_id || !focus.room_id || !focus.thread_root) return null
+  if (typeof f.identifier === 'string') {
+    if (!IDENTIFIER_RE.test(f.identifier)) return null
+    focus.identifier = f.identifier
+  } else if (typeof f.name === 'string') {
+    const path = str(f.path) || '/'
+    if (!NAME_RE.test(f.name) || !path.startsWith('/') || path.length > 500 || /\s/.test(path)) return null
+    focus.name = f.name
+    focus.path = path
+  } else return null
+  return focus
+}
+
+/** Workstation → gateway. */
+export type UpMessage =
+  /** `log`: the retained output, sent once per preview on a new connection. */
+  | { t: 'state'; preview: PreviewState; log?: string }
+  | { t: 'log'; agent_id: string; name: string; text: string }
+  | { t: 'remove'; agent_id: string; name: string }
+  /** `focus: null` clears the agent's focus. */
+  | { t: 'focus'; agent_id: string; focus: AgentFocus | null }
+
+/** Gateway → workstation. */
+export type DownMessage =
+  | { t: 'open'; stream: string; agent_id: string; name: string }
+  | { t: 'restart' | 'stop'; agent_id: string; name: string }
+
+/**
+ * A naive registrable domain: the last two labels, or the whole host for an IP or `localhost`.
+ * ponytail: no public-suffix list, so `a.co.uk` and `b.co.uk` count as one site (refused: the safe side).
+ */
+export function siteOf(hostname: string): string {
+  return /^[\d.]+$|:/.test(hostname) ? hostname : hostname.split('.').slice(-2).join('.')
+}
+
+/**
+ * Why a preview origin is unsafe, or null. Previews run agent code with `allow-same-origin`,
+ * so they must be on another site than Fabrium (spec §5.2, D1), which shares the homeserver's site.
+ */
+export function previewOriginProblem(origin: string, homeserver: string): string | null {
+  const preview = siteOf(new URL(origin.replace('*', 'x')).hostname)
+  const fabrium = siteOf(new URL(homeserver).hostname)
+  return preview === fabrium
+    ? `previews.origin ${origin} is on the same site as the homeserver (${fabrium}); use a separate domain`
+    : null
+}
+
+export const previewKey = (agentId: string, name: string): string => `${agentId}\n${name}`
+
+/**
+ * Call `onLine` per complete line; false when a line exceeds `max` characters (the peer is untrusted).
+ * Takes raw chunks: an upgraded server socket refuses `setEncoding`.
+ */
+export function lineReader(onLine: (line: string) => void, max = 256 * 1024): (chunk: Buffer) => boolean {
+  const decoder = new StringDecoder('utf8')
+  let buf = ''
+  return (chunk) => {
+    buf += decoder.write(chunk)
+    let idx: number
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx)
+      buf = buf.slice(idx + 1)
+      if (line) onLine(line)
+    }
+    return buf.length <= max
+  }
+}
+
+const PING_MS = 20_000
+const SILENCE_MS = 60_000
+
+/**
+ * Ping the peer and end the connection after 60 s without data from it. TCP keepalive
+ * takes minutes to notice a NAT drop or a laptop that slept; the reconnect loop then dials again.
+ */
+export function heartbeat(socket: Duplex): void {
+  let last = Date.now()
+  socket.on('data', () => (last = Date.now()))
+  const timer = setInterval(() => {
+    if (Date.now() - last > SILENCE_MS) socket.destroy()
+    else socket.write('{"t":"ping"}\n')
+  }, PING_MS)
+  timer.unref()
+  socket.once('close', () => clearInterval(timer))
+}
+
+/** Connect to an app on loopback: 127.0.0.1 first, then ::1 (Vite may bind only `localhost`). */
+export function dialLoopback(port: number, timeoutMs?: number): Promise<Socket> {
+  const one = (host: string) =>
+    new Promise<Socket>((resolve, reject) => {
+      const socket = connect({ host, port })
+      socket.once('connect', () => {
+        socket.setTimeout(0)
+        resolve(socket)
+      })
+      socket.once('error', reject)
+      if (timeoutMs) socket.setTimeout(timeoutMs, () => socket.destroy(new Error('connect timeout')))
+    })
+  return one('127.0.0.1').catch(() => one('::1'))
+}

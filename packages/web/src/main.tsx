@@ -5,7 +5,7 @@ import { App, type AppConfig } from "./app";
 import { BootstrapError } from "@/components/bootstrap-error";
 import { ThemeProvider } from "@/components/theme-provider";
 import { discoverHomeserver } from "./client/homeserver-discovery";
-import { resolveGlobalSearch, setGlobalSearchEnabled } from "./client/feature-flags";
+import { resolveGlobalSearch, setGlobalSearchEnabled, setPreviewsEnabled } from "./client/feature-flags";
 import { loadRuntimeConfig } from "./client/runtime-config";
 
 const buildtimeUrl = (import.meta.env.VITE_MATRIX_HOMESERVER_URL as string | undefined) ?? null;
@@ -18,6 +18,7 @@ async function bootstrap() {
       buildtime: import.meta.env.VITE_GLOBAL_SEARCH as string | undefined,
     }),
   );
+  setPreviewsEnabled(runtime?.previews === true);
   const homeserverUrl = await discoverHomeserver({
     mxid: null,
     runtimeConfig: runtime,

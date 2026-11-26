@@ -1,0 +1,12 @@
+# Live app previews (PREVIEWS_SPEC.md §5.2): each preview session is a host under the preview domain.
+# deploy/Dockerfile fills in the domain and the DNS provider and copies this to /etc/caddy/sites/.
+# The hosts are random, so the certificate is a wildcard, which needs the DNS-01 challenge.
+# PREVIEW_DNS_TOKEN comes from ${ZOOID_HOME}/caddy.env (deploy/docker-compose.yml).
+*.__PREVIEW_DOMAIN__ {
+	tls {
+		dns __DNS_PROVIDER__ {env.PREVIEW_DNS_TOKEN}
+	}
+
+	# The gateway in the zooid daemon finds the session by Host, which reverse_proxy keeps.
+	reverse_proxy zooid:{$APPSERVICE_PORT:9000}
+}

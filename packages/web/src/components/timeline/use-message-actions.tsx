@@ -20,12 +20,7 @@ import { setQuoteDraft, type QuoteDraft } from "@/lib/quote-draft-store";
 import type { ThreadSummary, TimelineMessage } from "@/model/types";
 import type { MessageRowActions } from "./message-row";
 import { sendEditEvent } from "./message-actions";
-
-type SendEvent = (
-  room: string,
-  type: string,
-  content: Record<string, unknown>,
-) => Promise<unknown>;
+import { sendReaction } from "@/lib/matrix/reactions";
 
 
 /**
@@ -93,18 +88,7 @@ export function useMessageActions(
           void client.redactEvent(roomId, mine.myEventId);
           return;
         }
-        void (client.sendEvent as unknown as SendEvent).call(
-          client,
-          roomId,
-          "m.reaction",
-          {
-            "m.relates_to": {
-              rel_type: "m.annotation",
-              event_id: m.id,
-              key: emoji,
-            },
-          },
-        );
+        void sendReaction(client, roomId, m.id, emoji);
       },
       openThread:
         inThread || !onOpenThread ? undefined : (m) => onOpenThread(m.id),

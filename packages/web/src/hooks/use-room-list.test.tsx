@@ -41,6 +41,22 @@ describe("useRoomList", () => {
     expect(result.current).toHaveLength(2);
   });
 
+  it("returns a new list when a room is renamed", () => {
+    const client = makeFakeClient({ userId: me });
+    const a = makeRoom("!a:h.example", { client, myUserId: me });
+    (client as unknown as { getRooms: () => unknown[] }).getRooms = () => [a];
+    MatrixClientPeg.injectClientForTest(client);
+
+    const { result } = renderHook(() => useRoomList());
+    const before = result.current;
+    act(() => {
+      (a as unknown as { name: string }).name = "renamed";
+      (client as unknown as { emit: (n: string, r: unknown) => void }).emit("Room.name", a);
+    });
+    expect(result.current).not.toBe(before);
+    expect(result.current[0]!.name).toBe("renamed");
+  });
+
   it("returns empty list when peg is empty", () => {
     const { result } = renderHook(() => useRoomList());
     expect(result.current).toEqual([]);

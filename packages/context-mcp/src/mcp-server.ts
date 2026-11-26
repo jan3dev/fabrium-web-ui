@@ -6,7 +6,12 @@ import {
   ARTIFACT_DESCRIPTION,
   ARTIFACT_INSTRUCTIONS,
   ARTIFACT_KINDS,
+  DESIGN_SYSTEM_DESCRIPTION,
   HANDOFF_DESCRIPTION,
+  PREVIEW_FOCUS_DESCRIPTION,
+  PREVIEW_LOGS_DESCRIPTION,
+  PREVIEW_START_DESCRIPTION,
+  PREVIEW_STOP_DESCRIPTION,
   SEND_ATTACHMENT_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
 } from './tool-text.js'
@@ -41,6 +46,14 @@ export interface BuildContextMcpServerOpts {
    * when the bound provider can send attachments ([[ZOD068]]).
    */
   canSendAttachment?: boolean
+  /**
+   * Register the zooid_preview_* tools: set by the spawn (`--previews`) when
+   * previews are on and the agent runs locally. Calls the daemon's supervisor.
+   */
+  callPreview?: (
+    method: 'previewStart' | 'previewStop' | 'previewLogs' | 'previewFocus',
+    params: Record<string, unknown>,
+  ) => Promise<unknown>
 }
 // The socket substitutes its authenticated spawn binding; models never supply an address.
 const CALLER_FROM_BINDING: TaskCallerRef = {
@@ -236,12 +249,32 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
       edits: z
         .array(z.object({ old_str: z.string(), new_str: z.string() }))
         .optional()
-        .describe('find/replace pairs against the latest version'),
+        .describe('find/replace pairs against the latest version from any author'),
+      read: z.boolean().optional().describe('true: return the latest version; pass only identifier'),
+      assets: z
+        .array(z.string())
+        .optional()
+        .describe('workspace paths of images, video or fonts to upload; returns their mxc:// URIs; pass only identifier'),
     },
     async (input) => {
       const provider = await opts.resolve()
       if (!provider.sendArtifact) throw new Error('artifacts unavailable on this transport')
       const result = await provider.sendArtifact('', '', input)
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] }
+    },
+  )
+  server.tool(
+    'zooid_design_system',
+    DESIGN_SYSTEM_DESCRIPTION,
+    {
+      identifier: z.string().optional().describe('omit to list the systems'),
+      room_id: z.string().optional().describe('when two listed systems share the identifier'),
+      component: z.string().optional().describe("a component's name: return its html"),
+    },
+    async (input) => {
+      const provider = await opts.resolve()
+      if (!provider.designSystem) throw new Error('design systems unavailable on this transport')
+      const result = await provider.designSystem('', input)
       return { content: [{ type: 'text', text: JSON.stringify(result) }] }
     },
   )
@@ -263,6 +296,48 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
         const result = await provider.sendAttachment('', '', { path, name, caption })
         return { content: [{ type: 'text', text: JSON.stringify(result) }] }
       },
+    )
+  }
+
+  const callPreview = opts.callPreview
+  if (callPreview) {
+    const text = (result: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(result) }] })
+    server.tool(
+      'zooid_preview_start',
+      PREVIEW_START_DESCRIPTION,
+      {
+        name: z.string().describe('kebab-case id, stable across restarts, e.g. "todo-app"'),
+        command: z.string().describe('shell command that runs the app in the foreground'),
+        title: z.string().optional().describe('shown to the user; defaults to name'),
+        port: z.number().int().optional().describe('default: a free port, given in $PORT'),
+        cwd: z.string().optional().describe('relative to your workspace'),
+        env: z.record(z.string()).optional(),
+        kind: z
+          .enum(['web', 'expo'])
+          .optional()
+          .describe('"expo" for a React Native app with Expo: the user can also open it in Expo Go on a phone'),
+      },
+      async (input) => text(await callPreview('previewStart', input)),
+    )
+    server.tool('zooid_preview_stop', PREVIEW_STOP_DESCRIPTION, { name: z.string() }, async (input) =>
+      text(await callPreview('previewStop', input)),
+    )
+    server.tool(
+      'zooid_preview_logs',
+      PREVIEW_LOGS_DESCRIPTION,
+      { name: z.string(), lines: z.number().int().optional().describe('default 100, max 1000') },
+      async (input) => text(await callPreview('previewLogs', input)),
+    )
+    server.tool(
+      'zooid_preview_focus',
+      PREVIEW_FOCUS_DESCRIPTION,
+      {
+        identifier: z.string().optional().describe('the artifact you are editing'),
+        name: z.string().optional().describe('or the preview you are working on'),
+        path: z.string().optional().describe('with name: the page path, default "/"'),
+        selector: z.string().optional().describe('one CSS selector for the element; leave out to clear'),
+      },
+      async (input) => text(await callPreview('previewFocus', input)),
     )
   }
 

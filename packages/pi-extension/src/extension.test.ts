@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   AGENT_NOTIFY_INSTRUCTIONS,
+  ARTIFACT_DESCRIPTION,
   ARTIFACT_INSTRUCTIONS,
+  DESIGN_SYSTEM_DESCRIPTION,
   HANDOFF_DESCRIPTION,
   SEND_MESSAGE_DESCRIPTION,
 } from '@zooid/context-mcp'
@@ -40,9 +42,9 @@ describe('Pi Zooid extension', () => {
   it('registers the renamed surface plus the task and handoff tools', () => {
     const { tools } = harness()
     expect(tools.map((t) => t.name).sort()).toEqual([
-      'zooid_artifact', 'zooid_complete_task', 'zooid_get_history', 'zooid_get_members',
+      'zooid_artifact', 'zooid_complete_task', 'zooid_design_system', 'zooid_get_history', 'zooid_get_members',
       'zooid_get_recent_threads', 'zooid_get_room_info', 'zooid_get_rooms',
-      'zooid_get_thread_history', 'zooid_handoff', 'zooid_send_message',
+      'zooid_get_thread_history', 'zooid_handoff', 'zooid_send_attachment', 'zooid_send_message',
       'zooid_start_task_threads',
     ])
   })
@@ -96,6 +98,14 @@ describe('Pi Zooid extension', () => {
     )
     expect(calls).toEqual([
       { acpSessionId: 'session-a', method: 'sendMessage', params: { room: '!a:localhost', thread_id: '$t', text: 'noted' } },
+    ])
+  })
+
+  it('zooid_send_attachment forwards path, name and caption (design modes §6.9)', async () => {
+    const { tools, calls } = harness({ ok: true, result: { event_id: '$e' } })
+    await tools.find((tool) => tool.name === 'zooid_send_attachment').execute('c', { path: 'out/deck.pptx', name: 'Deck.pptx' }, undefined, undefined, ctx())
+    expect(calls).toEqual([
+      { acpSessionId: 'session-a', method: 'sendAttachment', params: { path: 'out/deck.pptx', name: 'Deck.pptx', caption: undefined } },
     ])
   })
 
@@ -159,6 +169,31 @@ describe('zooid_handoff on pi ([[ZOD094]])', () => {
     const artifact = tools.find((t) => t.name === 'zooid_artifact')!
     expect(artifact.promptGuidelines).toEqual([ARTIFACT_INSTRUCTIONS])
     expect(ARTIFACT_INSTRUCTIONS).toMatch(/without being asked/)
+  })
+
+  it('zooid_artifact takes `read` and passes it to the daemon as-is', async () => {
+    const { tools, calls } = harness()
+    const artifact = tools.find((t) => t.name === 'zooid_artifact')!
+    expect(artifact.description).toBe(ARTIFACT_DESCRIPTION)
+    expect(artifact.parameters.properties.read).toEqual({ type: 'boolean' })
+    await artifact.execute('id', { identifier: 'deck', read: true }, undefined, undefined, ctx())
+    expect(calls.at(-1)).toMatchObject({ method: 'sendArtifact', params: { identifier: 'deck', read: true } })
+  })
+
+  it('zooid_artifact takes `assets` and passes them to the daemon as-is', async () => {
+    const { tools, calls } = harness()
+    const artifact = tools.find((t) => t.name === 'zooid_artifact')!
+    expect(artifact.parameters.properties.assets).toEqual({ type: 'array', items: { type: 'string' } })
+    await artifact.execute('id', { identifier: 'deck', assets: ['logo.png'] }, undefined, undefined, ctx())
+    expect(calls.at(-1)).toMatchObject({ method: 'sendArtifact', params: { identifier: 'deck', assets: ['logo.png'] } })
+  })
+
+  it('zooid_design_system passes its arguments to the daemon as-is', async () => {
+    const { tools, calls } = harness()
+    const tool = tools.find((t) => t.name === 'zooid_design_system')!
+    expect(tool.description).toBe(DESIGN_SYSTEM_DESCRIPTION)
+    await tool.execute('id', { identifier: 'brand', component: 'Button' }, undefined, undefined, ctx())
+    expect(calls.at(-1)).toMatchObject({ method: 'designSystem', params: { identifier: 'brand', component: 'Button' } })
   })
 
   it('carries the MCP server instructions and the end-your-turn rule in promptGuidelines', () => {

@@ -1,15 +1,16 @@
 // Derived from Buzz (Apache-2.0, © Block, Inc.): desktop/src/features/messages/ui/MessageThreadPanel.tsx. Modified.
 import * as React from "react";
 
+import { MatrixClientPeg } from "@/client/peg";
 import { ArrowDownIcon } from "@/components/icons";
 import { AuxPanelHeader } from "@/components/layout/aux-panel-header";
 import { AuxPanel } from "@/components/layout/aux-panel-shell";
 import { Button } from "@/components/ui/button";
 import { useArtifactRoute } from "@/hooks/use-artifacts";
+import { useRoomName } from "@/hooks/use-room-name";
 import { useAwaitingInput } from "@/hooks/use-timeline";
 import type { ArtifactVersion, TimelineMessage } from "@/model/types";
 import { buildTimelineItems } from "@/lib/timeline/timeline-items";
-import { MatrixClientPeg } from "../../client/peg";
 import { useAuxPanelWidth } from "../../hooks/use-aux-panel-width";
 import { useLoadMoreThread } from "../../hooks/use-load-more-thread";
 import { usePlan } from "../../hooks/use-plan";
@@ -66,12 +67,16 @@ function ThreadPlan({
 /** Clock skew between the server's timestamps and ours. */
 const LIVE_SKEW_MS = 30_000;
 
-/** Open an artifact version the agent sends while this thread is open; never one from history. */
+/**
+ * Open an artifact version someone else sends while this thread is open; never one from
+ * history, and never the user's own: the panel that made it already follows the latest.
+ */
 function useAutoOpenArtifact(replies: TimelineMessage[]) {
   const { open } = useArtifactRoute();
   const [openedAt] = React.useState(() => Date.now());
   const opened = React.useRef<string | null>(null);
-  const latest = [...replies].reverse().find((m) => m.kind === "artifact");
+  const me = MatrixClientPeg.safeGet()?.getUserId();
+  const latest = [...replies].reverse().find((m) => m.kind === "artifact" && !m.pending && m.author.id !== me);
   React.useEffect(() => {
     if (!latest || latest.id === opened.current || latest.createdAt < openedAt - LIVE_SKEW_MS) return;
     opened.current = latest.id;
@@ -114,7 +119,7 @@ export function ThreadPane({
   } = useLoadMoreThread(roomId, rootEventId);
   const typingUserIds = useTyping(roomId);
   const awaitingUserIds = useAwaitingInput(roomId);
-  const roomName = MatrixClientPeg.safeGet()?.getRoom(roomId)?.name;
+  const roomName = useRoomName(roomId);
 
   // Two conditions, both required: the server says replies are outstanding,
   // and there's somewhere left to paginate from. Offering the button on the

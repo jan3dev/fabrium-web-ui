@@ -16,11 +16,16 @@ export interface DaemonRequest {
     | 'getRooms'
     | 'sendMessage'
     | 'sendArtifact'
+    | 'designSystem'
     | 'sendAttachment'
     | 'startTasks'
     | 'completeTask'
     | 'describeRole'
     | 'handoff'
+    | 'previewStart'
+    | 'previewStop'
+    | 'previewLogs'
+    | 'previewFocus'
   params: Record<string, unknown>
 }
 
@@ -46,6 +51,7 @@ export interface AgentSocketsHandle {
 
 /** Same wire error for absent and foreign bindings, so sockets are not an ID oracle. */
 const NOT_OWNED = 'binding not owned by caller'
+const PREVIEW_OPS = { previewStart: 'start', previewStop: 'stop', previewLogs: 'logs', previewFocus: 'focus' } as const
 
 /** Longest request line, in characters, the listener buffers while waiting for a newline. */
 export const MAX_LINE_LENGTH = 1024 * 1024
@@ -199,6 +205,12 @@ async function handleLine(
         binding.threadRef.threadId,
         req.params as unknown as Parameters<NonNullable<typeof binding.provider.sendArtifact>>[2],
       )
+    } else if (req.method === 'designSystem') {
+      if (!binding.provider.designSystem) throw new Error('design systems unavailable on this transport')
+      result = await binding.provider.designSystem(
+        channelId,
+        req.params as unknown as Parameters<NonNullable<typeof binding.provider.designSystem>>[1],
+      )
     } else if (req.method === 'sendAttachment') {
       if (!binding.provider.sendAttachment) {
         socket.write(
@@ -216,6 +228,17 @@ async function handleLine(
         name,
         caption,
       })
+    } else if (Object.hasOwn(PREVIEW_OPS, req.method)) {
+      const previews = registry.previews
+      if (!previews) {
+        socket.write(
+          JSON.stringify({ ok: false, error: 'previews are off on this workstation' } satisfies DaemonError) + '\n',
+        )
+        return
+      }
+      // Scope comes from the binding; the model cannot name another room, thread, or agent.
+      const caller = { agentName: binding.agentName, channelId, threadId: binding.threadRef.threadId }
+      result = await previews[PREVIEW_OPS[req.method as keyof typeof PREVIEW_OPS]](caller, req.params)
     } else if (
       req.method === 'startTasks' ||
       req.method === 'completeTask' ||

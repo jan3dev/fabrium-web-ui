@@ -1,5 +1,7 @@
 import { CloseIcon, CommentIcon } from "@/components/icons";
-import type { ArtifactRef, ArtifactRefTarget } from "@/lib/artifacts/refs";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { MAX_NOTE, type ArtifactRef, type ArtifactRefDraft, type ArtifactRefTarget } from "@/lib/artifacts/refs";
 
 /** One line naming what an annotation points at. */
 export function describeTarget(t: ArtifactRefTarget): string {
@@ -13,8 +15,9 @@ function RefBody({ item: r }: { item: ArtifactRef }) {
   return (
     <span className="min-w-0 flex-1">
       <span className="block truncate text-caption1 text-text-secondary">
-        <span className="font-semibold text-text-primary">{r.title}</span> v
-        {r.version} · <span className="font-mono">{describeTarget(r.target)}</span>
+        <span className="font-semibold text-text-primary">{r.title}</span>
+        {r.preview ? ` · ${r.preview.path}` : ` v${r.version}`} ·{" "}
+        <span className="font-mono">{describeTarget(r.target)}</span>
       </span>
       {r.note.trim() ? (
         <span className="block line-clamp-2 text-caption1 whitespace-pre-wrap text-text-primary">
@@ -25,13 +28,18 @@ function RefBody({ item: r }: { item: ArtifactRef }) {
   );
 }
 
-/** Annotations waiting in the composer. */
+/**
+ * Annotations waiting in the composer. "Send to agent" (spec §6.6, on by default): the checked ones
+ * go in the reply to the agent, the others in a quiet message that wakes no agent.
+ */
 export function ArtifactRefChips({
   refs,
   onRemove,
+  onSendToAgent,
 }: {
-  refs: readonly ArtifactRef[];
+  refs: readonly ArtifactRefDraft[];
   onRemove: (index: number) => void;
+  onSendToAgent?: (index: number, on: boolean) => void;
 }) {
   if (refs.length === 0) return null;
   return (
@@ -43,6 +51,17 @@ export function ArtifactRefChips({
         >
           <CommentIcon className="mt-0.5 size-3.5 shrink-0 text-text-tertiary" />
           <RefBody item={r} />
+          {onSendToAgent ? (
+            <label className="flex shrink-0 cursor-pointer items-center gap-1 text-caption1 text-text-secondary">
+              <input
+                type="checkbox"
+                checked={!r.quiet}
+                onChange={(e) => onSendToAgent(i, e.target.checked)}
+                className="size-3.5 cursor-pointer accent-accent-brand"
+              />
+              Send to agent
+            </label>
+          ) : null}
           <button
             type="button"
             aria-label={`Remove annotation ${i + 1}`}
@@ -81,5 +100,60 @@ export function ArtifactRefList({
         </li>
       ))}
     </ul>
+  );
+}
+
+/** The note form for a picked target, under an artifact or a preview. */
+export function AnnotationForm({
+  target,
+  note,
+  onNoteChange,
+  onAdd,
+  onCancel,
+}: {
+  target: ArtifactRefTarget;
+  note: string;
+  onNoteChange: (note: string) => void;
+  onAdd: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <form
+      className="flex flex-col gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onAdd();
+      }}
+    >
+      <p className="truncate text-caption1 text-text-secondary">
+        Annotating <span className="font-mono text-text-primary">{describeTarget(target)}</span>
+      </p>
+      <Textarea
+        aria-label="Annotation note"
+        autoFocus
+        rows={2}
+        maxLength={MAX_NOTE}
+        value={note}
+        placeholder="What should change here? (optional)"
+        className="text-body2"
+        onChange={(e) => onNoteChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            onAdd();
+          } else if (e.key === "Escape") {
+            onCancel();
+          }
+        }}
+      />
+      <div className="flex justify-end gap-2">
+        <Button type="button" size="xs" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" size="xs">
+          Add to reply
+        </Button>
+      </div>
+    </form>
   );
 }

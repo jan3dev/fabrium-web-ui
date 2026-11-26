@@ -37,6 +37,9 @@ import { SidebarProfileCard } from "./sidebar/profile-card";
 import type { Scope } from "./sidebar/scope";
 import { ThreadPane } from "./thread-pane";
 import { ArtifactPanel } from "../artifacts/artifact-panel";
+import { PreviewPanel } from "../previews/preview-panel";
+import { parsePreviewParam } from "@/hooks/use-previews";
+import { isPreviewsEnabled } from "@/client/feature-flags";
 import { cn } from "@/lib/utils";
 import { TopBar } from "./top-bar";
 import { WorkspaceRail } from "./workspace-rail";
@@ -113,6 +116,11 @@ export function LoggedInView({
     roomId && !threadId ? parsePaneView(searchParams.get("pane")) : null;
   // Artifacts live in threads; the panel takes the room column while open.
   const artifactId = threadId ? searchParams.get("artifact") : null;
+  // A live app preview takes the same place; the artifact wins if both are set.
+  const preview =
+    threadId && !artifactId && isPreviewsEnabled()
+      ? parsePreviewParam(searchParams.get("preview"))
+      : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -174,6 +182,7 @@ export function LoggedInView({
       next.delete("event");
       next.delete("artifact");
       next.delete("version");
+      next.delete("preview");
       return next;
     });
   const togglePane = (view: PaneView) => setPane(pane === view ? null : view);
@@ -218,12 +227,21 @@ export function LoggedInView({
     />
   );
 
+  const roomHeader = {
+    workforceSpaceId: spaceId,
+    membersOpen: pane === "members",
+    infoOpen: pane === "info",
+    onToggleMembers: () => togglePane("members"),
+    onToggleInfo: () => togglePane("info"),
+  };
+
   return (
     <WorkforceSpaceContext.Provider value={spaceId}>
       <SidebarProvider className="h-svh overflow-hidden bg-sidebar">
         {isMobile ? null : rail}
         <div className="flex min-w-0 flex-1 flex-col">
-          <TopBar workforceSpaceId={spaceId} />
+          {/* On desktop the room header shares the top bar's row; a phone has no room for both. */}
+          <TopBar workforceSpaceId={spaceId} room={roomId && !isMobile ? roomHeader : undefined} />
           <div className="relative flex min-h-0 flex-1">
             <Sidebar>
               {isMobile ? rail : null}
@@ -242,18 +260,10 @@ export function LoggedInView({
               data-testid="logged-in-view"
               className="overflow-hidden border-border md:rounded-tl-card md:border-t md:border-l"
             >
-              {roomId ? (
-                <RoomHeader
-                  workforceSpaceId={spaceId}
-                  membersOpen={pane === "members"}
-                  infoOpen={pane === "info"}
-                  onToggleMembers={() => togglePane("members")}
-                  onToggleInfo={() => togglePane("info")}
-                />
-              ) : null}
+              {roomId && isMobile ? <RoomHeader {...roomHeader} /> : null}
               <div className="relative flex min-h-0 flex-1">
                 {/* Hidden, not unmounted: the timeline keeps its scroll position. */}
-                <div className={cn("min-w-0 flex-1 overflow-hidden", artifactId && "hidden")}>
+                <div className={cn("min-w-0 flex-1 overflow-hidden", (artifactId || preview) && "hidden")}>
                   <Outlet
                     context={
                       {
@@ -270,6 +280,15 @@ export function LoggedInView({
                     roomId={roomId}
                     threadRootId={threadId}
                     workforceSpaceId={spaceId}
+                  />
+                ) : null}
+                {roomId && threadId && preview ? (
+                  <PreviewPanel
+                    key={`${roomId}:${threadId}:${preview.agentId}/${preview.name}`}
+                    roomId={roomId}
+                    threadRootId={threadId}
+                    workforceSpaceId={spaceId}
+                    preview={preview}
                   />
                 ) : null}
                 {roomId && threadId ? (
